@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { Filter, Check, ArrowUp, ArrowDown } from "lucide-react";
-import { MARKETPLACES, DELIVERY_STATUSES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
+import { MARKETPLACES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
 import type { Order, OrderUpdate } from "@/types/database";
 
 interface OrderTableProps {
@@ -419,7 +419,6 @@ function OrderTable({
                   onCommit={handleCommit} onBlurSave={saveValue}
                   onSelectToggle={onSelectToggle} onFillStart={handleFillStart}
                   onRowClick={onRowClick}
-                  onStatusChange={(id, status) => onUpdate(id, { delivery_status: status })}
                 />
               );
             })}
@@ -508,14 +507,13 @@ interface RowProps {
   onSelectToggle: (id: string) => void;
   onFillStart: (r: number, c: number, v: unknown) => void;
   onRowClick?: (order: Order) => void;
-  onStatusChange: (id: string, status: string) => void;
 }
 
 const MemoRow = memo(function Row({
   order, rowIdx, colWidths, isChecked, activeCol,
   selMinC, selMaxC, showFillHandle, fillHandleCol, fillHighlightCol,
   onCellMouseDown, onCellMouseEnter, onCommit, onBlurSave, onSelectToggle, onFillStart,
-  onRowClick, onStatusChange,
+  onRowClick,
 }: RowProps) {
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -570,25 +568,14 @@ const MemoRow = memo(function Row({
             onMouseEnter={() => onCellMouseEnter(rowIdx, ci)}
           >
             {col.key === "delivery_status" ? (
-              <div className="flex items-center gap-1">
-                <select
-                  value={String(val || "결제전")}
-                  onChange={(e) => { e.stopPropagation(); onStatusChange(order.id, e.target.value); }}
-                  onClick={(e) => e.stopPropagation()}
-                  className={`flex-1 bg-transparent border-none rounded px-1 py-0.5 text-xs font-medium outline-none cursor-pointer ${DELIVERY_STATUS_COLORS[String(val)] || "text-gray-400"}`}
-                >
-                  {DELIVERY_STATUSES.map((s) => (
-                    <option key={s} value={s} className="bg-[#2a2a3e] text-white">{s}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onRowClick?.(order); }}
-                  className="shrink-0 p-0.5 text-white/20 hover:text-white/60 transition-colors"
-                  title="상담내역"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                </button>
-              </div>
+              <button
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); onRowClick?.(order); }}
+                className={`inline-block px-2 py-0.5 rounded text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity ${DELIVERY_STATUS_COLORS[String(val)] || "bg-gray-500/20 text-gray-400"}`}
+                title="클릭하여 상담내역 열기"
+              >
+                {String(val || "결제전")}
+              </button>
             ) : isActive && isEditable ? (
               <input
                 ref={inputRef}
