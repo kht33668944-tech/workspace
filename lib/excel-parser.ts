@@ -253,6 +253,27 @@ export function parseExcelSheet(file: File, sheetIndex: number): Promise<OrderIn
   });
 }
 
+// 주소를 기본주소/상세주소로 분리
+function splitAddress(fullAddress: string): { base: string; detail: string } {
+  // 1. 괄호 안 내용 제거
+  let addr = fullAddress.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+
+  // 2. 도로명 주소 패턴: ~대로/~번길/~로/~길 + 번지[-번지]
+  const roadMatch = addr.match(/^(.*?(?:대로|번길|로|길)\s+\d+(?:-\d+)?)\s+(.+)$/);
+  if (roadMatch) {
+    return { base: roadMatch[1].trim(), detail: roadMatch[2].trim() };
+  }
+
+  // 3. 지번 주소 패턴: ~동/~리/~가 + 번지[-번지]
+  const lotMatch = addr.match(/^(.*?[동리가]\s+\d+(?:-\d+)?)\s+(.+)$/);
+  if (lotMatch) {
+    return { base: lotMatch[1].trim(), detail: lotMatch[2].trim() };
+  }
+
+  // 4. 분리 불가능하면 전체를 기본주소로
+  return { base: addr, detail: "" };
+}
+
 function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderInsert {
   const mapped: Record<string, unknown> = {
     user_id: "",
@@ -313,7 +334,15 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
   if (mapped.orderer_phone === undefined) mapped.orderer_phone = null;
   if (mapped.postal_code === undefined) mapped.postal_code = null;
   if (mapped.address === undefined) mapped.address = null;
+  if (mapped.address_detail === undefined) mapped.address_detail = null;
   if (mapped.delivery_memo === undefined) mapped.delivery_memo = null;
+
+  // 주소가 있고 상세주소가 없으면 자동 분리
+  if (mapped.address && typeof mapped.address === "string" && !mapped.address_detail) {
+    const { base, detail } = splitAddress(mapped.address);
+    mapped.address = base;
+    mapped.address_detail = detail || null;
+  }
   if (mapped.revenue === undefined) mapped.revenue = 0;
 
   // 수동 입력 필드 기본값

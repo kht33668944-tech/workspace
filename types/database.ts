@@ -11,6 +11,7 @@ export interface Order {
   orderer_phone: string | null;
   postal_code: string | null;
   address: string | null;
+  address_detail: string | null;
   delivery_memo: string | null;
   revenue: number;
   settlement: number;

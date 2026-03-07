@@ -53,7 +53,13 @@ export default function OrdersPage() {
   const stats = useMemo(() => {
     const totalRevenue = orders.reduce((sum, o) => sum + (o.revenue || 0), 0);
     const totalMargin = orders.reduce((sum, o) => sum + (o.margin || 0), 0);
-    return { count: orders.length, totalRevenue, totalMargin };
+    const marketplaceRevenue: Record<string, number> = {};
+    for (const o of orders) {
+      if (o.marketplace) {
+        marketplaceRevenue[o.marketplace] = (marketplaceRevenue[o.marketplace] || 0) + (o.revenue || 0);
+      }
+    }
+    return { count: orders.length, totalRevenue, totalMargin, marketplaceRevenue };
   }, [orders]);
 
   const handleImport = async (rows: OrderInsert[]) => {
@@ -130,7 +136,8 @@ export default function OrdersPage() {
       수령자번호: o.recipient_phone,
       주문자번호: o.orderer_phone,
       우편번호: o.postal_code,
-      주소: o.address,
+      기본주소: o.address,
+      상세주소: o.address_detail,
       배송메모: o.delivery_memo,
       매출: o.revenue,
       정산예정: o.settlement,
@@ -272,6 +279,17 @@ export default function OrdersPage() {
       <div className="flex items-center gap-6 text-xs text-white/40">
         <span>총 <strong className="text-white/70">{stats.count}</strong>건</span>
         <span>매출 <strong className="text-white/70">{stats.totalRevenue.toLocaleString()}</strong>원</span>
+        {Object.keys(stats.marketplaceRevenue).length > 0 && (
+          <>
+            <span className="text-white/20">|</span>
+            {Object.entries(stats.marketplaceRevenue)
+              .sort((a, b) => b[1] - a[1])
+              .map(([name, revenue]) => (
+                <span key={name}>{name} <strong className="text-white/70">{revenue.toLocaleString()}</strong>원</span>
+              ))}
+            <span className="text-white/20">|</span>
+          </>
+        )}
         <span>
           마진{" "}
           <strong className={stats.totalMargin >= 0 ? "text-green-400" : "text-red-400"}>
@@ -298,6 +316,7 @@ export default function OrdersPage() {
         onSelectToggle={handleSelectToggle}
         onSelectAll={handleSelectAll}
         onUpdate={updateOrder}
+        onDeleteSelected={handleBulkDelete}
         columnFilters={columnFilters}
         onColumnFilterChange={handleColumnFilterChange}
       />

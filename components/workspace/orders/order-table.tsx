@@ -13,6 +13,7 @@ interface OrderTableProps {
   onSelectToggle: (id: string) => void;
   onSelectAll: () => void;
   onUpdate: (id: string, updates: OrderUpdate) => void;
+  onDeleteSelected?: () => void;
   columnFilters: Record<string, string[]>;
   onColumnFilterChange: (key: string, values: string[]) => void;
 }
@@ -20,7 +21,7 @@ interface OrderTableProps {
 // margin 제외 모든 컬럼 편집 가능 (address 포함)
 const EDITABLE_KEYS = new Set([
   "bundle_no", "order_date", "marketplace", "recipient_name", "product_name",
-  "quantity", "recipient_phone", "orderer_phone", "postal_code", "address",
+  "quantity", "recipient_phone", "orderer_phone", "postal_code", "address", "address_detail",
   "delivery_memo", "revenue", "settlement", "cost", "payment_method",
   "purchase_id", "purchase_source", "purchase_order_no", "courier", "tracking_no", "memo",
 ]);
@@ -38,7 +39,8 @@ const COLUMNS: Col[] = [
   { key: "recipient_phone", label: "수령자번호", minWidth: 110 },
   { key: "orderer_phone", label: "주문자번호", minWidth: 110 },
   { key: "postal_code", label: "우편번호", minWidth: 65 },
-  { key: "address", label: "주소", minWidth: 200 },
+  { key: "address", label: "기본주소", minWidth: 200 },
+  { key: "address_detail", label: "상세주소", minWidth: 120 },
   { key: "delivery_memo", label: "배송메모", minWidth: 100 },
   { key: "revenue", label: "매출", minWidth: 75, align: "right" },
   { key: "settlement", label: "정산예정", minWidth: 75, align: "right" },
@@ -100,7 +102,7 @@ function formatCell(key: string, val: unknown): React.ReactNode {
 // ════════════════════════════════════
 function OrderTable({
   orders: rawOrders, allOrders, loading, selectedIds, onSelectToggle, onSelectAll, onUpdate,
-  columnFilters, onColumnFilterChange,
+  onDeleteSelected, columnFilters, onColumnFilterChange,
 }: OrderTableProps) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const o: Record<string, number> = {};
@@ -254,6 +256,13 @@ function OrderTable({
     }
     if (ctrl && e.key === "v") { e.preventDefault(); handlePaste(); }
 
+    // Delete key with checkbox-selected rows → delete rows
+    if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0 && onDeleteSelected) {
+      e.preventDefault();
+      onDeleteSelected();
+      return;
+    }
+
     if (!activeCell && selection) {
       const { minR, minC } = norm(selection);
       if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) {
@@ -279,7 +288,7 @@ function OrderTable({
         setActiveCell({ row: minR, col: minC });
       }
     }
-  }, [activeCell, selection, orders, onUpdate, handleCopy, handlePaste]);
+  }, [activeCell, selection, orders, selectedIds, onDeleteSelected, onUpdate, handleCopy, handlePaste]);
 
   // Fill drag
   useEffect(() => {
