@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
-import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar } from "lucide-react";
+import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar, Truck } from "lucide-react";
 import { useOrders } from "@/hooks/use-orders";
+import { supabase } from "@/lib/supabase";
 import { exportOrdersToCSV } from "@/lib/excel-parser";
 import OrderTable from "@/components/workspace/orders/order-table";
 import ExcelImport from "@/components/workspace/orders/excel-import";
 import OrderModal from "@/components/workspace/orders/order-modal";
 import OrderSidePanel from "@/components/workspace/orders/order-side-panel";
+import TrackingCollectModal from "@/components/workspace/orders/tracking-collect-modal";
 import type { Order, OrderInsert } from "@/types/database";
 
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
@@ -39,6 +41,7 @@ export default function OrdersPage() {
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [sidePanelOrder, setSidePanelOrder] = useState<Order | null>(null);
+  const [showTrackingCollect, setShowTrackingCollect] = useState(false);
 
   const monthOptions = useMemo(() => generateMonthOptions(), []);
 
@@ -267,6 +270,13 @@ export default function OrdersPage() {
             내보내기
           </button>
           <button
+            onClick={() => setShowTrackingCollect(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 text-sm rounded-lg transition-colors"
+          >
+            <Truck className="w-4 h-4" />
+            배송조회 수집
+          </button>
+          <button
             onClick={() => setShowImport(true)}
             className="flex items-center gap-1.5 px-3 py-2 bg-green-600/20 text-green-400 hover:bg-green-600/30 text-sm rounded-lg transition-colors"
           >
@@ -342,6 +352,30 @@ export default function OrdersPage() {
           order={orders.find((o) => o.id === sidePanelOrder.id) || sidePanelOrder}
           onUpdate={updateOrder}
           onClose={() => setSidePanelOrder(null)}
+        />
+      )}
+      {showTrackingCollect && (
+        <TrackingCollectModal
+          orders={allOrders}
+          onClose={() => setShowTrackingCollect(false)}
+          onApply={async (updates) => {
+            const { data: { session } } = await supabase.auth.getSession();
+            const res = await fetch("/api/orders/bulk-update-tracking", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+              },
+              body: JSON.stringify({ updates }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              alert(`업데이트 실패: ${data.error}`);
+            } else if (data.failCount > 0) {
+              alert(`업데이트: 성공 ${data.successCount}건, 실패 ${data.failCount}건\n${data.errors?.slice(0, 5).join("\n")}`);
+            }
+            window.location.reload();
+          }}
         />
       )}
     </div>
