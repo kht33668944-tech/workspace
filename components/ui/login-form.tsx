@@ -66,7 +66,7 @@ export function SmokeyBackground({
   backdropBlurAmount = "sm",
   color = "#1E40AF",
   className = "",
-}: SmokeyBackgroundProps): JSX.Element {
+}: SmokeyBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [isHovering, setIsHovering] = useState(false);
@@ -209,7 +209,7 @@ export function LoginForm() {
       setError("이메일 또는 비밀번호가 올바르지 않습니다.");
       setLoading(false);
     } else {
-      window.location.href = "/dashboard";
+      window.location.href = "/workspace";
     }
   };
 

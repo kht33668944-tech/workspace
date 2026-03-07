@@ -1,9 +1,9 @@
 "use client";
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-export default function AuthHandle() {
+function AuthHandleInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -14,7 +14,7 @@ export default function AuthHandle() {
       if (event === "PASSWORD_RECOVERY") {
         router.replace("/auth/reset-password");
       } else if (event === "SIGNED_IN") {
-        router.replace("/dashboard");
+        router.replace("/workspace");
       }
     });
 
@@ -26,11 +26,24 @@ export default function AuthHandle() {
   }, [router, searchParams]);
 
   return (
+    <div className="text-center space-y-3">
+      <div className="w-10 h-10 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
+      <p className="text-white text-sm">로그인 처리 중...</p>
+    </div>
+  );
+}
+
+export default function AuthHandle() {
+  return (
     <main className="relative w-screen h-screen bg-gray-900 flex items-center justify-center">
-      <div className="text-center space-y-3">
-        <div className="w-10 h-10 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="text-white text-sm">로그인 처리 중...</p>
-      </div>
+      <Suspense fallback={
+        <div className="text-center space-y-3">
+          <div className="w-10 h-10 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-white text-sm">로그인 처리 중...</p>
+        </div>
+      }>
+        <AuthHandleInner />
+      </Suspense>
     </main>
   );
 }
