@@ -42,11 +42,20 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
     return { hasDates: missingCount === 0, missingCount };
   }, [parsedOrders]);
 
+  const [isLegacy, setIsLegacy] = useState(false);
+  const [sheetCounts, setSheetCounts] = useState<number[]>([]);
+  const [showSheetPicker, setShowSheetPicker] = useState(false);
+  const [pendingFile, setPendingFile] = useState<{ file: File; sheetNames: string[]; counts: number[]; isLegacy: boolean } | null>(null);
+
   const handleFile = useCallback(async (file: File) => {
     setError(null);
     setFileName(file.name);
     setRawFile(file);
     setManualDate("");
+    setIsLegacy(false);
+    setSheetCounts([]);
+    setShowSheetPicker(false);
+    setPendingFile(null);
 
     // 파일명에서 날짜 추출 시도
     const filenameDate = extractDateFromFilename(file.name);
@@ -56,19 +65,28 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
 
     try {
       const result = await parseExcelFile(file, 0);
-      if (result.orders.length === 0 && result.sheetNames.length > 1) {
-        for (let i = 1; i < result.sheetNames.length; i++) {
-          const orders = await parseExcelSheet(file, i);
-          if (orders.length > 0) {
-            setSheetNames(result.sheetNames);
-            setSelectedSheet(i);
-            setParsedOrders(orders);
-            return;
-          }
+      setIsLegacy(result.isLegacyFormat || false);
+
+      // 여러 시트 + 데이터 있는 시트가 2개 이상이면 시트 선택 팝업
+      if (result.sheetNames.length > 1 && result.sheetOrderCounts) {
+        const sheetsWithData = result.sheetOrderCounts.filter((c) => c > 0).length;
+        setSheetCounts(result.sheetOrderCounts);
+
+        if (sheetsWithData > 1) {
+          setPendingFile({
+            file,
+            sheetNames: result.sheetNames,
+            counts: result.sheetOrderCounts,
+            isLegacy: result.isLegacyFormat || false,
+          });
+          setShowSheetPicker(true);
+          return;
         }
       }
+
       setSheetNames(result.sheetNames);
       setParsedOrders(result.orders);
+      if (result.sheetOrderCounts) setSheetCounts(result.sheetOrderCounts);
       if (result.orders.length === 0) {
         setError("파싱된 데이터가 없습니다. 엑셀 형식을 확인해주세요.");
       }
@@ -91,6 +109,49 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
       setError("시트를 읽을 수 없습니다.");
     }
   }, [rawFile]);
+
+  const handleSheetPick = useCallback(async (index: number) => {
+    if (!pendingFile) return;
+    setShowSheetPicker(false);
+    setSheetNames(pendingFile.sheetNames);
+    setSheetCounts(pendingFile.counts);
+    setSelectedSheet(index);
+    setIsLegacy(pendingFile.isLegacy);
+    setRawFile(pendingFile.file);
+    try {
+      const orders = await parseExcelSheet(pendingFile.file, index);
+      setParsedOrders(orders);
+      if (orders.length === 0) {
+        setError("이 시트에는 데이터가 없습니다.");
+      }
+    } catch {
+      setError("시트를 읽을 수 없습니다.");
+    }
+    setPendingFile(null);
+  }, [pendingFile]);
+
+  const handleImportAllSheets = useCallback(async () => {
+    if (!pendingFile) return;
+    setShowSheetPicker(false);
+    setSheetNames(pendingFile.sheetNames);
+    setSheetCounts(pendingFile.counts);
+    setIsLegacy(pendingFile.isLegacy);
+    setRawFile(pendingFile.file);
+
+    const allOrders: OrderInsert[] = [];
+    for (let i = 0; i < pendingFile.sheetNames.length; i++) {
+      if (pendingFile.counts[i] === 0) continue;
+      try {
+        const orders = await parseExcelSheet(pendingFile.file, i);
+        allOrders.push(...orders);
+      } catch { /* skip */ }
+    }
+    setParsedOrders(allOrders);
+    if (allOrders.length === 0) {
+      setError("파싱된 데이터가 없습니다.");
+    }
+    setPendingFile(null);
+  }, [pendingFile]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -135,7 +196,43 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
         </div>
 
         <div className="p-6">
-          {!parsedOrders ? (
+          {showSheetPicker && pendingFile ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <FileSpreadsheet className="w-5 h-5 text-green-400" />
+                <span className="text-white text-sm">{fileName}</span>
+                {pendingFile.isLegacy && (
+                  <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded">기존 발주서</span>
+                )}
+              </div>
+              <p className="text-white/60 text-sm">여러 시트가 감지되었습니다. 가져올 시트를 선택하세요.</p>
+              <div className="space-y-2">
+                {pendingFile.sheetNames.map((name, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSheetPick(i)}
+                    disabled={pendingFile.counts[i] === 0}
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-colors ${
+                      pendingFile.counts[i] > 0
+                        ? "border-white/10 bg-white/5 hover:bg-white/10 text-white cursor-pointer"
+                        : "border-white/5 bg-white/[0.02] text-white/20 cursor-not-allowed"
+                    }`}
+                  >
+                    <span className="text-sm font-medium">{name}</span>
+                    <span className={`text-xs ${pendingFile.counts[i] > 0 ? "text-white/50" : "text-white/20"}`}>
+                      {pendingFile.counts[i]}건
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={handleImportAllSheets}
+                className="w-full px-4 py-2.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 text-sm font-medium rounded-lg transition-colors"
+              >
+                전체 시트 합쳐서 가져오기 ({pendingFile.counts.reduce((a, b) => a + b, 0)}건)
+              </button>
+            </div>
+          ) : !parsedOrders ? (
             <>
               <div
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -148,8 +245,8 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                 `}
               >
                 <Upload className="w-10 h-10 text-white/40 mb-3" />
-                <p className="text-white/60 text-sm">플레이오토 엑셀 파일을 드래그하거나 클릭해서 선택</p>
-                <p className="text-white/30 text-xs mt-1">.xlsx, .xls, .csv 지원</p>
+                <p className="text-white/60 text-sm">엑셀 파일을 드래그하거나 클릭해서 선택</p>
+                <p className="text-white/30 text-xs mt-1">플레이오토 양식 · 기존 발주서 양식 자동 인식 (.xlsx, .xls, .csv)</p>
               </div>
               <input
                 ref={fileRef}
@@ -168,6 +265,9 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                 <FileSpreadsheet className="w-5 h-5 text-green-400" />
                 <span className="text-white text-sm">{fileName}</span>
                 <span className="text-white/40 text-sm">({parsedOrders.length}건)</span>
+                {isLegacy && (
+                  <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded">기존 발주서</span>
+                )}
 
                 {sheetNames.length > 1 && (
                   <select
@@ -176,7 +276,9 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                     className="ml-auto px-2 py-1 bg-white/5 border border-white/10 rounded text-xs text-white outline-none"
                   >
                     {sheetNames.map((name, i) => (
-                      <option key={i} value={i}>{name}</option>
+                      <option key={i} value={i} className="bg-[#2a2a3e] text-white">
+                        {name}{sheetCounts[i] !== undefined ? ` (${sheetCounts[i]}건)` : ""}
+                      </option>
                     ))}
                   </select>
                 )}
@@ -219,6 +321,12 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                       <th className="px-3 py-2 text-left">수취인명</th>
                       <th className="px-3 py-2 text-left">상품명</th>
                       <th className="px-3 py-2 text-right">매출</th>
+                      {isLegacy && (
+                        <>
+                          <th className="px-3 py-2 text-right">정산</th>
+                          <th className="px-3 py-2 text-right">원가</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -238,6 +346,12 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                         <td className="px-3 py-1.5">{order.recipient_name ?? "-"}</td>
                         <td className="px-3 py-1.5 max-w-48 truncate">{order.product_name ?? "-"}</td>
                         <td className="px-3 py-1.5 text-right">{order.revenue?.toLocaleString() ?? 0}</td>
+                        {isLegacy && (
+                          <>
+                            <td className="px-3 py-1.5 text-right">{order.settlement?.toLocaleString() ?? 0}</td>
+                            <td className="px-3 py-1.5 text-right">{order.cost?.toLocaleString() ?? 0}</td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>

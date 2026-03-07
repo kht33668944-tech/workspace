@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { EXCEL_COLUMN_MAP } from "./constants";
+import { EXCEL_COLUMN_MAP, LEGACY_EXCEL_COLUMN_MAP } from "./constants";
 import type { OrderInsert } from "@/types/database";
 
 interface RawRow {
@@ -10,6 +10,8 @@ export interface ParsedExcelResult {
   sheetNames: string[];
   orders: OrderInsert[];
   debugHeaders?: string[]; // 디버그용
+  isLegacyFormat?: boolean; // 기존 발주서 양식 감지
+  sheetOrderCounts?: number[]; // 시트별 주문 건수
 }
 
 // 헤더 정규화: 공백, 특수문자 제거
@@ -27,6 +29,9 @@ const KNOWN_HEADERS = [
   // 플레이오토 발주양식 전용 헤더
   "결제완료일", "소핑몰", "쇼핑몰", "수량자명", "온라인상품명",
   "수량자휴대폰번호", "수령자휴대폰번호", "주문자휴대폰번호", "배송메세지", "금액",
+  // 기존 발주서(구글 드라이브) 전용 헤더
+  "정산예정", "원가", "마진", "결제방식", "구매처", "아이디", "주문번호", "택배사", "운송장",
+  "수령자 번호", "주문자 번호",
 ];
 
 // 추가 별칭 (플레이오토 엑셀의 다양한 헤더 형식 대응)
@@ -43,6 +48,14 @@ const ALIASES: Record<string, string[]> = {
   address: ["주소", "배송지", "배송 주소", "배송지주소", "배송주소", "받는분주소"],
   delivery_memo: ["배송메모", "배송 메모", "배송메세지", "배송 메세지", "배송요청사항", "배송 요청사항", "요청사항", "배송시요청사항", "배송메시지"],
   revenue: ["매출", "매출액", "판매가", "판매금액", "결제금액", "상품금액", "주문금액", "금액"],
+  settlement: ["정산예정", "정산금", "정산금액", "정산"],
+  cost: ["원가", "매입가", "매입금액", "구매가"],
+  payment_method: ["결제방식", "결제수단", "결제방법"],
+  purchase_source: ["구매처"],
+  purchase_id: ["아이디", "구매아이디", "구매ID"],
+  purchase_order_no: ["주문번호", "발주번호"],
+  courier: ["택배사", "배송업체"],
+  tracking_no: ["운송장", "운송장번호", "송장번호", "송장"],
 };
 
 // 엑셀 헤더 → DB 컬럼 매핑
@@ -53,18 +66,25 @@ function buildHeaderMap(headers: string[]): Record<string, string> {
     const normalized = normalizeHeader(header);
     if (!normalized) continue;
 
-    // 1. EXCEL_COLUMN_MAP 정확한 매칭
+    // 1. EXCEL_COLUMN_MAP + LEGACY_EXCEL_COLUMN_MAP 정확한 매칭
     if (EXCEL_COLUMN_MAP[header]) {
       map[header] = EXCEL_COLUMN_MAP[header];
       continue;
     }
+    if (LEGACY_EXCEL_COLUMN_MAP[header]) {
+      map[header] = LEGACY_EXCEL_COLUMN_MAP[header];
+      continue;
+    }
 
-    // 2. EXCEL_COLUMN_MAP 정규화 매칭
-    for (const [korKey, engKey] of Object.entries(EXCEL_COLUMN_MAP)) {
-      if (normalizeHeader(korKey) === normalized) {
-        map[header] = engKey;
-        break;
+    // 2. 두 맵 정규화 매칭
+    for (const colMap of [EXCEL_COLUMN_MAP, LEGACY_EXCEL_COLUMN_MAP]) {
+      for (const [korKey, engKey] of Object.entries(colMap)) {
+        if (normalizeHeader(korKey) === normalized) {
+          map[header] = engKey;
+          break;
+        }
       }
+      if (map[header]) break;
     }
     if (map[header]) continue;
 
@@ -176,6 +196,28 @@ function parseSheet(sheet: XLSX.WorkSheet): { headers: string[]; rows: RawRow[] 
   return { headers, rows: defaultRows };
 }
 
+// 기존 발주서 양식 감지: 정산예정/원가/마진/결제방식/구매처 등 고유 헤더가 있으면 레거시
+function detectLegacyFormat(headerMap: Record<string, string>): boolean {
+  const mapped = new Set(Object.values(headerMap));
+  const legacyKeys = ["settlement", "cost", "payment_method", "purchase_source", "tracking_no"];
+  const matchCount = legacyKeys.filter((k) => mapped.has(k)).length;
+  return matchCount >= 3;
+}
+
+// 시트 하나를 파싱하여 주문 목록 반환 (내부 공용)
+function parseSheetToOrders(sheet: XLSX.WorkSheet): { orders: OrderInsert[]; headers: string[]; headerMap: Record<string, string> } {
+  const { headers, rows } = parseSheet(sheet);
+  const headerMap = buildHeaderMap(headers);
+  const bundleKey = headers.find((h) => headerMap[h] === "bundle_no");
+  const productKey = headers.find((h) => headerMap[h] === "product_name");
+
+  const orders = rows
+    .filter((row) => (bundleKey && row[bundleKey]) || (productKey && row[productKey]))
+    .map((row) => mapRowToOrder(row, headerMap));
+
+  return { orders, headers, headerMap };
+}
+
 export function parseExcelFile(file: File, sheetIndex = 0): Promise<ParsedExcelResult> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -185,36 +227,49 @@ export function parseExcelFile(file: File, sheetIndex = 0): Promise<ParsedExcelR
         const workbook = XLSX.read(data, { type: "array", cellDates: false });
         const sheetNames = workbook.SheetNames;
         const sheet = workbook.Sheets[sheetNames[sheetIndex] || sheetNames[0]];
-        const { headers, rows } = parseSheet(sheet);
-        const headerMap = buildHeaderMap(headers);
+        const { orders, headers, headerMap } = parseSheetToOrders(sheet);
+        const isLegacyFormat = detectLegacyFormat(headerMap);
 
         console.log("[엑셀 파서] 최종 헤더:", headers);
         console.log("[엑셀 파서] 최종 매핑:", headerMap);
-        console.log("[엑셀 파서] 첫 행 원본:", rows[0]);
-
-        // 주문일시 디버그
-        const dateKey = headers.find((h) => headerMap[h] === "order_date");
-        if (dateKey) {
-          console.log("[엑셀 파서] 주문일시 헤더:", dateKey, "값:", rows[0]?.[dateKey], "타입:", typeof rows[0]?.[dateKey]);
-        } else {
-          console.warn("[엑셀 파서] ⚠️ 주문일시 매핑 실패! 헤더 목록:", headers);
-        }
-
-        const bundleKey = headers.find((h) => headerMap[h] === "bundle_no");
-        const productKey = headers.find((h) => headerMap[h] === "product_name");
-
-        const orders = rows
-          .filter((row) => {
-            return (bundleKey && row[bundleKey]) || (productKey && row[productKey]);
-          })
-          .map((row) => mapRowToOrder(row, headerMap));
-
-        console.log("[엑셀 파서] 파싱된 주문 수:", orders.length);
+        console.log("[엑셀 파서] 레거시 양식:", isLegacyFormat);
         if (orders.length > 0) {
           console.log("[엑셀 파서] 첫 주문:", orders[0]);
         }
 
-        resolve({ sheetNames, orders, debugHeaders: headers });
+        // 여러 시트가 있으면 시트별 건수 미리 계산
+        let sheetOrderCounts: number[] | undefined;
+        if (sheetNames.length > 1) {
+          sheetOrderCounts = sheetNames.map((name, i) => {
+            if (i === (sheetIndex || 0)) return orders.length;
+            try {
+              const s = workbook.Sheets[name];
+              const { orders: sheetOrders } = parseSheetToOrders(s);
+              return sheetOrders.length;
+            } catch {
+              return 0;
+            }
+          });
+
+          // 현재 시트에 데이터가 없으면 데이터가 있는 첫 시트로 자동 전환
+          if (orders.length === 0) {
+            const firstWithData = sheetOrderCounts.findIndex((c) => c > 0);
+            if (firstWithData >= 0 && firstWithData !== sheetIndex) {
+              const altSheet = workbook.Sheets[sheetNames[firstWithData]];
+              const alt = parseSheetToOrders(altSheet);
+              resolve({
+                sheetNames,
+                orders: alt.orders,
+                debugHeaders: alt.headers,
+                isLegacyFormat: detectLegacyFormat(alt.headerMap),
+                sheetOrderCounts,
+              });
+              return;
+            }
+          }
+        }
+
+        resolve({ sheetNames, orders, debugHeaders: headers, isLegacyFormat, sheetOrderCounts });
       } catch (err) {
         reject(err);
       }
@@ -232,17 +287,7 @@ export function parseExcelSheet(file: File, sheetIndex: number): Promise<OrderIn
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: "array", cellDates: false });
         const sheet = workbook.Sheets[workbook.SheetNames[sheetIndex]];
-        const { headers, rows } = parseSheet(sheet);
-        const headerMap = buildHeaderMap(headers);
-
-        const bundleKey = headers.find((h) => headerMap[h] === "bundle_no");
-        const productKey = headers.find((h) => headerMap[h] === "product_name");
-
-        const orders = rows
-          .filter((row) => {
-            return (bundleKey && row[bundleKey]) || (productKey && row[productKey]);
-          })
-          .map((row) => mapRowToOrder(row, headerMap));
+        const { orders } = parseSheetToOrders(sheet);
         resolve(orders);
       } catch (err) {
         reject(err);
@@ -254,24 +299,26 @@ export function parseExcelSheet(file: File, sheetIndex: number): Promise<OrderIn
 }
 
 // 주소를 기본주소/상세주소로 분리
+// 규칙: 도로명/지번 + 번지까지 = 기본주소, 나머지(괄호 내용 포함) = 상세주소
 function splitAddress(fullAddress: string): { base: string; detail: string } {
-  // 1. 괄호 안 내용 제거
-  let addr = fullAddress.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+  const trimmed = fullAddress.trim();
 
-  // 2. 도로명 주소 패턴: ~대로/~번길/~로/~길 + 번지[-번지]
-  const roadMatch = addr.match(/^(.*?(?:대로|번길|로|길)\s+\d+(?:-\d+)?)\s+(.+)$/);
-  if (roadMatch) {
-    return { base: roadMatch[1].trim(), detail: roadMatch[2].trim() };
+  // 도로명주소: ~대로/~번길/~로/~길 + 번지[-번지]
+  // 지번주소: ~동/~리/~가 + 번지[-번지]
+  const basePattern = /^(.*?(?:대로|번길|로|길|동|리|가)\s+\d+(?:-\d+)?)\s+(.+)$/;
+  const match = trimmed.match(basePattern);
+
+  if (!match) {
+    return { base: trimmed, detail: "" };
   }
 
-  // 3. 지번 주소 패턴: ~동/~리/~가 + 번지[-번지]
-  const lotMatch = addr.match(/^(.*?[동리가]\s+\d+(?:-\d+)?)\s+(.+)$/);
-  if (lotMatch) {
-    return { base: lotMatch[1].trim(), detail: lotMatch[2].trim() };
-  }
+  const base = match[1].trim();
+  const rest = match[2].trim();
 
-  // 4. 분리 불가능하면 전체를 기본주소로
-  return { base: addr, detail: "" };
+  // 괄호 기호만 제거하고 내용은 상세주소에 보존
+  const detail = rest.replace(/[()]/g, "").replace(/\s+/g, " ").trim();
+
+  return { base, detail };
 }
 
 function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderInsert {
@@ -304,6 +351,12 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
         break;
       case "quantity":
       case "revenue":
+      case "settlement":
+      case "cost":
+        mapped[engKey] = typeof value === "number" ? Math.round(value) : parseInt(String(value).replace(/,/g, ""), 10) || 0;
+        break;
+      case "margin":
+        // 마진은 수식일 수 있음 — 숫자로 변환, 나중에 settlement - cost로 재계산
         mapped[engKey] = typeof value === "number" ? Math.round(value) : parseInt(String(value).replace(/,/g, ""), 10) || 0;
         break;
       case "order_date":
@@ -354,7 +407,12 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
   if (mapped.purchase_order_no === undefined) mapped.purchase_order_no = null;
   if (mapped.courier === undefined) mapped.courier = null;
   if (mapped.tracking_no === undefined) mapped.tracking_no = null;
+  if (mapped.delivery_status === undefined) mapped.delivery_status = "결제전";
+  if (mapped.consultation_logs === undefined) mapped.consultation_logs = [];
   if (mapped.memo === undefined) mapped.memo = null;
+
+  // margin은 DB에서 자동 계산 (generated column) — 직접 전달하지 않음
+  delete mapped.margin;
 
   return mapped as unknown as OrderInsert;
 }

@@ -7,7 +7,8 @@ import { exportOrdersToCSV } from "@/lib/excel-parser";
 import OrderTable from "@/components/workspace/orders/order-table";
 import ExcelImport from "@/components/workspace/orders/excel-import";
 import OrderModal from "@/components/workspace/orders/order-modal";
-import type { OrderInsert } from "@/types/database";
+import OrderSidePanel from "@/components/workspace/orders/order-side-panel";
+import type { Order, OrderInsert } from "@/types/database";
 
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
 
@@ -22,8 +23,13 @@ function generateMonthOptions(): string[] {
   return result;
 }
 
+function getCurrentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export default function OrdersPage() {
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(getCurrentMonth);
   const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeSearch, setActiveSearch] = useState("");
@@ -32,6 +38,7 @@ export default function OrdersPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [sidePanelOrder, setSidePanelOrder] = useState<Order | null>(null);
 
   const monthOptions = useMemo(() => generateMonthOptions(), []);
 
@@ -43,7 +50,7 @@ export default function OrdersPage() {
     setActiveSearch("");
   };
 
-  const { orders, allOrders, loading, months, insertOrders, updateOrder, deleteOrders } = useOrders({
+  const { orders, allOrders, loading, months, insertOrders, updateOrder, deleteOrders, undo } = useOrders({
     month: selectedMonth,
     marketplace: selectedMarketplace,
     search: activeSearch,
@@ -149,6 +156,7 @@ export default function OrdersPage() {
       주문번호: o.purchase_order_no,
       택배사: o.courier,
       운송장: o.tracking_no,
+      배송상태: o.delivery_status,
     }));
     const monthLabel = selectedMonth || "전체";
     exportOrdersToCSV(exportData, `발주서_${monthLabel}.xlsx`);
@@ -316,7 +324,9 @@ export default function OrdersPage() {
         onSelectToggle={handleSelectToggle}
         onSelectAll={handleSelectAll}
         onUpdate={updateOrder}
+        onUndo={undo}
         onDeleteSelected={handleBulkDelete}
+        onRowClick={(order) => setSidePanelOrder(order)}
         columnFilters={columnFilters}
         onColumnFilterChange={handleColumnFilterChange}
       />
@@ -326,6 +336,13 @@ export default function OrdersPage() {
       )}
       {showAddModal && (
         <OrderModal onSave={handleAddOrder} onClose={() => setShowAddModal(false)} />
+      )}
+      {sidePanelOrder && (
+        <OrderSidePanel
+          order={orders.find((o) => o.id === sidePanelOrder.id) || sidePanelOrder}
+          onUpdate={updateOrder}
+          onClose={() => setSidePanelOrder(null)}
+        />
       )}
     </div>
   );

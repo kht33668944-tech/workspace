@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
-import { COURIERS, PAYMENT_METHODS } from "@/lib/constants";
+import { COURIERS, PAYMENT_METHODS, DELIVERY_STATUSES } from "@/lib/constants";
 import type { OrderInsert } from "@/types/database";
 
 interface OrderModalProps {
@@ -11,6 +11,7 @@ interface OrderModalProps {
 }
 
 const FIELDS: { key: string; label: string; type?: string; placeholder?: string }[] = [
+  { key: "delivery_status", label: "배송상태", type: "select" },
   { key: "bundle_no", label: "묶음번호" },
   { key: "order_date", label: "주문일시", type: "date" },
   { key: "marketplace", label: "판매처", placeholder: "예: 쿠팡, 스마트스토어" },
@@ -71,6 +72,8 @@ export default function OrderModal({ onSave, onClose }: OrderModalProps) {
       purchase_order_no: form.purchase_order_no || null,
       courier: form.courier || null,
       tracking_no: form.tracking_no || null,
+      delivery_status: form.delivery_status || "결제전",
+      consultation_logs: [],
       memo: form.memo || null,
     };
 
@@ -106,7 +109,7 @@ export default function OrderModal({ onSave, onClose }: OrderModalProps) {
                   className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50"
                 >
                   <option value="">선택</option>
-                  {(field.key === "courier" ? COURIERS : PAYMENT_METHODS).map((opt) => (
+                  {(field.key === "delivery_status" ? [...DELIVERY_STATUSES] : field.key === "courier" ? COURIERS : PAYMENT_METHODS).map((opt) => (
                     <option key={opt} value={opt}>{opt}</option>
                   ))}
                 </select>

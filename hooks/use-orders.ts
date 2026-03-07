@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import type { Order, OrderInsert, OrderUpdate } from "@/types/database";
@@ -12,11 +12,21 @@ interface UseOrdersOptions {
   columnFilters?: Record<string, string[]>;
 }
 
+interface UndoEntry {
+  type: "update";
+  id: string;
+  prev: OrderUpdate;
+  next: OrderUpdate;
+}
+
+const MAX_UNDO = 20;
+
 export function useOrders(options: UseOrdersOptions = {}) {
   const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [months, setMonths] = useState<string[]>([]);
+  const undoStackRef = useRef<UndoEntry[]>([]);
 
   const fetchOrders = useCallback(async () => {
     if (!user) return;
@@ -66,18 +76,15 @@ export function useOrders(options: UseOrdersOptions = {}) {
 
   const fetchMonths = useCallback(async () => {
     if (!user) return;
-    // distinct 대신 전체를 가져와서 클라이언트에서 unique 처리
-    // RPC 없이 가장 간단한 방법
+    // order_month만 select하여 경량 쿼리, 클라이언트에서 unique 처리
     const { data } = await supabase
       .from("orders")
       .select("order_month")
       .eq("user_id", user.id)
-      .not("order_month", "is", null)
-      .order("order_month", { ascending: false })
-      .limit(10000);
+      .not("order_month", "is", null);
 
     if (data) {
-      const unique = [...new Set(data.map((d) => d.order_month as string))];
+      const unique = [...new Set(data.map((d) => d.order_month as string))].sort().reverse();
       setMonths(unique);
     }
   }, [user]);
@@ -110,21 +117,54 @@ export function useOrders(options: UseOrdersOptions = {}) {
   };
 
   // Optimistic update: 즉시 UI 반영 후 백그라운드에서 DB 저장
-  const updateOrder = (id: string, updates: OrderUpdate) => {
+  const updateOrder = (id: string, updates: OrderUpdate, skipUndo = false) => {
+    // 배송상태 자동 변경 로직
+    const autoStatusUpdates = { ...updates };
+
+    // undo 스택에 이전 값 저장
+    if (!skipUndo) {
+      const order = orders.find((o) => o.id === id);
+      if (order) {
+        const prev: OrderUpdate = {};
+        for (const key of Object.keys(autoStatusUpdates) as (keyof OrderUpdate)[]) {
+          (prev as Record<string, unknown>)[key] = order[key as keyof Order];
+        }
+        undoStackRef.current.push({ type: "update", id, prev, next: autoStatusUpdates });
+        if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+      }
+    }
+
     setOrders((prev) =>
       prev.map((o) => {
         if (o.id !== id) return o;
-        const updated = { ...o, ...updates };
+        const merged = { ...o, ...autoStatusUpdates };
+
+        // 운송장번호 입력 → 배송완료 (취소/반품/교환 상태가 아닐 때만)
+        if (autoStatusUpdates.tracking_no && autoStatusUpdates.tracking_no !== o.tracking_no) {
+          const noAutoChange = ["취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료"];
+          if (!noAutoChange.includes(merged.delivery_status)) {
+            autoStatusUpdates.delivery_status = "배송완료";
+            merged.delivery_status = "배송완료";
+          }
+        }
+        // 주문번호 입력 → 배송준비 (결제전 상태일 때만)
+        else if (autoStatusUpdates.purchase_order_no && autoStatusUpdates.purchase_order_no !== o.purchase_order_no) {
+          if (merged.delivery_status === "결제전") {
+            autoStatusUpdates.delivery_status = "배송준비";
+            merged.delivery_status = "배송준비";
+          }
+        }
+
         // margin 재계산
-        updated.margin = (updated.settlement || 0) - (updated.cost || 0);
-        return updated;
+        merged.margin = (merged.settlement || 0) - (merged.cost || 0);
+        return merged;
       })
     );
 
     // 백그라운드 DB 저장
     supabase
       .from("orders")
-      .update(updates)
+      .update(autoStatusUpdates)
       .eq("id", id)
       .then(({ error }) => {
         if (error) {
@@ -133,6 +173,14 @@ export function useOrders(options: UseOrdersOptions = {}) {
         }
       });
   };
+
+  const undo = useCallback(() => {
+    const entry = undoStackRef.current.pop();
+    if (!entry) return;
+    if (entry.type === "update") {
+      updateOrder(entry.id, entry.prev, true);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const deleteOrders = async (ids: string[]) => {
     // 배치 삭제 (한번에 최대 100개 — URL 길이 제한 방지)
@@ -155,6 +203,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
     insertOrders,
     updateOrder,
     deleteOrders,
+    undo,
   };
 }
 

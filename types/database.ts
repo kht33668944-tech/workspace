@@ -23,10 +23,18 @@ export interface Order {
   purchase_order_no: string | null;
   courier: string | null;
   tracking_no: string | null;
+  delivery_status: string;
+  consultation_logs: ConsultationLog[];
   order_month: string | null; // generated: YYYY-MM
   memo: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ConsultationLog {
+  date: string;
+  author: string;
+  content: string;
 }
 
 export type OrderInsert = Omit<Order, "id" | "margin" | "order_month" | "created_at" | "updated_at">;

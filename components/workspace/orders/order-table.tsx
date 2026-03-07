@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { Filter, Check, ArrowUp, ArrowDown } from "lucide-react";
-import { MARKETPLACES } from "@/lib/constants";
+import { MARKETPLACES, DELIVERY_STATUSES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
 import type { Order, OrderUpdate } from "@/types/database";
 
 interface OrderTableProps {
@@ -13,7 +13,9 @@ interface OrderTableProps {
   onSelectToggle: (id: string) => void;
   onSelectAll: () => void;
   onUpdate: (id: string, updates: OrderUpdate) => void;
+  onUndo?: () => void;
   onDeleteSelected?: () => void;
+  onRowClick?: (order: Order) => void;
   columnFilters: Record<string, string[]>;
   onColumnFilterChange: (key: string, values: string[]) => void;
 }
@@ -23,13 +25,14 @@ const EDITABLE_KEYS = new Set([
   "bundle_no", "order_date", "marketplace", "recipient_name", "product_name",
   "quantity", "recipient_phone", "orderer_phone", "postal_code", "address", "address_detail",
   "delivery_memo", "revenue", "settlement", "cost", "payment_method",
-  "purchase_id", "purchase_source", "purchase_order_no", "courier", "tracking_no", "memo",
+  "purchase_id", "purchase_source", "purchase_order_no", "courier", "tracking_no", "delivery_status", "memo",
 ]);
 const NUMERIC_KEYS = new Set(["quantity", "revenue", "settlement", "cost"]);
 const FORMULA_KEYS = new Set(["settlement"]);
 
 interface Col { key: string; label: string; minWidth: number; align?: "right"; }
 const COLUMNS: Col[] = [
+  { key: "delivery_status", label: "배송상태", minWidth: 85 },
   { key: "bundle_no", label: "묶음번호", minWidth: 110 },
   { key: "order_date", label: "주문일시", minWidth: 125 },
   { key: "marketplace", label: "판매처", minWidth: 80 },
@@ -81,6 +84,10 @@ function processValue(colKey: string, raw: string, revenue?: number): unknown {
 
 function formatCell(key: string, val: unknown): React.ReactNode {
   if (val == null || val === "") return <span className="text-white/20 text-xs">-</span>;
+  if (key === "delivery_status") {
+    const color = DELIVERY_STATUS_COLORS[String(val)] || "bg-gray-500/20 text-gray-400";
+    return <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${color}`}>{String(val)}</span>;
+  }
   if (key === "margin") {
     const n = Number(val);
     return <span className={`text-xs font-medium ${n > 0 ? "text-green-400" : n < 0 ? "text-red-400" : "text-white/70"}`}>{n.toLocaleString()}</span>;
@@ -100,9 +107,11 @@ function formatCell(key: string, val: unknown): React.ReactNode {
 // ════════════════════════════════════
 // OrderTable
 // ════════════════════════════════════
+const PAGE_SIZE = 100;
+
 function OrderTable({
   orders: rawOrders, allOrders, loading, selectedIds, onSelectToggle, onSelectAll, onUpdate,
-  onDeleteSelected, columnFilters, onColumnFilterChange,
+  onUndo, onDeleteSelected, onRowClick, columnFilters, onColumnFilterChange,
 }: OrderTableProps) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const o: Record<string, number> = {};
@@ -114,15 +123,25 @@ function OrderTable({
   const [selection, setSelection] = useState<SelRange | null>(null);
   const [sort, setSort] = useState<{ key: string; dir: SortDir } | null>(null);
   const [fillDrag, setFillDrag] = useState<{ colIdx: number; startRow: number; endRow: number; value: unknown } | null>(null);
+  const [page, setPage] = useState(0);
 
   const tableRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<CellPos | null>(null);
   const isDraggingRef = useRef(false);
 
+  // 데이터가 바뀌면 페이지 리셋
+  const prevLenRef = useRef(rawOrders.length);
+  useEffect(() => {
+    if (rawOrders.length !== prevLenRef.current) {
+      setPage(0);
+      prevLenRef.current = rawOrders.length;
+    }
+  }, [rawOrders.length]);
+
   const allSelected = rawOrders.length > 0 && selectedIds.size === rawOrders.length;
 
   // Sort
-  const orders = useMemo(() => {
+  const sortedOrders = useMemo(() => {
     if (!sort?.dir) return rawOrders;
     const s = [...rawOrders];
     s.sort((a, b) => {
@@ -134,6 +153,12 @@ function OrderTable({
     });
     return s;
   }, [rawOrders, sort]);
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(sortedOrders.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageStart = safePage * PAGE_SIZE;
+  const orders = sortedOrders.slice(pageStart, pageStart + PAGE_SIZE);
 
   // Save cell
   const saveValue = useCallback((row: number, col: number, raw: string) => {
@@ -255,6 +280,7 @@ function OrderTable({
       }
     }
     if (ctrl && e.key === "v") { e.preventDefault(); handlePaste(); }
+    if (ctrl && e.key === "z") { e.preventDefault(); onUndo?.(); return; }
 
     // Delete key with checkbox-selected rows → delete rows
     if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0 && onDeleteSelected) {
@@ -288,7 +314,7 @@ function OrderTable({
         setActiveCell({ row: minR, col: minC });
       }
     }
-  }, [activeCell, selection, orders, selectedIds, onDeleteSelected, onUpdate, handleCopy, handlePaste]);
+  }, [activeCell, selection, orders, selectedIds, onDeleteSelected, onUndo, onUpdate, handleCopy, handlePaste]);
 
   // Fill drag
   useEffect(() => {
@@ -333,7 +359,7 @@ function OrderTable({
       <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
     </div>
   );
-  if (orders.length === 0) return (
+  if (sortedOrders.length === 0) return (
     <div className="flex flex-col items-center justify-center py-20 text-white/30">
       <p className="text-sm">주문 데이터가 없습니다</p>
       <p className="text-xs mt-1">엑셀 파일을 가져오거나 수동으로 추가해주세요</p>
@@ -343,59 +369,124 @@ function OrderTable({
   const sn = selection ? norm(selection) : null;
 
   return (
-    <div
-      ref={tableRef}
-      className="rounded-xl border border-white/10 overflow-auto focus:outline-none"
-      style={{ maxHeight: "calc(100vh - 260px)" }}
-      tabIndex={0}
-      onKeyDown={handleTableKeyDown}
-    >
-      <table className="w-max min-w-full text-sm border-collapse">
-        <thead className="bg-[#1e1e2e] sticky top-0 z-20">
-          <tr>
-            <th className="px-2 py-2.5 w-10 sticky left-0 bg-[#1e1e2e] z-30">
-              <input type="checkbox" checked={allSelected} onChange={onSelectAll} className="accent-blue-500" />
-            </th>
-            {COLUMNS.map(col => (
-              <ResizableHeader
-                key={col.key} col={col} width={colWidths[col.key]}
-                onResize={w => setColWidths(p => ({ ...p, [col.key]: w }))}
-                hasFilter={!!columnFilters[col.key]?.length}
-                filterOpen={filterOpen === col.key}
-                onFilterToggle={() => setFilterOpen(filterOpen === col.key ? null : col.key)}
-                selectedValues={columnFilters[col.key] || []}
-                onFilterChange={v => onColumnFilterChange(col.key, v)}
-                allOrders={allOrders}
-                sort={sort?.key === col.key ? sort.dir : null}
-                onSort={dir => handleSort(col.key, dir)}
-              />
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {orders.map((order, rowIdx) => {
-            const ac = activeCell?.row === rowIdx ? activeCell.col : -1;
-            let selMinC = -1, selMaxC = -1;
-            if (sn && rowIdx >= sn.minR && rowIdx <= sn.maxR) { selMinC = sn.minC; selMaxC = sn.maxC; }
-            const showFill = sn ? rowIdx === sn.maxR : activeCell?.row === rowIdx;
-            const fillCol = sn ? sn.maxC : (activeCell?.row === rowIdx ? activeCell.col : -1);
-            let fillHL = -1;
-            if (fillDrag && rowIdx > fillDrag.startRow && rowIdx <= fillDrag.endRow) fillHL = fillDrag.colIdx;
+    <div className="space-y-2">
+      <div
+        ref={tableRef}
+        className="rounded-xl border border-white/10 overflow-auto focus:outline-none"
+        style={{ maxHeight: "calc(100vh - 300px)" }}
+        tabIndex={0}
+        onKeyDown={handleTableKeyDown}
+      >
+        <table className="w-max min-w-full text-sm border-collapse">
+          <thead className="bg-[#1e1e2e] sticky top-0 z-20">
+            <tr>
+              <th className="px-2 py-2.5 w-10 sticky left-0 bg-[#1e1e2e] z-30">
+                <input type="checkbox" checked={allSelected} onChange={onSelectAll} className="accent-blue-500" />
+              </th>
+              {COLUMNS.map(col => (
+                <ResizableHeader
+                  key={col.key} col={col} width={colWidths[col.key]}
+                  onResize={w => setColWidths(p => ({ ...p, [col.key]: w }))}
+                  hasFilter={!!columnFilters[col.key]?.length}
+                  filterOpen={filterOpen === col.key}
+                  onFilterToggle={() => setFilterOpen(filterOpen === col.key ? null : col.key)}
+                  selectedValues={columnFilters[col.key] || []}
+                  onFilterChange={v => onColumnFilterChange(col.key, v)}
+                  allOrders={allOrders}
+                  sort={sort?.key === col.key ? sort.dir : null}
+                  onSort={dir => handleSort(col.key, dir)}
+                />
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map((order, rowIdx) => {
+              const ac = activeCell?.row === rowIdx ? activeCell.col : -1;
+              let selMinC = -1, selMaxC = -1;
+              if (sn && rowIdx >= sn.minR && rowIdx <= sn.maxR) { selMinC = sn.minC; selMaxC = sn.maxC; }
+              const showFill = sn ? rowIdx === sn.maxR : activeCell?.row === rowIdx;
+              const fillCol = sn ? sn.maxC : (activeCell?.row === rowIdx ? activeCell.col : -1);
+              let fillHL = -1;
+              if (fillDrag && rowIdx > fillDrag.startRow && rowIdx <= fillDrag.endRow) fillHL = fillDrag.colIdx;
 
-            return (
-              <MemoRow
-                key={order.id} order={order} rowIdx={rowIdx} colWidths={colWidths}
-                isChecked={selectedIds.has(order.id)} activeCol={ac}
-                selMinC={selMinC} selMaxC={selMaxC}
-                showFillHandle={!!showFill} fillHandleCol={fillCol} fillHighlightCol={fillHL}
-                onCellMouseDown={handleCellMouseDown} onCellMouseEnter={handleCellMouseEnter}
-                onCommit={handleCommit} onBlurSave={saveValue}
-                onSelectToggle={onSelectToggle} onFillStart={handleFillStart}
-              />
-            );
-          })}
-        </tbody>
-      </table>
+              return (
+                <MemoRow
+                  key={order.id} order={order} rowIdx={rowIdx} colWidths={colWidths}
+                  isChecked={selectedIds.has(order.id)} activeCol={ac}
+                  selMinC={selMinC} selMaxC={selMaxC}
+                  showFillHandle={!!showFill} fillHandleCol={fillCol} fillHighlightCol={fillHL}
+                  onCellMouseDown={handleCellMouseDown} onCellMouseEnter={handleCellMouseEnter}
+                  onCommit={handleCommit} onBlurSave={saveValue}
+                  onSelectToggle={onSelectToggle} onFillStart={handleFillStart}
+                  onRowClick={onRowClick}
+                  onStatusChange={(id, status) => onUpdate(id, { delivery_status: status })}
+                />
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-1">
+          <span className="text-xs text-white/30">
+            {pageStart + 1}-{Math.min(pageStart + PAGE_SIZE, sortedOrders.length)} / {sortedOrders.length}건
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(0)}
+              disabled={safePage === 0}
+              className="px-2 py-1 text-xs text-white/50 hover:text-white disabled:text-white/15 disabled:cursor-not-allowed"
+            >
+              ««
+            </button>
+            <button
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={safePage === 0}
+              className="px-2 py-1 text-xs text-white/50 hover:text-white disabled:text-white/15 disabled:cursor-not-allowed"
+            >
+              «
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i)
+              .filter(i => i === 0 || i === totalPages - 1 || Math.abs(i - safePage) <= 2)
+              .reduce<(number | "...")[]>((acc, i, idx, arr) => {
+                if (idx > 0 && i - arr[idx - 1] > 1) acc.push("...");
+                acc.push(i);
+                return acc;
+              }, [])
+              .map((item, idx) =>
+                item === "..." ? (
+                  <span key={`e${idx}`} className="px-1 text-xs text-white/20">...</span>
+                ) : (
+                  <button
+                    key={item}
+                    onClick={() => setPage(item)}
+                    className={`min-w-[28px] px-1.5 py-1 text-xs rounded transition-colors ${
+                      item === safePage ? "bg-blue-600/20 text-blue-400 font-medium" : "text-white/50 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    {item + 1}
+                  </button>
+                )
+              )}
+            <button
+              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={safePage >= totalPages - 1}
+              className="px-2 py-1 text-xs text-white/50 hover:text-white disabled:text-white/15 disabled:cursor-not-allowed"
+            >
+              »
+            </button>
+            <button
+              onClick={() => setPage(totalPages - 1)}
+              disabled={safePage >= totalPages - 1}
+              className="px-2 py-1 text-xs text-white/50 hover:text-white disabled:text-white/15 disabled:cursor-not-allowed"
+            >
+              »»
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -416,12 +507,15 @@ interface RowProps {
   onBlurSave: (r: number, c: number, v: string) => void;
   onSelectToggle: (id: string) => void;
   onFillStart: (r: number, c: number, v: unknown) => void;
+  onRowClick?: (order: Order) => void;
+  onStatusChange: (id: string, status: string) => void;
 }
 
 const MemoRow = memo(function Row({
   order, rowIdx, colWidths, isChecked, activeCol,
   selMinC, selMaxC, showFillHandle, fillHandleCol, fillHighlightCol,
   onCellMouseDown, onCellMouseEnter, onCommit, onBlurSave, onSelectToggle, onFillStart,
+  onRowClick, onStatusChange,
 }: RowProps) {
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -475,7 +569,27 @@ const MemoRow = memo(function Row({
             onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); onCellMouseDown(rowIdx, ci); } }}
             onMouseEnter={() => onCellMouseEnter(rowIdx, ci)}
           >
-            {isActive && isEditable ? (
+            {col.key === "delivery_status" ? (
+              <div className="flex items-center gap-1">
+                <select
+                  value={String(val || "결제전")}
+                  onChange={(e) => { e.stopPropagation(); onStatusChange(order.id, e.target.value); }}
+                  onClick={(e) => e.stopPropagation()}
+                  className={`flex-1 bg-transparent border-none rounded px-1 py-0.5 text-xs font-medium outline-none cursor-pointer ${DELIVERY_STATUS_COLORS[String(val)] || "text-gray-400"}`}
+                >
+                  {DELIVERY_STATUSES.map((s) => (
+                    <option key={s} value={s} className="bg-[#2a2a3e] text-white">{s}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRowClick?.(order); }}
+                  className="shrink-0 p-0.5 text-white/20 hover:text-white/60 transition-colors"
+                  title="상담내역"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </button>
+              </div>
+            ) : isActive && isEditable ? (
               <input
                 ref={inputRef}
                 value={editValue}
