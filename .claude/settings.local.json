@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install lucide-react)",
+      "Bash(npm list lucide-react)",
+      "mcp__claude_ai_Notion__notion-get-users",
+      "mcp__claude_ai_Slack__slack_read_user_profile"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "supabase"
+  ]
+}
