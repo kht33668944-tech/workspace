@@ -133,9 +133,8 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
                           ? "bg-orange-600/20 text-orange-400 border border-orange-500/30"
                           : "bg-white/5 text-white/40 border border-white/10 hover:text-white/60"
                       }`}
-                      disabled
                     >
-                      옥션 (준비중)
+                      옥션
                     </button>
                   </div>
                 </div>
@@ -143,7 +142,7 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
                 {/* 로그인 정보 */}
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs text-white/50 mb-1.5 block">지마켓 아이디</label>
+                    <label className="text-xs text-white/50 mb-1.5 block">{platform === "gmarket" ? "지마켓" : "옥션"} 아이디</label>
                     <input
                       type="text"
                       value={loginId}
@@ -267,7 +266,7 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
                         <div key={no} className="flex items-center gap-2 text-xs">
                           <AlertCircle className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
                           <span className="text-white/50 font-mono">{no}</span>
-                          <span className="text-yellow-400/60">지마켓에서 찾을 수 없음</span>
+                          <span className="text-yellow-400/60">{platform === "gmarket" ? "지마켓" : "옥션"}에서 찾을 수 없음</span>
                         </div>
                       ))}
                     </div>

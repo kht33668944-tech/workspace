@@ -356,7 +356,7 @@ export default function OrdersPage() {
       )}
       {showTrackingCollect && (
         <TrackingCollectModal
-          orders={allOrders}
+          orders={orders}
           onClose={() => setShowTrackingCollect(false)}
           onApply={async (updates) => {
             const { data: { session } } = await supabase.auth.getSession();

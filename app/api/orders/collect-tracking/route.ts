@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { collectGmarketTracking } from "@/lib/scrapers/gmarket";
+import { collectAuctionTracking } from "@/lib/scrapers/auction";
 import type { CollectTrackingRequest } from "@/lib/scrapers/types";
 
 export async function POST(request: NextRequest) {
@@ -16,6 +17,8 @@ export async function POST(request: NextRequest) {
     let result;
     if (body.platform === "gmarket") {
       result = await collectGmarketTracking(body.loginId, body.loginPw, body.orderNos);
+    } else if (body.platform === "auction") {
+      result = await collectAuctionTracking(body.loginId, body.loginPw, body.orderNos);
     } else {
       return NextResponse.json({ error: `${body.platform}은(는) 아직 지원되지 않습니다.` }, { status: 400 });
     }
