@@ -121,35 +121,67 @@ async function processSingleOrder(
   order: PurchaseOrderInfo,
   paymentPin: string
 ): Promise<SingleOrderResult> {
+  // 현재 작업 페이지 (쿠폰 등에서 새 탭이 열릴 수 있음)
+  let activePage = page;
+
   // 1. 상품 페이지 이동
   console.log(`[gmarket-purchase] 상품 페이지 이동: ${order.productUrl}`);
-  await page.goto(order.productUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-  await page.waitForTimeout(2000);
+  await activePage.goto(order.productUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+  await activePage.waitForTimeout(2000);
 
   // 2. 쿠폰 수집
-  await collectCoupons(page);
+  await collectCoupons(activePage);
+
+  // 페이지 닫힘 시 복구 (쿠폰 팝업이 새 탭을 열고 원래 탭을 닫는 경우)
+  if (activePage.isClosed()) {
+    console.log("[gmarket-purchase] 쿠폰 수집 후 페이지 닫힘 감지, 복구 시도...");
+    activePage = await recoverPage(context, order.productUrl);
+  }
 
   // 3. 수량 선택 (1인 경우 기본값)
   if (order.quantity > 1) {
-    await setQuantity(page, order.quantity);
+    await setQuantity(activePage, order.quantity);
   }
 
   // 4. 쿠폰 적용 (할인 최대화)
-  await applyCoupon(page);
+  await applyCoupon(activePage);
+
+  // 페이지 닫힘 시 복구
+  if (activePage.isClosed()) {
+    console.log("[gmarket-purchase] 쿠폰 적용 후 페이지 닫힘 감지, 복구 시도...");
+    activePage = await recoverPage(context, order.productUrl);
+  }
 
   // 5. 구매하기 클릭
-  await clickPurchaseButton(page);
+  await clickPurchaseButton(activePage);
 
   // 6. 주문 결제 페이지에서 배송지 변경
-  await changeShippingAddress(page, order);
+  await changeShippingAddress(activePage, order);
 
   // 7. 결제하기 클릭 + 비밀번호 입력
-  await processPayment(page, paymentPin);
+  await processPayment(activePage, paymentPin);
 
   // 8. 주문내역에서 주문번호 + 결제방식 + 원가 한번에 추출
-  const orderInfo = await extractOrderInfo(page, context);
+  const orderInfo = await extractOrderInfo(activePage, context);
 
   return orderInfo;
+}
+
+/** 페이지가 닫혔을 때 context에서 활성 페이지를 찾거나 새로 생성 */
+async function recoverPage(context: BrowserContext, fallbackUrl: string): Promise<Page> {
+  const pages = context.pages();
+  if (pages.length > 0) {
+    // 가장 최근 페이지 사용
+    const lastPage = pages[pages.length - 1];
+    console.log(`[gmarket-purchase] 기존 페이지 발견: ${lastPage.url()}`);
+    return lastPage;
+  }
+  // 페이지가 하나도 없으면 새로 생성
+  console.log("[gmarket-purchase] 새 페이지 생성");
+  const newPage = await context.newPage();
+  await newPage.goto(fallbackUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+  await newPage.waitForTimeout(2000);
+  return newPage;
 }
 
 // ═══════════════════════════════════
@@ -162,6 +194,12 @@ async function collectCoupons(page: Page) {
     if (await couponBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await couponBtn.click();
       await page.waitForTimeout(2000);
+
+      // 페이지 닫힘 체크
+      if (page.isClosed()) {
+        console.log("[gmarket-purchase] 쿠폰받기 클릭 후 페이지 닫힘 감지");
+        return;
+      }
 
       // 쿠폰 팝업에서 "모두 받기" 또는 개별 쿠폰 받기
       const allCouponBtn = page.locator('button:has-text("모두받기"), button:has-text("모두 받기"), a:has-text("모두받기")').first();
@@ -215,24 +253,42 @@ async function setQuantity(page: Page, quantity: number) {
 // ═══════════════════════════════════
 async function applyCoupon(page: Page) {
   try {
-    // "쿠폰적용" 또는 "할인적용" 버튼
+    // 쿠폰 적용 영역 내의 버튼만 대상 (광범위한 "확인" 버튼 오클릭 방지)
     const applyBtn = page.locator('button:has-text("쿠폰적용"), a:has-text("쿠폰적용"), button:has-text("할인적용")').first();
     if (await applyBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      // 클릭 전 현재 URL 저장 (네비게이션 감지용)
+      const urlBefore = page.url();
       await applyBtn.click();
       await page.waitForTimeout(2000);
 
-      // 쿠폰 적용 팝업에서 최대 할인 쿠폰 선택
-      const couponItems = page.locator('.coupon-item, .coupon-list li, [class*="coupon"]');
-      if (await couponItems.count() > 0) {
-        await couponItems.first().click();
-        await page.waitForTimeout(500);
+      // 페이지 닫힘/네비게이션 체크
+      if (page.isClosed()) {
+        console.log("[gmarket-purchase] 쿠폰적용 클릭 후 페이지 닫힘 감지");
+        return;
+      }
+      if (page.url() !== urlBefore) {
+        console.log(`[gmarket-purchase] 쿠폰적용 클릭 후 페이지 이동 감지: ${urlBefore} → ${page.url()}`);
+        return;
       }
 
-      // "적용" 확인 버튼
-      const confirmBtn = page.locator('button:has-text("적용"), button:has-text("확인")').first();
-      if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await confirmBtn.click();
-        await page.waitForTimeout(1000);
+      // 쿠폰 팝업/레이어 내에서만 쿠폰 선택 + 적용
+      // 쿠폰 팝업 컨테이너 찾기
+      const couponLayer = page.locator('[class*="coupon"], [class*="Coupon"], [id*="coupon"], .layer-coupon, .popup-coupon').first();
+      if (await couponLayer.isVisible({ timeout: 2000 }).catch(() => false)) {
+        // 팝업 내 쿠폰 항목 선택
+        const couponItems = couponLayer.locator('li, .coupon-item, [class*="item"]');
+        const itemCount = await couponItems.count();
+        if (itemCount > 0) {
+          await couponItems.first().click();
+          await page.waitForTimeout(500);
+        }
+
+        // 팝업 내 "적용" 버튼만 클릭 (광범위한 "확인" 버튼 회피)
+        const confirmBtn = couponLayer.locator('button:has-text("적용")').first();
+        if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await confirmBtn.click();
+          await page.waitForTimeout(1000);
+        }
       }
     }
     console.log("[gmarket-purchase] 쿠폰 적용 완료");
@@ -252,8 +308,8 @@ async function clickPurchaseButton(page: Page) {
     await page.waitForTimeout(1000);
   }
 
-  // alert 핸들러 등록 (수량 미선택 등)
-  page.on("dialog", async (dialog) => {
+  // alert 핸들러 등록 (중복 등록 방지 - once 사용)
+  page.once("dialog", async (dialog) => {
     console.log(`[gmarket-purchase] dialog: ${dialog.message()}`);
     await dialog.accept();
   });
