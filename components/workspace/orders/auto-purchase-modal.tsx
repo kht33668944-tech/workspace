@@ -276,20 +276,20 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
   const failCount = orderStatuses.filter((s) => s.status === "failed").length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--bg-overlay)] backdrop-blur-sm">
+      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
           <div className="flex items-center gap-2">
             <ShoppingCart className="w-5 h-5 text-orange-400" />
-            <h2 className="text-lg font-semibold text-white">구매 자동화</h2>
-            <span className="text-xs text-white/40 ml-1">
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">구매 자동화</h2>
+            <span className="text-xs text-[var(--text-muted)] ml-1">
               {step === "config" && "설정"}
               {step === "processing" && `진행 중... (${currentGroupIndex + 1}/${matchedGroups.length} 그룹)`}
               {step === "result" && "결과"}
             </span>
           </div>
-          <button onClick={onClose} className="p-1 text-white/40 hover:text-white transition-colors">
+          <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -300,33 +300,33 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
             <>
               {/* 계정별 자동 분류 */}
               <div className="space-y-2">
-                <h3 className="text-sm font-medium text-white/70">대상 주문 (계정별 자동 분류)</h3>
+                <h3 className="text-sm font-medium text-[var(--text-secondary)]">대상 주문 (계정별 자동 분류)</h3>
 
                 {credLoading ? (
-                  <div className="flex items-center gap-2 text-xs text-white/40 py-4">
+                  <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] py-4">
                     <Loader2 className="w-3 h-3 animate-spin" /> 계정 매칭 중...
                   </div>
                 ) : matchedGroups.length > 0 ? (
                   <div className="space-y-3">
                     {matchedGroups.map((group) => (
-                      <div key={group.key} className="bg-white/5 border border-white/10 rounded-lg overflow-hidden">
-                        <div className="flex items-center gap-2 px-3 py-2 bg-white/5">
+                      <div key={group.key} className="bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 bg-[var(--bg-hover)]">
                           <CheckCircle className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-white/10 text-white/60">
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--bg-active)] text-[var(--text-tertiary)]">
                             {PLATFORM_LABELS[group.platform] || group.platform}
                           </span>
-                          <span className="text-sm text-white/80 font-medium">{group.purchaseId}</span>
+                          <span className="text-sm text-[var(--text-secondary)] font-medium">{group.purchaseId}</span>
                           {group.credentialLabel && (
-                            <span className="text-xs text-white/30">({group.credentialLabel})</span>
+                            <span className="text-xs text-[var(--text-muted)]">({group.credentialLabel})</span>
                           )}
-                          <span className="ml-auto text-xs text-white/40">{group.orders.length}건</span>
+                          <span className="ml-auto text-xs text-[var(--text-muted)]">{group.orders.length}건</span>
                         </div>
                         <div className="px-3 py-2 space-y-1 max-h-32 overflow-y-auto">
                           {group.orders.map((o) => (
                             <div key={o.id} className="flex items-center gap-3 text-xs">
-                              <span className="text-white/50 w-16 shrink-0">{o.recipient_name || "-"}</span>
-                              <span className="text-white/70 truncate flex-1" title={o.product_name || ""}>{o.product_name || "-"}</span>
-                              <span className="text-white/30 text-[10px] shrink-0">{o.quantity}개</span>
+                              <span className="text-[var(--text-tertiary)] w-16 shrink-0">{o.recipient_name || "-"}</span>
+                              <span className="text-[var(--text-secondary)] truncate flex-1" title={o.product_name || ""}>{o.product_name || "-"}</span>
+                              <span className="text-[var(--text-muted)] text-[10px] shrink-0">{o.quantity}개</span>
                             </div>
                           ))}
                         </div>
@@ -364,22 +364,22 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                   </div>
                 )}
                 {noPurchaseIdOrders.length > 0 && (
-                  <p className="text-xs text-white/30">
+                  <p className="text-xs text-[var(--text-muted)]">
                     {noPurchaseIdOrders.length}건은 구매아이디가 비어있어 제외됩니다.
                   </p>
                 )}
                 {unsupportedPlatformOrders.length > 0 && (
-                  <p className="text-xs text-white/30">
+                  <p className="text-xs text-[var(--text-muted)]">
                     {unsupportedPlatformOrders.length}건은 미지원 플랫폼이라 제외됩니다. (현재 지마켓만 지원)
                   </p>
                 )}
                 {alreadyPurchased.length > 0 && (
-                  <p className="text-xs text-white/30">
+                  <p className="text-xs text-[var(--text-muted)]">
                     {alreadyPurchased.length}건은 이미 주문번호가 입력되어 제외됩니다.
                   </p>
                 )}
                 {noUrlOrders.length > 0 && (
-                  <p className="text-xs text-white/30">
+                  <p className="text-xs text-[var(--text-muted)]">
                     {noUrlOrders.length}건은 최저가링크가 없어 제외됩니다.
                   </p>
                 )}
@@ -388,7 +388,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
               {/* 결제 비밀번호 */}
               {totalMatchedOrders > 0 && (
                 <div className="space-y-2">
-                  <h3 className="text-sm font-medium text-white/70">결제 비밀번호 (6자리)</h3>
+                  <h3 className="text-sm font-medium text-[var(--text-secondary)]">결제 비밀번호 (6자리)</h3>
                   <div className="relative max-w-48">
                     <input
                       type={showPin ? "text" : "password"}
@@ -396,13 +396,13 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                       onChange={(e) => setPaymentPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                       placeholder="000000"
                       maxLength={6}
-                      className="w-full px-3 py-2 pr-10 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-white/30 outline-none focus:border-blue-500/50 tracking-widest"
+                      className="w-full px-3 py-2 pr-10 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-blue-500/50 tracking-widest"
                     />
-                    <button onClick={() => setShowPin(!showPin)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white">
+                    <button onClick={() => setShowPin(!showPin)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
                       {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  <p className="text-xs text-white/30">스마일페이 결제 비밀번호를 입력하세요.</p>
+                  <p className="text-xs text-[var(--text-muted)]">스마일페이 결제 비밀번호를 입력하세요.</p>
                 </div>
               )}
             </>
@@ -410,13 +410,13 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
 
           {step === "processing" && (
             <div className="space-y-4">
-              <div className="flex items-center gap-3 text-sm text-white/70">
+              <div className="flex items-center gap-3 text-sm text-[var(--text-secondary)]">
                 <Loader2 className="w-5 h-5 animate-spin text-orange-400" />
                 구매 자동화 진행 중... (브라우저를 닫지 마세요)
               </div>
               {matchedGroups[currentGroupIndex] && (
-                <div className="flex items-center gap-2 text-xs text-white/40 bg-white/5 rounded-lg px-3 py-2">
-                  <span className="px-1.5 py-0.5 rounded bg-white/10 text-white/60">
+                <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] bg-[var(--bg-hover)] rounded-lg px-3 py-2">
+                  <span className="px-1.5 py-0.5 rounded bg-[var(--bg-active)] text-[var(--text-tertiary)]">
                     {PLATFORM_LABELS[matchedGroups[currentGroupIndex].platform]}
                   </span>
                   <span>{matchedGroups[currentGroupIndex].purchaseId}</span>
@@ -425,14 +425,14 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
               )}
               <div className="space-y-2">
                 {orderStatuses.map((s) => (
-                  <div key={s.orderId} className="flex items-center gap-3 px-3 py-2 bg-white/5 rounded-lg text-xs">
-                    {s.status === "pending" && <div className="w-4 h-4 rounded-full border border-white/20" />}
+                  <div key={s.orderId} className="flex items-center gap-3 px-3 py-2 bg-[var(--bg-hover)] rounded-lg text-xs">
+                    {s.status === "pending" && <div className="w-4 h-4 rounded-full border border-[var(--border-strong)]" />}
                     {s.status === "processing" && <Loader2 className="w-4 h-4 animate-spin text-orange-400" />}
                     {s.status === "success" && <CheckCircle className="w-4 h-4 text-green-400" />}
                     {s.status === "failed" && <AlertCircle className="w-4 h-4 text-red-400" />}
-                    <span className="text-white/50 w-16 shrink-0">{s.recipientName}</span>
-                    <span className="text-white/70 truncate flex-1">{s.productName}</span>
-                    {s.message && <span className="text-white/40 text-[10px] shrink-0">{s.message}</span>}
+                    <span className="text-[var(--text-tertiary)] w-16 shrink-0">{s.recipientName}</span>
+                    <span className="text-[var(--text-secondary)] truncate flex-1">{s.productName}</span>
+                    {s.message && <span className="text-[var(--text-muted)] text-[10px] shrink-0">{s.message}</span>}
                   </div>
                 ))}
               </div>
@@ -460,14 +460,14 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
 
               <div className="space-y-2">
                 {orderStatuses.map((s) => (
-                  <div key={s.orderId} className="flex items-center gap-3 px-3 py-2 bg-white/5 rounded-lg text-xs">
+                  <div key={s.orderId} className="flex items-center gap-3 px-3 py-2 bg-[var(--bg-hover)] rounded-lg text-xs">
                     {s.status === "success" ? (
                       <CheckCircle className="w-4 h-4 text-green-400 shrink-0" />
                     ) : (
                       <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                     )}
-                    <span className="text-white/50 w-16 shrink-0">{s.recipientName}</span>
-                    <span className="text-white/70 truncate flex-1">{s.productName}</span>
+                    <span className="text-[var(--text-tertiary)] w-16 shrink-0">{s.recipientName}</span>
+                    <span className="text-[var(--text-secondary)] truncate flex-1">{s.productName}</span>
                     <span className={`text-[10px] shrink-0 ${s.status === "success" ? "text-green-400" : "text-red-400"}`}>
                       {s.message}
                     </span>
@@ -479,16 +479,16 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-white/10">
+        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-[var(--border)]">
           {step === "config" && (
             <>
-              <button onClick={onClose} className="px-4 py-2 text-sm text-white/50 hover:text-white transition-colors">
+              <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors">
                 취소
               </button>
               <button
                 onClick={handleStart}
                 disabled={!canStart}
-                className="flex items-center gap-1.5 px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-600/30 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-600/30 disabled:cursor-not-allowed text-[var(--text-primary)] text-sm font-medium rounded-lg transition-colors"
               >
                 <ShoppingCart className="w-4 h-4" />
                 {totalMatchedOrders}건 구매 시작
@@ -497,17 +497,17 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
             </>
           )}
           {step === "processing" && (
-            <p className="text-xs text-white/30">진행 중에는 브라우저를 닫지 마세요.</p>
+            <p className="text-xs text-[var(--text-muted)]">진행 중에는 브라우저를 닫지 마세요.</p>
           )}
           {step === "result" && (
             <>
-              <button onClick={onClose} className="px-4 py-2 text-sm text-white/50 hover:text-white transition-colors">
+              <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors">
                 닫기
               </button>
               {successCount > 0 && (
                 <button
                   onClick={onComplete}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-[var(--text-primary)] text-sm font-medium rounded-lg transition-colors"
                 >
                   발주서에 적용
                 </button>

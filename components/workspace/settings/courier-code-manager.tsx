@@ -106,47 +106,47 @@ export default function CourierCodeManager() {
     : codes;
 
   return (
-    <div className="bg-[#1a1a2e] border border-white/10 rounded-2xl">
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl">
       {/* Header - 항상 보임 */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/[0.02] transition-colors rounded-2xl"
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-[var(--bg-subtle)] transition-colors rounded-2xl"
       >
         <div className="flex items-center gap-2">
           <Truck className="w-5 h-5 text-purple-400" />
-          <h2 className="text-base font-semibold text-white">택배사 코드 관리</h2>
-          <span className="text-xs text-white/30 ml-1">플레이오토 운송장 전송용</span>
+          <h2 className="text-base font-semibold text-[var(--text-primary)]">택배사 코드 관리</h2>
+          <span className="text-xs text-[var(--text-muted)] ml-1">플레이오토 운송장 전송용</span>
         </div>
         {expanded ? (
-          <ChevronUp className="w-5 h-5 text-white/30" />
+          <ChevronUp className="w-5 h-5 text-[var(--text-muted)]" />
         ) : (
-          <ChevronDown className="w-5 h-5 text-white/30" />
+          <ChevronDown className="w-5 h-5 text-[var(--text-muted)]" />
         )}
       </button>
 
       {/* Content - 펼쳤을 때만 */}
       {expanded && (
-        <div className="px-6 pb-6 space-y-3 border-t border-white/10 pt-4">
+        <div className="px-6 pb-6 space-y-3 border-t border-[var(--border)] pt-4">
           {loading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-5 h-5 text-white/30 animate-spin" />
+              <Loader2 className="w-5 h-5 text-[var(--text-muted)] animate-spin" />
             </div>
           ) : (
             <>
               {/* 상단 액션 */}
               <div className="flex items-center gap-2">
                 <div className="relative flex-1 max-w-xs">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
                   <input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="택배사명 또는 코드 검색..."
-                    className="w-full pl-9 pr-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-white placeholder:text-white/20 outline-none focus:border-purple-500/50"
+                    className="w-full pl-9 pr-3 py-1.5 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-purple-500/50"
                   />
                 </div>
                 <button
                   onClick={() => { loadDefaults(); }}
-                  className="flex items-center gap-1 px-2.5 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-white/40 hover:text-white/60 transition-colors"
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-muted)] hover:text-[var(--text-tertiary)] transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   기본값 복원
@@ -161,16 +161,16 @@ export default function CourierCodeManager() {
                 </button>
               </div>
 
-              <p className="text-xs text-white/20">총 {codes.length}개 택배사 등록됨 {search && `(${filteredCodes.length}개 표시)`}</p>
+              <p className="text-xs text-[var(--text-disabled)]">총 {codes.length}개 택배사 등록됨 {search && `(${filteredCodes.length}개 표시)`}</p>
 
               {/* 코드 테이블 */}
-              <div className="max-h-80 overflow-y-auto rounded-lg border border-white/10">
+              <div className="max-h-80 overflow-y-auto rounded-lg border border-[var(--border)]">
                 <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-[#1a1a2e] z-10">
-                    <tr className="border-b border-white/10">
-                      <th className="text-left text-white/40 font-medium px-3 py-2 w-12">#</th>
-                      <th className="text-left text-white/40 font-medium px-3 py-2">택배사명</th>
-                      <th className="text-left text-white/40 font-medium px-3 py-2 w-24">코드</th>
+                  <thead className="sticky top-0 bg-[var(--bg-card)] z-10">
+                    <tr className="border-b border-[var(--border)]">
+                      <th className="text-left text-[var(--text-muted)] font-medium px-3 py-2 w-12">#</th>
+                      <th className="text-left text-[var(--text-muted)] font-medium px-3 py-2">택배사명</th>
+                      <th className="text-left text-[var(--text-muted)] font-medium px-3 py-2 w-24">코드</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -179,9 +179,9 @@ export default function CourierCodeManager() {
                       return (
                         <tr
                           key={`${c.courier_name}-${c.courier_code}`}
-                          className="border-b border-white/5 hover:bg-white/[0.02] transition-colors"
+                          className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)] transition-colors"
                         >
-                          <td className="px-3 py-1.5 text-white/20">{realIdx + 1}</td>
+                          <td className="px-3 py-1.5 text-[var(--text-disabled)]">{realIdx + 1}</td>
                           <td className="px-3 py-1.5">
                             {editingIdx === realIdx ? (
                               <input
@@ -189,12 +189,12 @@ export default function CourierCodeManager() {
                                 onChange={(e) => handleNameChange(realIdx, e.target.value)}
                                 onBlur={() => setEditingIdx(null)}
                                 autoFocus
-                                className="bg-white/5 border border-purple-500/30 rounded px-2 py-0.5 text-white text-xs outline-none w-full"
+                                className="bg-[var(--bg-hover)] border border-purple-500/30 rounded px-2 py-0.5 text-[var(--text-primary)] text-xs outline-none w-full"
                               />
                             ) : (
                               <span
                                 onClick={() => setEditingIdx(realIdx)}
-                                className="text-white/80 cursor-pointer hover:text-white"
+                                className="text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)]"
                               >
                                 {c.courier_name}
                               </span>
@@ -205,7 +205,7 @@ export default function CourierCodeManager() {
                               type="number"
                               value={c.courier_code}
                               onChange={(e) => handleCodeChange(realIdx, e.target.value)}
-                              className="bg-white/5 border border-white/10 rounded px-2 py-0.5 text-white/80 text-xs outline-none w-16 focus:border-purple-500/30"
+                              className="bg-[var(--bg-hover)] border border-[var(--border)] rounded px-2 py-0.5 text-[var(--text-secondary)] text-xs outline-none w-16 focus:border-purple-500/30"
                             />
                           </td>
                         </tr>

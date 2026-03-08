@@ -19,8 +19,8 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
 
   if (loading) {
     return (
-      <main className="w-screen h-screen flex items-center justify-center bg-[#171717]">
-        <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+      <main className="w-screen h-screen flex items-center justify-center bg-[var(--bg-main)]">
+        <div className="w-8 h-8 border-2 border-[var(--spinner-track)] border-t-[var(--spinner-head)] rounded-full animate-spin" />
       </main>
     );
   }
@@ -28,7 +28,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-[#171717] dark:bg-[#171717]">
+    <div className="min-h-screen bg-[var(--bg-main)]">
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <div
         className="transition-all duration-300 ease-in-out"

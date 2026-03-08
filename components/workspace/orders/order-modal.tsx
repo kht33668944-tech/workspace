@@ -88,12 +88,12 @@ export default function OrderModal({ onSave, onClose }: OrderModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-lg mx-4 bg-[#1e1e2e] border border-white/10 rounded-2xl shadow-2xl max-h-[85vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--bg-overlay)] backdrop-blur-sm">
+      <div className="w-full max-w-lg mx-4 bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-2xl max-h-[85vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
-          <h2 className="text-lg font-semibold text-white">주문 수동 추가</h2>
-          <button onClick={onClose} className="p-1 text-white/40 hover:text-white">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0">
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">주문 수동 추가</h2>
+          <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -102,12 +102,12 @@ export default function OrderModal({ onSave, onClose }: OrderModalProps) {
         <div className="p-6 overflow-y-auto space-y-3">
           {FIELDS.map((field) => (
             <div key={field.key} className="flex items-center gap-3">
-              <label className="w-24 text-xs text-white/50 shrink-0 text-right">{field.label}</label>
+              <label className="w-24 text-xs text-[var(--text-tertiary)] shrink-0 text-right">{field.label}</label>
               {field.type === "select" ? (
                 <select
                   value={form[field.key] || ""}
                   onChange={(e) => handleChange(field.key, e.target.value)}
-                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50"
+                  className="flex-1 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-blue-500/50"
                 >
                   <option value="">선택</option>
                   {(field.key === "delivery_status" ? [...DELIVERY_STATUSES] : field.key === "courier" ? COURIERS : PAYMENT_METHODS).map((opt) => (
@@ -120,7 +120,7 @@ export default function OrderModal({ onSave, onClose }: OrderModalProps) {
                   value={form[field.key] || ""}
                   onChange={(e) => handleChange(field.key, e.target.value)}
                   placeholder={field.placeholder}
-                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 placeholder:text-white/20"
+                  className="flex-1 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-blue-500/50 placeholder:text-[var(--text-disabled)]"
                 />
               )}
             </div>
@@ -129,14 +129,14 @@ export default function OrderModal({ onSave, onClose }: OrderModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10 shrink-0">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-white/60 hover:text-white">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border)] shrink-0">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
             취소
           </button>
           <button
             onClick={handleSubmit}
             disabled={saving}
-            className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg"
+            className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-[var(--text-primary)] text-sm font-medium rounded-lg"
           >
             {saving ? "저장 중..." : "추가"}
           </button>

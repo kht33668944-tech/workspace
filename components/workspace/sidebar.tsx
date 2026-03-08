@@ -30,19 +30,19 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       className={`
         fixed top-0 left-0 h-screen z-30 flex flex-col
         transition-all duration-300 ease-in-out
-        bg-[#1a1a2e]/80 dark:bg-[#1a1a2e]/80 backdrop-blur-xl
-        border-r border-white/10
+        bg-[var(--bg-sidebar)] backdrop-blur-xl
+        border-r border-[var(--border)]
         ${collapsed ? "w-16" : "w-60"}
       `}
       style={{ willChange: "width" }}
     >
       {/* Title */}
-      <div className={`flex items-center h-16 px-4 border-b border-white/10 ${collapsed ? "justify-center" : "gap-3"}`}>
+      <div className={`flex items-center h-16 px-4 border-b border-[var(--border)] ${collapsed ? "justify-center" : "gap-3"}`}>
         <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0">
           <Package className="w-5 h-5 text-blue-400" />
         </div>
         {!collapsed && (
-          <span className="text-white font-semibold text-lg truncate">리셀 매니저</span>
+          <span className="text-[var(--text-primary)] font-semibold text-lg truncate">리셀 매니저</span>
         )}
       </div>
 
@@ -61,7 +61,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 ${collapsed ? "justify-center" : ""}
                 ${active
                   ? "bg-blue-600/20 text-blue-400"
-                  : "text-white/60 hover:text-white hover:bg-white/5"
+                  : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                 }
               `}
               title={collapsed ? item.label : undefined}
@@ -76,7 +76,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* Toggle */}
       <button
         onClick={onToggle}
-        className="flex items-center justify-center h-12 border-t border-white/10 text-white/40 hover:text-white hover:bg-white/5 transition-colors"
+        className="flex items-center justify-center h-12 border-t border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
       >
         {collapsed ? <ChevronsRight className="w-5 h-5" /> : <ChevronsLeft className="w-5 h-5" />}
       </button>

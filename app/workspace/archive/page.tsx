@@ -127,8 +127,8 @@ export default function ArchivePage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Archive className="w-5 h-5 text-blue-400" />
-          <h1 className="text-lg font-semibold text-white">보관함</h1>
-          <span className="text-xs text-white/30 ml-2">자동 저장된 엑셀 파일 (7일 보관)</span>
+          <h1 className="text-lg font-semibold text-[var(--text-primary)]">보관함</h1>
+          <span className="text-xs text-[var(--text-muted)] ml-2">자동 저장된 엑셀 파일 (7일 보관)</span>
         </div>
 
         {selectedIds.size > 0 && (
@@ -146,10 +146,10 @@ export default function ArchivePage() {
       {/* Content */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-6 h-6 text-white/30 animate-spin" />
+          <Loader2 className="w-6 h-6 text-[var(--text-muted)] animate-spin" />
         </div>
       ) : archives.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-white/30">
+        <div className="flex flex-col items-center justify-center py-20 text-[var(--text-muted)]">
           <Archive className="w-12 h-12 mb-3 opacity-30" />
           <p className="text-sm">보관된 파일이 없습니다</p>
           <p className="text-xs mt-1">배송조회 수집 후 엑셀 내보내기를 하면 자동으로 저장됩니다</p>
@@ -157,12 +157,12 @@ export default function ArchivePage() {
       ) : (
         <div className="space-y-1">
           {/* 전체 선택 */}
-          <div className="flex items-center gap-3 px-4 py-2 text-xs text-white/40">
+          <div className="flex items-center gap-3 px-4 py-2 text-xs text-[var(--text-muted)]">
             <input
               type="checkbox"
               checked={selectedIds.size === archives.length && archives.length > 0}
               onChange={handleSelectAll}
-              className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-blue-500"
+              className="w-3.5 h-3.5 rounded border-[var(--border-strong)] bg-[var(--bg-hover)] accent-blue-500"
             />
             <span className="w-48">파일명</span>
             <span className="w-24">유형</span>
@@ -183,19 +183,19 @@ export default function ArchivePage() {
                 className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors ${
                   selectedIds.has(archive.id)
                     ? "bg-blue-500/10 border-blue-500/20"
-                    : "bg-white/[0.02] border-white/5 hover:bg-white/5"
+                    : "bg-[var(--bg-subtle)] border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]"
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={selectedIds.has(archive.id)}
                   onChange={() => handleSelectToggle(archive.id)}
-                  className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-blue-500"
+                  className="w-3.5 h-3.5 rounded border-[var(--border-strong)] bg-[var(--bg-hover)] accent-blue-500"
                 />
 
                 <div className="w-48 flex items-center gap-2 min-w-0">
-                  <Icon className="w-4 h-4 text-white/30 shrink-0" />
-                  <span className="text-sm text-white truncate">{archive.file_name}</span>
+                  <Icon className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
+                  <span className="text-sm text-[var(--text-primary)] truncate">{archive.file_name}</span>
                 </div>
 
                 <span className={`w-24 text-xs px-2 py-0.5 rounded-full border text-center ${
@@ -206,13 +206,13 @@ export default function ArchivePage() {
                   {fileTypeLabel(archive.file_type)}
                 </span>
 
-                <span className="w-16 text-sm text-white/60 text-center">{archive.order_count}건</span>
+                <span className="w-16 text-sm text-[var(--text-tertiary)] text-center">{archive.order_count}건</span>
 
-                <span className="w-40 text-xs text-white/40">{formatDate(archive.created_at)}</span>
+                <span className="w-40 text-xs text-[var(--text-muted)]">{formatDate(archive.created_at)}</span>
 
                 <div className="w-20 flex items-center justify-center gap-1">
-                  <Clock className={`w-3 h-3 ${isExpiringSoon ? "text-red-400" : "text-white/30"}`} />
-                  <span className={`text-xs ${isExpiringSoon ? "text-red-400" : "text-white/40"}`}>
+                  <Clock className={`w-3 h-3 ${isExpiringSoon ? "text-red-400" : "text-[var(--text-muted)]"}`} />
+                  <span className={`text-xs ${isExpiringSoon ? "text-red-400" : "text-[var(--text-muted)]"}`}>
                     {remaining}일
                   </span>
                 </div>
@@ -220,7 +220,7 @@ export default function ArchivePage() {
                 <button
                   onClick={() => handleDownload(archive.id, archive.file_name)}
                   disabled={downloading === archive.id}
-                  className="w-20 ml-auto flex items-center justify-center gap-1 px-2 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-50 transition-colors"
+                  className="w-20 ml-auto flex items-center justify-center gap-1 px-2 py-1.5 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-active)] disabled:opacity-50 transition-colors"
                 >
                   {downloading === archive.id ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />

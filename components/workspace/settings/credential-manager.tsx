@@ -146,18 +146,18 @@ export default function CredentialManager() {
   };
 
   return (
-    <div className="bg-[#1a1a2e] border border-white/10 rounded-2xl">
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
         <div className="flex items-center gap-2">
           <KeyRound className="w-5 h-5 text-blue-400" />
-          <h2 className="text-base font-semibold text-white">구매처 계정 관리</h2>
-          <span className="text-xs text-white/30 ml-1">배송 조회 자동 수집에 사용됩니다</span>
+          <h2 className="text-base font-semibold text-[var(--text-primary)]">구매처 계정 관리</h2>
+          <span className="text-xs text-[var(--text-muted)] ml-1">배송 조회 자동 수집에 사용됩니다</span>
         </div>
         {!showForm && (
           <button
             onClick={() => { resetForm(); setShowForm(true); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-[var(--text-primary)] hover:bg-blue-700 transition-colors"
           >
             <Plus className="w-4 h-4" />
             계정 추가
@@ -183,14 +183,14 @@ export default function CredentialManager() {
 
         {/* 등록 폼 */}
         {showForm && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
-            <h3 className="text-sm font-medium text-white">
+          <div className="bg-[var(--bg-hover)] border border-[var(--border)] rounded-xl p-4 space-y-3">
+            <h3 className="text-sm font-medium text-[var(--text-primary)]">
               {editingId ? "계정 수정" : "새 계정 등록"}
             </h3>
 
             {/* 플랫폼 선택 */}
             <div>
-              <label className="text-xs text-white/50 mb-1.5 block">구매처</label>
+              <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">구매처</label>
               <div className="flex flex-wrap gap-2">
                 {PLATFORMS.map((p) => (
                   <button
@@ -200,7 +200,7 @@ export default function CredentialManager() {
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                       formPlatform === p
                         ? PLATFORM_COLORS[p]
-                        : "bg-white/5 text-white/30 border-white/10 hover:text-white/50"
+                        : "bg-[var(--bg-hover)] text-[var(--text-muted)] border-[var(--border)] hover:text-[var(--text-tertiary)]"
                     } ${editingId ? "opacity-50 cursor-not-allowed" : ""}`}
                   >
                     {PLATFORM_LABELS[p]}
@@ -211,32 +211,32 @@ export default function CredentialManager() {
 
             {/* 별칭 */}
             <div>
-              <label className="text-xs text-white/50 mb-1.5 block">별칭 (선택)</label>
+              <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">별칭 (선택)</label>
               <input
                 type="text"
                 value={formLabel}
                 onChange={(e) => setFormLabel(e.target.value)}
                 placeholder={`예: ${PLATFORM_LABELS[formPlatform]} 메인계정`}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/20 outline-none focus:border-blue-500/50"
+                className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-blue-500/50"
               />
             </div>
 
             {/* 아이디 */}
             <div>
-              <label className="text-xs text-white/50 mb-1.5 block">아이디</label>
+              <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">아이디</label>
               <input
                 type="text"
                 value={formLoginId}
                 onChange={(e) => setFormLoginId(e.target.value)}
                 placeholder="구매처 로그인 아이디"
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/20 outline-none focus:border-blue-500/50"
+                className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-blue-500/50"
               />
             </div>
 
             {/* 비밀번호 */}
             <div>
-              <label className="text-xs text-white/50 mb-1.5 block">
-                비밀번호 {editingId && <span className="text-white/20">(변경 시에만 입력)</span>}
+              <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">
+                비밀번호 {editingId && <span className="text-[var(--text-disabled)]">(변경 시에만 입력)</span>}
               </label>
               <div className="relative">
                 <input
@@ -244,31 +244,31 @@ export default function CredentialManager() {
                   value={formLoginPw}
                   onChange={(e) => setFormLoginPw(e.target.value)}
                   placeholder={editingId ? "새 비밀번호 입력" : "비밀번호 입력"}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 pr-10 text-sm text-white placeholder:text-white/20 outline-none focus:border-blue-500/50"
+                  className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 pr-10 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-blue-500/50"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPw(!showPw)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-tertiary)]"
                 >
                   {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              <p className="text-xs text-white/20 mt-1">비밀번호는 AES-256으로 암호화되어 안전하게 저장됩니다.</p>
+              <p className="text-xs text-[var(--text-disabled)] mt-1">비밀번호는 AES-256으로 암호화되어 안전하게 저장됩니다.</p>
             </div>
 
             {/* 버튼 */}
             <div className="flex gap-2 pt-1">
               <button
                 onClick={resetForm}
-                className="px-4 py-2 rounded-lg text-sm text-white/50 bg-white/5 hover:bg-white/10 transition-colors"
+                className="px-4 py-2 rounded-lg text-sm text-[var(--text-tertiary)] bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors"
               >
                 취소
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving || !formLoginId || (!editingId && !formLoginPw)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-30 transition-colors"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-[var(--text-primary)] hover:bg-blue-700 disabled:opacity-30 transition-colors"
               >
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 {editingId ? "수정" : "등록"}
@@ -280,20 +280,20 @@ export default function CredentialManager() {
         {/* 계정 목록 */}
         {loading ? (
           <div className="flex items-center justify-center py-10">
-            <Loader2 className="w-6 h-6 text-white/30 animate-spin" />
+            <Loader2 className="w-6 h-6 text-[var(--text-muted)] animate-spin" />
           </div>
         ) : credentials.length === 0 && !showForm ? (
           <div className="text-center py-10">
-            <KeyRound className="w-10 h-10 text-white/10 mx-auto mb-3" />
-            <p className="text-sm text-white/30">등록된 구매처 계정이 없습니다.</p>
-            <p className="text-xs text-white/20 mt-1">계정을 등록하면 배송 조회 시 자동으로 로그인합니다.</p>
+            <KeyRound className="w-10 h-10 text-[var(--text-disabled)] mx-auto mb-3" />
+            <p className="text-sm text-[var(--text-muted)]">등록된 구매처 계정이 없습니다.</p>
+            <p className="text-xs text-[var(--text-disabled)] mt-1">계정을 등록하면 배송 조회 시 자동으로 로그인합니다.</p>
           </div>
         ) : (
           <div className="space-y-2">
             {credentials.map((cred) => (
               <div
                 key={cred.id}
-                className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-4 py-3 group hover:border-white/20 transition-colors"
+                className="flex items-center gap-3 bg-[var(--bg-hover)] border border-[var(--border)] rounded-xl px-4 py-3 group hover:border-[var(--border-strong)] transition-colors"
               >
                 {/* 플랫폼 뱃지 */}
                 <span className={`px-2.5 py-1 rounded-md text-xs font-medium border ${PLATFORM_COLORS[cred.platform]}`}>
@@ -303,12 +303,12 @@ export default function CredentialManager() {
                 {/* 정보 */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm text-white font-medium">{cred.login_id}</span>
+                    <span className="text-sm text-[var(--text-primary)] font-medium">{cred.login_id}</span>
                     {cred.label && (
-                      <span className="text-xs text-white/30">({cred.label})</span>
+                      <span className="text-xs text-[var(--text-muted)]">({cred.label})</span>
                     )}
                   </div>
-                  <p className="text-xs text-white/20">
+                  <p className="text-xs text-[var(--text-disabled)]">
                     등록: {new Date(cred.created_at).toLocaleDateString("ko-KR")}
                   </p>
                 </div>
@@ -317,7 +317,7 @@ export default function CredentialManager() {
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => handleEdit(cred)}
-                    className="p-1.5 rounded-lg text-white/30 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                    className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
                     title="수정"
                   >
                     <Pencil className="w-4 h-4" />
@@ -325,7 +325,7 @@ export default function CredentialManager() {
                   <button
                     onClick={() => handleDelete(cred.id)}
                     disabled={deletingId === cred.id}
-                    className="p-1.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
                     title="삭제"
                   >
                     {deletingId === cred.id ? (

@@ -1,26 +1,92 @@
 @import "tailwindcss";
 
+/* Tailwind CSS 4: class 기반 다크모드 활성화 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ═══════════════════════════════════════
+   시맨틱 CSS 변수 — 라이트 모드 (기본)
+   ═══════════════════════════════════════ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* 배경 */
+  --bg-main: #f3f4f6;
+  --bg-sidebar: rgba(255, 255, 255, 0.92);
+  --bg-card: #ffffff;
+  --bg-elevated: #ebedf2;
+  --bg-hover: rgba(0, 0, 0, 0.06);
+  --bg-active: rgba(0, 0, 0, 0.1);
+  --bg-subtle: rgba(0, 0, 0, 0.03);
+  --bg-input: rgba(0, 0, 0, 0.05);
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+
+  /* 텍스트 */
+  --text-primary: #111827;
+  --text-secondary: #374151;
+  --text-tertiary: #4b5563;
+  --text-muted: #6b7280;
+  --text-disabled: #9ca3af;
+  --text-inverse: #ffffff;
+
+  /* 보더 */
+  --border: rgba(0, 0, 0, 0.15);
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.25);
+
+  /* 스피너 */
+  --spinner-track: rgba(0, 0, 0, 0.2);
+  --spinner-head: #111827;
+
+  /* 셀/테이블 관련 */
+  --cell-sticky-bg: #f3f4f6;
+  --table-header-bg: #e5e7eb;
+
+  /* 스크롤바 등 */
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+}
+
+/* ═══════════════════════════════════════
+   다크 모드
+   ═══════════════════════════════════════ */
+.dark {
+  --bg-main: #171717;
+  --bg-sidebar: rgba(26, 26, 46, 0.8);
+  --bg-card: #1e1e2e;
+  --bg-elevated: #2a2a3e;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --bg-active: rgba(255, 255, 255, 0.1);
+  --bg-subtle: rgba(255, 255, 255, 0.03);
+  --bg-input: rgba(255, 255, 255, 0.05);
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --text-tertiary: rgba(255, 255, 255, 0.5);
+  --text-muted: rgba(255, 255, 255, 0.3);
+  --text-disabled: rgba(255, 255, 255, 0.15);
+  --text-inverse: #1a1a2e;
+
+  --border: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-strong: rgba(255, 255, 255, 0.2);
+
+  --spinner-track: rgba(255, 255, 255, 0.3);
+  --spinner-head: #ffffff;
+
+  --cell-sticky-bg: #171717;
+  --table-header-bg: #1e1e2e;
+
+  --scrollbar-thumb: rgba(255, 255, 255, 0.15);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--bg-main);
+  --color-foreground: var(--text-primary);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg-main);
+  color: var(--text-primary);
   font-family: Arial, Helvetica, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }

@@ -186,11 +186,11 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-2xl mx-4 bg-[#1e1e2e] border border-white/10 rounded-2xl shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="text-lg font-semibold text-white">엑셀 가져오기</h2>
-          <button onClick={onClose} className="p-1 text-white/40 hover:text-white">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--bg-overlay)] backdrop-blur-sm">
+      <div className="w-full max-w-2xl mx-4 bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">엑셀 가져오기</h2>
+          <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -200,12 +200,12 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <FileSpreadsheet className="w-5 h-5 text-green-400" />
-                <span className="text-white text-sm">{fileName}</span>
+                <span className="text-[var(--text-primary)] text-sm">{fileName}</span>
                 {pendingFile.isLegacy && (
                   <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded">기존 발주서</span>
                 )}
               </div>
-              <p className="text-white/60 text-sm">여러 시트가 감지되었습니다. 가져올 시트를 선택하세요.</p>
+              <p className="text-[var(--text-tertiary)] text-sm">여러 시트가 감지되었습니다. 가져올 시트를 선택하세요.</p>
               <div className="space-y-2">
                 {pendingFile.sheetNames.map((name, i) => (
                   <button
@@ -214,12 +214,12 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                     disabled={pendingFile.counts[i] === 0}
                     className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-colors ${
                       pendingFile.counts[i] > 0
-                        ? "border-white/10 bg-white/5 hover:bg-white/10 text-white cursor-pointer"
-                        : "border-white/5 bg-white/[0.02] text-white/20 cursor-not-allowed"
+                        ? "border-[var(--border)] bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] text-[var(--text-primary)] cursor-pointer"
+                        : "border-[var(--border-subtle)] bg-[var(--bg-subtle)] text-[var(--text-disabled)] cursor-not-allowed"
                     }`}
                   >
                     <span className="text-sm font-medium">{name}</span>
-                    <span className={`text-xs ${pendingFile.counts[i] > 0 ? "text-white/50" : "text-white/20"}`}>
+                    <span className={`text-xs ${pendingFile.counts[i] > 0 ? "text-[var(--text-tertiary)]" : "text-[var(--text-disabled)]"}`}>
                       {pendingFile.counts[i]}건
                     </span>
                   </button>
@@ -241,12 +241,12 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                 onClick={() => fileRef.current?.click()}
                 className={`
                   flex flex-col items-center justify-center py-16 border-2 border-dashed rounded-xl cursor-pointer transition-colors
-                  ${dragOver ? "border-blue-400 bg-blue-500/10" : "border-white/20 hover:border-white/40 bg-white/5"}
+                  ${dragOver ? "border-blue-400 bg-blue-500/10" : "border-[var(--border-strong)] hover:border-[var(--border-strong)] bg-[var(--bg-hover)]"}
                 `}
               >
-                <Upload className="w-10 h-10 text-white/40 mb-3" />
-                <p className="text-white/60 text-sm">엑셀 파일을 드래그하거나 클릭해서 선택</p>
-                <p className="text-white/30 text-xs mt-1">플레이오토 양식 · 기존 발주서 양식 자동 인식 (.xlsx, .xls, .csv)</p>
+                <Upload className="w-10 h-10 text-[var(--text-muted)] mb-3" />
+                <p className="text-[var(--text-tertiary)] text-sm">엑셀 파일을 드래그하거나 클릭해서 선택</p>
+                <p className="text-[var(--text-muted)] text-xs mt-1">플레이오토 양식 · 기존 발주서 양식 자동 인식 (.xlsx, .xls, .csv)</p>
               </div>
               <input
                 ref={fileRef}
@@ -263,8 +263,8 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
             <>
               <div className="flex items-center gap-3 mb-4 flex-wrap">
                 <FileSpreadsheet className="w-5 h-5 text-green-400" />
-                <span className="text-white text-sm">{fileName}</span>
-                <span className="text-white/40 text-sm">({parsedOrders.length}건)</span>
+                <span className="text-[var(--text-primary)] text-sm">{fileName}</span>
+                <span className="text-[var(--text-muted)] text-sm">({parsedOrders.length}건)</span>
                 {isLegacy && (
                   <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded">기존 발주서</span>
                 )}
@@ -273,10 +273,10 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                   <select
                     value={selectedSheet}
                     onChange={(e) => handleSheetChange(Number(e.target.value))}
-                    className="ml-auto px-2 py-1 bg-white/5 border border-white/10 rounded text-xs text-white outline-none"
+                    className="ml-auto px-2 py-1 bg-[var(--bg-hover)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] outline-none"
                   >
                     {sheetNames.map((name, i) => (
-                      <option key={i} value={i} className="bg-[#2a2a3e] text-white">
+                      <option key={i} value={i} className="bg-[var(--bg-elevated)] text-[var(--text-primary)]">
                         {name}{sheetCounts[i] !== undefined ? ` (${sheetCounts[i]}건)` : ""}
                       </option>
                     ))}
@@ -294,12 +294,12 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <label className="text-white/50 text-xs">주문 날짜:</label>
+                    <label className="text-[var(--text-tertiary)] text-xs">주문 날짜:</label>
                     <input
                       type="date"
                       value={manualDate}
                       onChange={(e) => setManualDate(e.target.value)}
-                      className="px-2 py-1 bg-white/5 border border-white/10 rounded text-xs text-white outline-none"
+                      className="px-2 py-1 bg-[var(--bg-hover)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] outline-none"
                     />
                     {manualDate && (
                       <span className="text-green-400 text-xs">
@@ -310,9 +310,9 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                 </div>
               )}
 
-              <div className="max-h-64 overflow-auto rounded-lg border border-white/10">
-                <table className="w-full text-xs text-white/70">
-                  <thead className="bg-white/5 sticky top-0">
+              <div className="max-h-64 overflow-auto rounded-lg border border-[var(--border)]">
+                <table className="w-full text-xs text-[var(--text-secondary)]">
+                  <thead className="bg-[var(--bg-hover)] sticky top-0">
                     <tr>
                       <th className="px-3 py-2 text-left">#</th>
                       <th className="px-3 py-2 text-left">묶음번호</th>
@@ -331,7 +331,7 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                   </thead>
                   <tbody>
                     {parsedOrders.slice(0, 20).map((order, i) => (
-                      <tr key={i} className="border-t border-white/5">
+                      <tr key={i} className="border-t border-[var(--border-subtle)]">
                         <td className="px-3 py-1.5">{i + 1}</td>
                         <td className="px-3 py-1.5">{order.bundle_no ?? "-"}</td>
                         <td className="px-3 py-1.5">
@@ -357,7 +357,7 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                   </tbody>
                 </table>
                 {parsedOrders.length > 20 && (
-                  <p className="text-center text-white/30 text-xs py-2">... 외 {parsedOrders.length - 20}건</p>
+                  <p className="text-center text-[var(--text-muted)] text-xs py-2">... 외 {parsedOrders.length - 20}건</p>
                 )}
               </div>
             </>
@@ -367,17 +367,17 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
         </div>
 
         {parsedOrders && parsedOrders.length > 0 && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border)]">
             <button
               onClick={() => { setParsedOrders(null); setFileName(""); setRawFile(null); setSheetNames([]); setManualDate(""); }}
-              className="px-4 py-2 text-sm text-white/60 hover:text-white transition-colors"
+              className="px-4 py-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
             >
               다시 선택
             </button>
             <button
               onClick={handleConfirm}
               disabled={importing || (dateInfo.missingCount > 0 && !manualDate)}
-              className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+              className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-[var(--text-primary)] text-sm font-medium rounded-lg transition-colors"
             >
               <Check className="w-4 h-4" />
               {importing ? "가져오는 중..." : `${parsedOrders.length}건 가져오기`}

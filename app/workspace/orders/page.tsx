@@ -248,7 +248,7 @@ export default function OrdersPage() {
         <button
           onClick={() => setSelectedMonth(null)}
           className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${
-            !selectedMonth ? "bg-blue-600/20 text-blue-400" : "text-white/40 hover:text-white hover:bg-white/5"
+            !selectedMonth ? "bg-blue-600/20 text-blue-400" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
           }`}
         >
           전체
@@ -263,8 +263,8 @@ export default function OrdersPage() {
                 selectedMonth === m
                   ? "bg-blue-600/20 text-blue-400"
                   : hasData
-                    ? "text-white/60 hover:text-white hover:bg-white/5"
-                    : "text-white/20 hover:text-white/40 hover:bg-white/5"
+                    ? "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                    : "text-[var(--text-disabled)] hover:text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
               }`}
             >
               {m.slice(5)}월
@@ -274,19 +274,19 @@ export default function OrdersPage() {
         <div className="relative">
           <button
             onClick={() => setShowMonthPicker(!showMonthPicker)}
-            className="p-1.5 text-white/30 hover:text-white/60"
+            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-tertiary)]"
           >
             <Calendar className="w-4 h-4" />
           </button>
           {showMonthPicker && (
-            <div className="absolute top-full left-0 mt-1 z-50 bg-[#1e1e2e] border border-white/10 rounded-lg shadow-xl p-2">
+            <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl p-2">
               <input
                 type="month"
                 onChange={(e) => {
                   if (e.target.value) setSelectedMonth(e.target.value);
                   setShowMonthPicker(false);
                 }}
-                className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none"
+                className="bg-[var(--bg-hover)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--text-primary)] outline-none"
               />
             </div>
           )}
@@ -296,16 +296,16 @@ export default function OrdersPage() {
       {/* 액션 바 */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-48 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={handleSearchKeyDown}
             placeholder="검색어 입력 후 Enter..."
-            className="w-full pl-9 pr-8 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-white/30 outline-none focus:border-blue-500/50"
+            className="w-full pl-9 pr-8 py-2 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-blue-500/50"
           />
           {search && (
-            <button onClick={handleSearchClear} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white">
+            <button onClick={handleSearchClear} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
               <span className="text-xs">✕</span>
             </button>
           )}
@@ -314,7 +314,7 @@ export default function OrdersPage() {
         <select
           value={selectedMarketplace || "전체"}
           onChange={(e) => setSelectedMarketplace(e.target.value === "전체" ? null : e.target.value)}
-          className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white outline-none"
+          className="px-3 py-2 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] outline-none"
         >
           {MARKETPLACE_OPTIONS.map((opt) => (
             <option key={opt} value={opt}>{opt}</option>
@@ -335,7 +335,7 @@ export default function OrdersPage() {
           <button
             onClick={() => setShowAutoPurchase(true)}
             disabled={selectedIds.size === 0}
-            className="flex items-center gap-1.5 px-3 py-2 bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 disabled:opacity-30 disabled:cursor-not-allowed text-sm rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 bg-orange-500 text-white border border-orange-600 hover:bg-orange-600 dark:bg-orange-600 dark:text-white dark:border-orange-700 dark:hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium rounded-lg transition-colors"
           >
             <ShoppingCart className="w-4 h-4" />
             구매 자동화{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
@@ -343,24 +343,24 @@ export default function OrdersPage() {
           <div className="relative" ref={exportMenuRef}>
             <button
               onClick={() => setShowExportMenu(!showExportMenu)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 text-white/60 hover:text-white text-sm rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-2 bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-sm rounded-lg transition-colors"
             >
               <Download className="w-4 h-4" />
               내보내기{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
               <ChevronDown className="w-3.5 h-3.5" />
             </button>
             {showExportMenu && (
-              <div className="absolute top-full right-0 mt-1 z-50 bg-[#1e1e2e] border border-white/10 rounded-lg shadow-xl py-1 min-w-44">
+              <div className="absolute top-full right-0 mt-1 z-50 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl py-1 min-w-44">
                 <button
                   onClick={handleExportOrder}
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white transition-colors"
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-blue-400" />
                   발주서 양식
                 </button>
                 <button
                   onClick={handleExportPlayAuto}
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white transition-colors"
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                 >
                   <Truck className="w-4 h-4 text-purple-400" />
                   플레이오토 운송장
@@ -370,14 +370,14 @@ export default function OrdersPage() {
           </div>
           <button
             onClick={() => setShowTrackingCollect(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 text-sm rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200 dark:bg-purple-600/20 dark:text-purple-400 dark:border-transparent dark:hover:bg-purple-600/30 text-sm rounded-lg transition-colors"
           >
             <Truck className="w-4 h-4" />
             배송조회 수집
           </button>
           <button
             onClick={() => setShowImport(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-green-600/20 text-green-400 hover:bg-green-600/30 text-sm rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 bg-green-100 text-green-700 border border-green-200 hover:bg-green-200 dark:bg-green-600/20 dark:text-green-400 dark:border-transparent dark:hover:bg-green-600/30 text-sm rounded-lg transition-colors"
           >
             <FileSpreadsheet className="w-4 h-4" />
             엑셀 가져오기
@@ -393,18 +393,18 @@ export default function OrdersPage() {
       </div>
 
       {/* 통계 */}
-      <div className="flex items-center gap-6 text-xs text-white/40">
-        <span>총 <strong className="text-white/70">{stats.count}</strong>건</span>
-        <span>매출 <strong className="text-white/70">{stats.totalRevenue.toLocaleString()}</strong>원</span>
+      <div className="flex items-center gap-6 text-xs text-[var(--text-muted)]">
+        <span>총 <strong className="text-[var(--text-secondary)]">{stats.count}</strong>건</span>
+        <span>매출 <strong className="text-[var(--text-secondary)]">{stats.totalRevenue.toLocaleString()}</strong>원</span>
         {Object.keys(stats.marketplaceRevenue).length > 0 && (
           <>
-            <span className="text-white/20">|</span>
+            <span className="text-[var(--text-disabled)]">|</span>
             {Object.entries(stats.marketplaceRevenue)
               .sort((a, b) => b[1] - a[1])
               .map(([name, revenue]) => (
-                <span key={name}>{name} <strong className="text-white/70">{revenue.toLocaleString()}</strong>원</span>
+                <span key={name}>{name} <strong className="text-[var(--text-secondary)]">{revenue.toLocaleString()}</strong>원</span>
               ))}
-            <span className="text-white/20">|</span>
+            <span className="text-[var(--text-disabled)]">|</span>
           </>
         )}
         <span>

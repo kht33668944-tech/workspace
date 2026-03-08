@@ -322,16 +322,16 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 z-40" onClick={onClose} />
+      <div className="fixed inset-0 bg-[var(--bg-overlay)] z-40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0">
             <div className="flex items-center gap-2">
               <Truck className="w-5 h-5 text-blue-400" />
-              <h2 className="text-base font-semibold text-white">배송정보 자동 수집</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">배송정보 자동 수집</h2>
             </div>
-            <button onClick={onClose} className="p-1 text-white/40 hover:text-white">
+            <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -342,7 +342,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
               <>
                 {credLoading ? (
                   <div className="flex items-center justify-center py-6">
-                    <Loader2 className="w-5 h-5 text-white/30 animate-spin" />
+                    <Loader2 className="w-5 h-5 text-[var(--text-muted)] animate-spin" />
                   </div>
                 ) : !manualMode && autoCollectGroups.length > 0 ? (
                   /* === 자동 모드 === */
@@ -352,7 +352,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                         <KeyRound className="w-4 h-4 text-blue-400" />
                         <span className="text-sm font-medium text-blue-400">등록된 계정으로 자동 수집</span>
                       </div>
-                      <p className="text-xs text-white/40">
+                      <p className="text-xs text-[var(--text-muted)]">
                         설정에 등록된 구매처 계정으로 자동 로그인하여 배송정보를 수집합니다.
                       </p>
                     </div>
@@ -360,7 +360,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                     {/* 수집 대상 플랫폼 목록 */}
                     <div className="space-y-2">
                       {autoCollectGroups.map(({ credential, platform: p, targets }) => (
-                        <div key={credential.id} className="bg-white/5 border border-white/10 rounded-lg p-3">
+                        <div key={credential.id} className="bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg p-3">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium border ${
@@ -372,12 +372,12 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                               }`}>
                                 {PLATFORM_LABELS[p]}
                               </span>
-                              <span className="text-sm text-white">{credential.login_id}</span>
+                              <span className="text-sm text-[var(--text-primary)]">{credential.login_id}</span>
                               {credential.label && (
-                                <span className="text-xs text-white/30">({credential.label})</span>
+                                <span className="text-xs text-[var(--text-muted)]">({credential.label})</span>
                               )}
                             </div>
-                            <span className="text-sm font-medium text-white">{targets.length}건</span>
+                            <span className="text-sm font-medium text-[var(--text-primary)]">{targets.length}건</span>
                           </div>
                         </div>
                       ))}
@@ -401,7 +401,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                             계정 등록
                           </Link>
                         </div>
-                        <p className="text-xs text-white/20 mt-1">
+                        <p className="text-xs text-[var(--text-disabled)] mt-1">
                           주문의 구매 아이디와 일치하는 계정이 없습니다.
                         </p>
                       </div>
@@ -409,7 +409,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
 
                     <button
                       onClick={() => setManualMode(true)}
-                      className="text-xs text-white/20 hover:text-white/40 transition-colors"
+                      className="text-xs text-[var(--text-disabled)] hover:text-[var(--text-muted)] transition-colors"
                     >
                       수동으로 로그인 정보 입력하기
                     </button>
@@ -428,10 +428,10 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                     )}
 
                     {credentials.length === 0 && (
-                      <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                      <div className="bg-[var(--bg-hover)] border border-[var(--border)] rounded-xl p-3">
                         <div className="flex items-center gap-2">
-                          <Settings className="w-4 h-4 text-white/30" />
-                          <span className="text-xs text-white/40">
+                          <Settings className="w-4 h-4 text-[var(--text-muted)]" />
+                          <span className="text-xs text-[var(--text-muted)]">
                             구매처 계정을 등록하면 원클릭 자동 수집이 가능합니다.
                           </span>
                           <Link
@@ -447,7 +447,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
 
                     {/* 플랫폼 선택 */}
                     <div>
-                      <label className="text-xs text-white/50 mb-1.5 block">구매처</label>
+                      <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">구매처</label>
                       <div className="flex gap-2">
                         {SUPPORTED_PLATFORMS.map((p) => (
                           <button
@@ -460,7 +460,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                                   : p === "auction"
                                     ? "bg-orange-600/20 text-orange-400 border border-orange-500/30"
                                     : "bg-cyan-600/20 text-cyan-400 border border-cyan-500/30"
-                                : "bg-white/5 text-white/40 border border-white/10 hover:text-white/60"
+                                : "bg-[var(--bg-hover)] text-[var(--text-muted)] border border-[var(--border)] hover:text-[var(--text-tertiary)]"
                             }`}
                           >
                             {PLATFORM_LABELS[p]}
@@ -472,17 +472,17 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                     {/* 로그인 정보 */}
                     <div className="space-y-3">
                       <div>
-                        <label className="text-xs text-white/50 mb-1.5 block">{PLATFORM_LABELS[platform]} 아이디</label>
+                        <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">{PLATFORM_LABELS[platform]} 아이디</label>
                         <input
                           type="text"
                           value={loginId}
                           onChange={(e) => setLoginId(e.target.value)}
                           placeholder="아이디 입력"
-                          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/20 outline-none focus:border-blue-500/50"
+                          className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-blue-500/50"
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-white/50 mb-1.5 block">비밀번호</label>
+                        <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">비밀번호</label>
                         <div className="relative">
                           <input
                             type={showPw ? "text" : "password"}
@@ -490,12 +490,12 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                             onChange={(e) => setLoginPw(e.target.value)}
                             placeholder="비밀번호 입력"
                             onKeyDown={(e) => e.key === "Enter" && handleManualCollect()}
-                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 pr-10 text-sm text-white placeholder:text-white/20 outline-none focus:border-blue-500/50"
+                            className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 pr-10 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-blue-500/50"
                           />
                           <button
                             type="button"
                             onClick={() => setShowPw(!showPw)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-tertiary)]"
                           >
                             {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
@@ -504,12 +504,12 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                     </div>
 
                     {/* 수집 대상 */}
-                    <div className="bg-white/5 rounded-lg p-3">
+                    <div className="bg-[var(--bg-hover)] rounded-lg p-3">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs text-white/50">수집 대상</span>
-                        <span className="text-sm font-medium text-white">{manualTargets.length}건</span>
+                        <span className="text-xs text-[var(--text-tertiary)]">수집 대상</span>
+                        <span className="text-sm font-medium text-[var(--text-primary)]">{manualTargets.length}건</span>
                       </div>
-                      <p className="text-xs text-white/30">
+                      <p className="text-xs text-[var(--text-muted)]">
                         구매처가 &quot;{PLATFORM_LABELS[platform]}&quot;이고 운송장이 비어있는 주문
                       </p>
                       {manualTargets.length > 0 && (
@@ -517,11 +517,11 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                           {manualTargets.slice(0, 10).map((o) => (
                             <div key={o.id} className="flex items-center gap-2 text-xs">
                               <span className="text-blue-400 font-mono">{o.purchase_order_no}</span>
-                              <span className="text-white/30 truncate flex-1">{o.product_name}</span>
+                              <span className="text-[var(--text-muted)] truncate flex-1">{o.product_name}</span>
                             </div>
                           ))}
                           {manualTargets.length > 10 && (
-                            <p className="text-xs text-white/20">외 {manualTargets.length - 10}건...</p>
+                            <p className="text-xs text-[var(--text-disabled)]">외 {manualTargets.length - 10}건...</p>
                           )}
                         </div>
                       )}
@@ -541,8 +541,8 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
             {step === "collecting" && (
               <div className="flex flex-col items-center justify-center py-10 gap-4">
                 <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
-                <p className="text-sm text-white/60">{progress}</p>
-                <p className="text-xs text-white/30">{progressDetail || "잠시만 기다려주세요..."}</p>
+                <p className="text-sm text-[var(--text-tertiary)]">{progress}</p>
+                <p className="text-xs text-[var(--text-muted)]">{progressDetail || "잠시만 기다려주세요..."}</p>
               </div>
             )}
 
@@ -567,14 +567,14 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                 {/* 성공 목록 */}
                 {mergedResult.success.length > 0 && (
                   <div>
-                    <h3 className="text-xs font-medium text-white/50 mb-2">수집 완료</h3>
+                    <h3 className="text-xs font-medium text-[var(--text-tertiary)] mb-2">수집 완료</h3>
                     <div className="space-y-1.5 max-h-40 overflow-y-auto">
                       {mergedResult.success.map((t: TrackingInfo) => (
-                        <div key={t.orderNo} className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2">
+                        <div key={t.orderNo} className="flex items-center gap-2 bg-[var(--bg-hover)] rounded-lg px-3 py-2">
                           <CheckCircle className="w-3.5 h-3.5 text-green-400 shrink-0" />
                           <span className="text-xs text-blue-400 font-mono">{t.orderNo}</span>
-                          <span className="text-xs text-white/50">{t.courier}</span>
-                          <span className="text-xs text-white/70 font-mono">{t.trackingNo}</span>
+                          <span className="text-xs text-[var(--text-tertiary)]">{t.courier}</span>
+                          <span className="text-xs text-[var(--text-secondary)] font-mono">{t.trackingNo}</span>
                         </div>
                       ))}
                     </div>
@@ -584,19 +584,19 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                 {/* 실패/미발견 목록 */}
                 {(mergedResult.failed.length > 0 || mergedResult.notFound.length > 0) && (
                   <div>
-                    <h3 className="text-xs font-medium text-white/50 mb-2">실패/미발견</h3>
+                    <h3 className="text-xs font-medium text-[var(--text-tertiary)] mb-2">실패/미발견</h3>
                     <div className="space-y-1 max-h-28 overflow-y-auto">
                       {mergedResult.failed.map((f) => (
                         <div key={f.orderNo} className="flex items-center gap-2 text-xs">
                           <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
-                          <span className="text-white/50 font-mono">{f.orderNo}</span>
+                          <span className="text-[var(--text-tertiary)] font-mono">{f.orderNo}</span>
                           <span className="text-red-400/60">{f.reason}</span>
                         </div>
                       ))}
                       {mergedResult.notFound.map((no) => (
                         <div key={no} className="flex items-center gap-2 text-xs">
                           <AlertCircle className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
-                          <span className="text-white/50 font-mono">{no}</span>
+                          <span className="text-[var(--text-tertiary)] font-mono">{no}</span>
                           <span className="text-yellow-400/60">구매처에서 찾을 수 없음</span>
                         </div>
                       ))}
@@ -607,7 +607,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                 {/* 엑셀 내보내기 */}
                 {collectedOrders.length > 0 && (
                   <div>
-                    <h3 className="text-xs font-medium text-white/50 mb-2">엑셀 내보내기</h3>
+                    <h3 className="text-xs font-medium text-[var(--text-tertiary)] mb-2">엑셀 내보내기</h3>
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleExport("order")}
@@ -626,7 +626,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                         {exporting === "playauto" ? "저장 중..." : "플레이오토 운송장"}
                       </button>
                     </div>
-                    <p className="text-xs text-white/20 mt-1.5">다운로드와 동시에 보관함에 자동 저장됩니다</p>
+                    <p className="text-xs text-[var(--text-disabled)] mt-1.5">다운로드와 동시에 보관함에 자동 저장됩니다</p>
                   </div>
                 )}
               </>
@@ -634,17 +634,17 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
           </div>
 
           {/* Footer */}
-          <div className="px-6 py-4 border-t border-white/10 shrink-0 flex items-center gap-2">
+          <div className="px-6 py-4 border-t border-[var(--border)] shrink-0 flex items-center gap-2">
             {step === "config" && (
               <>
-                <button onClick={onClose} className="flex-1 px-4 py-2 rounded-lg text-sm text-white/50 bg-white/5 hover:bg-white/10 transition-colors">
+                <button onClick={onClose} className="flex-1 px-4 py-2 rounded-lg text-sm text-[var(--text-tertiary)] bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors">
                   취소
                 </button>
                 {!manualMode && autoCollectGroups.length > 0 ? (
                   <button
                     onClick={handleAutoCollect}
                     disabled={totalAutoTargets === 0}
-                    className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-30 transition-colors"
+                    className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-[var(--text-primary)] hover:bg-blue-700 disabled:opacity-30 transition-colors"
                   >
                     자동 수집 ({totalAutoTargets}건)
                   </button>
@@ -652,7 +652,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                   <button
                     onClick={handleManualCollect}
                     disabled={!loginId || !loginPw || manualTargets.length === 0}
-                    className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-30 transition-colors"
+                    className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-[var(--text-primary)] hover:bg-blue-700 disabled:opacity-30 transition-colors"
                   >
                     수집 시작 ({manualTargets.length}건)
                   </button>
@@ -661,14 +661,14 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
             )}
             {step === "result" && (
               <>
-                <button onClick={onClose} className="flex-1 px-4 py-2 rounded-lg text-sm text-white/50 bg-white/5 hover:bg-white/10 transition-colors">
+                <button onClick={onClose} className="flex-1 px-4 py-2 rounded-lg text-sm text-[var(--text-tertiary)] bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors">
                   닫기
                 </button>
                 {mergedResult && mergedResult.success.length > 0 && (
                   <button
                     onClick={handleApply}
                     disabled={applying}
-                    className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+                    className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-green-600 text-[var(--text-primary)] hover:bg-green-700 disabled:opacity-50 transition-colors"
                   >
                     {applying ? "적용 중..." : `발주서에 적용 (${mergedResult.success.length}건)`}
                   </button>

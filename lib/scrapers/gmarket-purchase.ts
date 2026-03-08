@@ -50,10 +50,26 @@ export async function purchaseGmarket(
     console.log("[gmarket-purchase] 로그인 성공");
 
     // 2. 각 주문건 순차 처리
+    let activePage = page;
     for (const order of orders) {
       onProgress?.(order.orderId, "processing", "구매 진행 중...");
       try {
-        const { purchaseOrderNo, cost, paymentMethod } = await processSingleOrder(page, context, order, paymentPin);
+        // 페이지 상태 확인 및 복구
+        if (activePage.isClosed()) {
+          console.log("[gmarket-purchase] 주문 시작 전 페이지 닫힘 감지, 복구...");
+          activePage = await recoverPage(context, "about:blank");
+        }
+
+        // 이전 주문의 다이얼로그/팝업 정리
+        try {
+          await activePage.evaluate(() => {
+            document.querySelectorAll('.box__layer, [class*="popup"], [class*="modal"]').forEach(el => {
+              (el as HTMLElement).style.display = "none";
+            });
+          });
+        } catch { /* 무시 */ }
+
+        const { purchaseOrderNo, cost, paymentMethod } = await processSingleOrder(activePage, context, order, paymentPin);
         result.success.push({ orderId: order.orderId, purchaseOrderNo, cost, paymentMethod });
         onProgress?.(order.orderId, "success", `주문번호: ${purchaseOrderNo}${cost ? ` (원가: ${cost.toLocaleString()}원)` : ""}${paymentMethod ? ` [${paymentMethod}]` : ""}`, purchaseOrderNo);
         console.log(`[gmarket-purchase] 주문 성공: ${order.orderId} → ${purchaseOrderNo} (원가: ${cost ?? "미확인"}, 카드: ${paymentMethod ?? "미확인"})`);
@@ -62,6 +78,30 @@ export async function purchaseGmarket(
         result.failed.push({ orderId: order.orderId, reason });
         onProgress?.(order.orderId, "failed", reason);
         console.error(`[gmarket-purchase] 주문 실패: ${order.orderId}`, reason);
+
+        // 실패 후 페이지 상태 복구 시도
+        try {
+          if (activePage.isClosed()) {
+            activePage = await recoverPage(context, "about:blank");
+          } else {
+            // 불필요한 탭 닫기 (메인 페이지만 유지)
+            const pages = context.pages();
+            for (const p of pages) {
+              if (p !== activePage && !p.isClosed()) {
+                await p.close().catch(() => {});
+              }
+            }
+          }
+        } catch {
+          console.log("[gmarket-purchase] 실패 후 페이지 복구 불가, 새 페이지 생성 시도");
+          try {
+            activePage = await context.newPage();
+          } catch {
+            console.error("[gmarket-purchase] 브라우저 컨텍스트 사용 불가, 남은 주문 중단");
+            // 남은 주문 모두 실패 처리
+            break;
+          }
+        }
       }
     }
   } catch (err) {
@@ -169,18 +209,20 @@ async function processSingleOrder(
 
 /** 페이지가 닫혔을 때 context에서 활성 페이지를 찾거나 새로 생성 */
 async function recoverPage(context: BrowserContext, fallbackUrl: string): Promise<Page> {
-  const pages = context.pages();
-  if (pages.length > 0) {
-    // 가장 최근 페이지 사용
-    const lastPage = pages[pages.length - 1];
+  // 닫히지 않은 페이지 필터링
+  const activePages = context.pages().filter(p => !p.isClosed());
+  if (activePages.length > 0) {
+    const lastPage = activePages[activePages.length - 1];
     console.log(`[gmarket-purchase] 기존 페이지 발견: ${lastPage.url()}`);
     return lastPage;
   }
   // 페이지가 하나도 없으면 새로 생성
   console.log("[gmarket-purchase] 새 페이지 생성");
   const newPage = await context.newPage();
-  await newPage.goto(fallbackUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-  await newPage.waitForTimeout(2000);
+  if (fallbackUrl && fallbackUrl !== "about:blank") {
+    await newPage.goto(fallbackUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await newPage.waitForTimeout(2000);
+  }
   return newPage;
 }
 
@@ -409,21 +451,87 @@ async function changeShippingAddress(page: Page, order: PurchaseOrderInfo) {
     await page.waitForTimeout(2000);
 
     // 8. 검색 결과에서 가장 일치하는 항목 클릭
-    const resultButtons = addrFrame.locator("ul > li > button:nth-child(2)");
-    const resultCount = await resultButtons.count();
+    let resultButtons = addrFrame.locator("ul > li > button:nth-child(2)");
+    let resultCount = await resultButtons.count();
+
+    // 검색 결과가 없으면 키워드를 줄여서 재시도
+    if (resultCount === 0) {
+      // 번지 제거 후 도로명만으로 재검색 (예: "상신하길로 295" → "상신하길로")
+      const roadOnly = searchKeyword.replace(/\s+\d[\d-]*$/, "").trim();
+      if (roadOnly && roadOnly !== searchKeyword) {
+        console.log(`[gmarket-purchase] 주소 재검색 (도로명만): "${roadOnly}"`);
+        await addrInput.fill(roadOnly);
+        await searchBtn.click();
+        await page.waitForTimeout(2000);
+        resultButtons = addrFrame.locator("ul > li > button:nth-child(2)");
+        resultCount = await resultButtons.count();
+      }
+    }
+
+    // 그래도 없으면 읍/면/동 포함하여 재검색
+    if (resultCount === 0) {
+      const addrParts = order.address.replace(/^\[?\d{5}\]?\s*/, "").replace(/\(.*?\)/g, "").trim().split(/\s+/);
+      for (let i = 0; i < addrParts.length; i++) {
+        if (addrParts[i].match(/(동|읍|면)\d*$/)) {
+          const areaKeyword = addrParts.slice(i).join(" ");
+          if (areaKeyword !== searchKeyword) {
+            console.log(`[gmarket-purchase] 주소 재검색 (동/읍/면 포함): "${areaKeyword}"`);
+            await addrInput.fill(areaKeyword);
+            await searchBtn.click();
+            await page.waitForTimeout(2000);
+            resultButtons = addrFrame.locator("ul > li > button:nth-child(2)");
+            resultCount = await resultButtons.count();
+          }
+          break;
+        }
+      }
+    }
+
     if (resultCount === 0) {
       throw new Error(`주소 검색 결과 없음: "${searchKeyword}"`);
     }
 
-    // 주소 텍스트가 가장 일치하는 결과 찾기
-    let bestIdx = 0;
-    for (let i = 0; i < Math.min(resultCount, 20); i++) {
-      const btnText = await resultButtons.nth(i).textContent() || "";
-      // 우편번호가 일치하면 최우선
-      if (order.postalCode && btnText.includes(order.postalCode)) {
-        bestIdx = i;
-        break;
+    // 우편번호가 일치하는 결과를 반드시 찾기
+    let bestIdx = -1;
+    if (order.postalCode) {
+      for (let i = 0; i < Math.min(resultCount, 30); i++) {
+        const btnText = await resultButtons.nth(i).textContent() || "";
+        if (btnText.includes(order.postalCode)) {
+          bestIdx = i;
+          console.log(`[gmarket-purchase] 우편번호 ${order.postalCode} 일치 결과 발견 (index: ${i})`);
+          break;
+        }
       }
+    }
+
+    // 우편번호 매칭 실패 시: 검색어를 변경하여 재시도
+    if (bestIdx === -1 && order.postalCode) {
+      // 우편번호 자체로 직접 검색
+      console.log(`[gmarket-purchase] 우편번호로 직접 검색: "${order.postalCode}"`);
+      await addrInput.fill(order.postalCode);
+      await searchBtn.click();
+      await page.waitForTimeout(2000);
+      resultButtons = addrFrame.locator("ul > li > button:nth-child(2)");
+      resultCount = await resultButtons.count();
+
+      for (let i = 0; i < Math.min(resultCount, 30); i++) {
+        const btnText = await resultButtons.nth(i).textContent() || "";
+        if (btnText.includes(order.postalCode)) {
+          bestIdx = i;
+          console.log(`[gmarket-purchase] 우편번호 검색으로 일치 결과 발견 (index: ${i})`);
+          break;
+        }
+      }
+    }
+
+    // 그래도 못 찾으면 에러 (잘못된 주소를 선택하는 것보다 실패가 안전)
+    if (bestIdx === -1) {
+      if (order.postalCode) {
+        throw new Error(`우편번호 ${order.postalCode}에 일치하는 주소를 찾을 수 없습니다 (검색어: "${searchKeyword}")`);
+      }
+      // 우편번호가 없는 경우에만 첫 번째 결과 사용 (fallback)
+      console.warn("[gmarket-purchase] 우편번호 정보 없음, 첫 번째 검색 결과 사용");
+      bestIdx = 0;
     }
 
     await resultButtons.nth(bestIdx).click();
@@ -524,18 +632,23 @@ async function changeShippingAddress(page: Page, order: PurchaseOrderInfo) {
   }
 }
 
-/** 주소에서 검색 키워드 추출 (도로명 또는 동/읍/면 이름) */
+/** 주소에서 검색 키워드 추출 (도로명 우선, 동/읍/면 fallback) */
 function extractSearchKeyword(address: string): string {
   // 우편번호 제거
   let addr = address.replace(/^\[?\d{5}\]?\s*/, "").trim();
   // 괄호 안 내용 제거
   addr = addr.replace(/\(.*?\)/g, "").trim();
-  // "시/도 구/군" 뒤의 도로명 또는 동이름 추출
-  // 예: "경기도 수원시 팔달구 월드컵로357번길 11-16" → "월드컵로357번길 11-16"
   const parts = addr.split(/\s+/);
-  // 도로명(~로, ~길) 또는 동(~동, ~읍, ~면)이 포함된 부분부터
+
+  // 1순위: 도로명(~로, ~길) + 이후 번지 (가장 정확한 검색 결과)
   for (let i = 0; i < parts.length; i++) {
-    if (parts[i].match(/(로|길|동|읍|면)\d*$/)) {
+    if (parts[i].match(/(로|길)\d*$/)) {
+      return parts.slice(i).join(" ");
+    }
+  }
+  // 2순위: 동/읍/면 이름 + 이후
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i].match(/(동|읍|면)\d*$/)) {
       return parts.slice(i).join(" ");
     }
   }

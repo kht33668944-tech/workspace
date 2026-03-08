@@ -32,12 +32,12 @@ export default function Header() {
   }, []);
 
   return (
-    <header className="h-16 flex items-center justify-between px-6 border-b border-white/10 dark:border-white/10 bg-transparent">
-      <h1 className="text-xl font-semibold text-white dark:text-white">{title}</h1>
+    <header className="h-16 flex items-center justify-between px-6 border-b border-[var(--border)] bg-transparent">
+      <h1 className="text-xl font-semibold text-[var(--text-primary)]">{title}</h1>
 
       <div className="flex items-center gap-2">
         {/* Notification bell (UI only) */}
-        <button className="relative p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors">
+        <button className="relative p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
           <Bell className="w-5 h-5" />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
         </button>
@@ -45,7 +45,7 @@ export default function Header() {
         {/* Dark mode toggle */}
         <button
           onClick={toggleTheme}
-          className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors"
+          className="p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
         >
           {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
         </button>
@@ -54,22 +54,22 @@ export default function Header() {
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setUserMenuOpen(!userMenuOpen)}
-            className="flex items-center gap-2 p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/5 transition-colors"
+            className="flex items-center gap-2 p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             <User className="w-5 h-5" />
           </button>
 
           {userMenuOpen && (
-            <div className="absolute right-0 top-full mt-2 w-56 py-2 bg-[#1a1a2e] border border-white/10 rounded-xl shadow-2xl z-50">
-              <div className="px-4 py-2 border-b border-white/10">
-                <p className="text-sm text-white font-medium truncate">{user?.email}</p>
+            <div className="absolute right-0 top-full mt-2 w-56 py-2 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl z-50">
+              <div className="px-4 py-2 border-b border-[var(--border)]">
+                <p className="text-sm text-[var(--text-primary)] font-medium truncate">{user?.email}</p>
               </div>
               <button
                 onClick={() => {
                   setUserMenuOpen(false);
                   signOut();
                 }}
-                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-white/5 transition-colors"
+                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-[var(--bg-hover)] transition-colors"
               >
                 <LogOut className="w-4 h-4" />
                 로그아웃

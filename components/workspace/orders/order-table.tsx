@@ -84,18 +84,18 @@ function processValue(colKey: string, raw: string, revenue?: number): unknown {
 }
 
 function formatCell(key: string, val: unknown): React.ReactNode {
-  if (val == null || val === "") return <span className="text-white/20 text-xs">-</span>;
+  if (val == null || val === "") return <span className="text-[var(--text-disabled)] text-xs">-</span>;
   if (key === "delivery_status") {
     const color = DELIVERY_STATUS_COLORS[String(val)] || "bg-gray-500/20 text-gray-400";
     return <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${color}`}>{String(val)}</span>;
   }
   if (key === "margin") {
     const n = Number(val);
-    return <span className={`text-xs font-medium ${n > 0 ? "text-green-400" : n < 0 ? "text-red-400" : "text-white/70"}`}>{n.toLocaleString()}</span>;
+    return <span className={`text-xs font-medium ${n > 0 ? "text-green-400" : n < 0 ? "text-red-400" : "text-[var(--text-secondary)]"}`}>{n.toLocaleString()}</span>;
   }
   if (key === "order_date") {
     const s = String(val);
-    return <span className="text-white/70 text-xs">{s.length >= 16 ? s.slice(0, 16).replace("T", " ") : s.slice(0, 10)}</span>;
+    return <span className="text-[var(--text-secondary)] text-xs">{s.length >= 16 ? s.slice(0, 16).replace("T", " ") : s.slice(0, 10)}</span>;
   }
   if (key === "marketplace") {
     const mp = MARKETPLACES[String(val)];
@@ -105,8 +105,8 @@ function formatCell(key: string, val: unknown): React.ReactNode {
     const url = String(val);
     return <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-400 text-xs truncate block max-w-full hover:underline" title={url} onClick={e => e.stopPropagation()}>{url.replace(/^https?:\/\//, "").slice(0, 30)}...</a>;
   }
-  if (NUMERIC_KEYS.has(key)) return <span className="text-white/70 text-xs">{Number(val).toLocaleString()}</span>;
-  return <span title={String(val)} className="text-white/70 text-xs truncate block max-w-full">{String(val)}</span>;
+  if (NUMERIC_KEYS.has(key)) return <span className="text-[var(--text-secondary)] text-xs">{Number(val).toLocaleString()}</span>;
+  return <span title={String(val)} className="text-[var(--text-secondary)] text-xs truncate block max-w-full">{String(val)}</span>;
 }
 
 // ════════════════════════════════════
@@ -361,11 +361,11 @@ function OrderTable({
 
   if (loading) return (
     <div className="flex items-center justify-center py-20">
-      <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+      <div className="w-6 h-6 border-2 border-[var(--text-muted)] border-t-[var(--text-primary)] rounded-full animate-spin" />
     </div>
   );
   if (sortedOrders.length === 0) return (
-    <div className="flex flex-col items-center justify-center py-20 text-white/30">
+    <div className="flex flex-col items-center justify-center py-20 text-[var(--text-muted)]">
       <p className="text-sm">주문 데이터가 없습니다</p>
       <p className="text-xs mt-1">엑셀 파일을 가져오거나 수동으로 추가해주세요</p>
     </div>
@@ -377,15 +377,15 @@ function OrderTable({
     <div className="space-y-2">
       <div
         ref={tableRef}
-        className="rounded-xl border border-white/10 overflow-auto focus:outline-none"
+        className="rounded-xl border border-[var(--border)] overflow-auto focus:outline-none"
         style={{ maxHeight: "calc(100vh - 300px)" }}
         tabIndex={0}
         onKeyDown={handleTableKeyDown}
       >
         <table className="w-max min-w-full text-sm border-collapse">
-          <thead className="bg-[#1e1e2e] sticky top-0 z-20">
+          <thead className="bg-[var(--table-header-bg)] sticky top-0 z-20">
             <tr>
-              <th className="px-2 py-2.5 w-10 sticky left-0 bg-[#1e1e2e] z-30">
+              <th className="px-2 py-2.5 w-10 sticky left-0 bg-[var(--table-header-bg)] z-30">
                 <input type="checkbox" checked={allSelected} onChange={onSelectAll} className="accent-blue-500" />
               </th>
               {COLUMNS.map(col => (
@@ -435,21 +435,21 @@ function OrderTable({
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-1">
-          <span className="text-xs text-white/30">
+          <span className="text-xs text-[var(--text-muted)]">
             {pageStart + 1}-{Math.min(pageStart + PAGE_SIZE, sortedOrders.length)} / {sortedOrders.length}건
           </span>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setPage(0)}
               disabled={safePage === 0}
-              className="px-2 py-1 text-xs text-white/50 hover:text-white disabled:text-white/15 disabled:cursor-not-allowed"
+              className="px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed"
             >
               ««
             </button>
             <button
               onClick={() => setPage(p => Math.max(0, p - 1))}
               disabled={safePage === 0}
-              className="px-2 py-1 text-xs text-white/50 hover:text-white disabled:text-white/15 disabled:cursor-not-allowed"
+              className="px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed"
             >
               «
             </button>
@@ -462,13 +462,13 @@ function OrderTable({
               }, [])
               .map((item, idx) =>
                 item === "..." ? (
-                  <span key={`e${idx}`} className="px-1 text-xs text-white/20">...</span>
+                  <span key={`e${idx}`} className="px-1 text-xs text-[var(--text-disabled)]">...</span>
                 ) : (
                   <button
                     key={item}
                     onClick={() => setPage(item)}
                     className={`min-w-[28px] px-1.5 py-1 text-xs rounded transition-colors ${
-                      item === safePage ? "bg-blue-600/20 text-blue-400 font-medium" : "text-white/50 hover:text-white hover:bg-white/5"
+                      item === safePage ? "bg-blue-600/20 text-blue-400 font-medium" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                     }`}
                   >
                     {item + 1}
@@ -478,14 +478,14 @@ function OrderTable({
             <button
               onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
               disabled={safePage >= totalPages - 1}
-              className="px-2 py-1 text-xs text-white/50 hover:text-white disabled:text-white/15 disabled:cursor-not-allowed"
+              className="px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed"
             >
               »
             </button>
             <button
               onClick={() => setPage(totalPages - 1)}
               disabled={safePage >= totalPages - 1}
-              className="px-2 py-1 text-xs text-white/50 hover:text-white disabled:text-white/15 disabled:cursor-not-allowed"
+              className="px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed"
             >
               »»
             </button>
@@ -551,8 +551,8 @@ const MemoRow = memo(function Row({
   }, [rowIdx, activeCol, onBlurSave]);
 
   return (
-    <tr className="border-t border-white/5 hover:bg-white/[0.03]">
-      <td className="px-2 py-1.5 sticky left-0 bg-[#171717] z-10">
+    <tr className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)]">
+      <td className="px-2 py-1.5 sticky left-0 bg-[var(--cell-sticky-bg)] z-10">
         <input type="checkbox" checked={isChecked} onChange={() => onSelectToggle(order.id)} className="accent-blue-500" />
       </td>
       {COLUMNS.map((col, ci) => {
@@ -590,7 +590,7 @@ const MemoRow = memo(function Row({
                 onKeyDown={onKeyDown}
                 onBlur={onBlur}
                 placeholder={FORMULA_KEYS.has(col.key) ? "=매출*0.9" : undefined}
-                className="w-full bg-white/10 border border-blue-500/50 rounded px-1.5 py-0.5 text-xs text-white outline-none"
+                className="w-full bg-[var(--bg-active)] border border-blue-500/50 rounded px-1.5 py-0.5 text-xs text-[var(--text-primary)] outline-none"
               />
             ) : (
               <div className={`text-xs truncate min-h-[22px] leading-[22px] px-1 ${
@@ -644,12 +644,12 @@ function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilter
     document.addEventListener("mouseup", onUp);
   };
   return (
-    <th className={`relative px-2 py-2.5 text-xs font-medium text-white/50 whitespace-nowrap select-none group ${col.align === "right" ? "text-right" : "text-left"}`} style={{ width, minWidth: width }}>
+    <th className={`relative px-2 py-2.5 text-xs font-medium text-[var(--text-tertiary)] whitespace-nowrap select-none group ${col.align === "right" ? "text-right" : "text-left"}`} style={{ width, minWidth: width }}>
       <div className="flex items-center gap-1">
         <span className="truncate">{col.label}</span>
         {sort === "asc" && <ArrowUp className="w-3 h-3 text-blue-400 shrink-0" />}
         {sort === "desc" && <ArrowDown className="w-3 h-3 text-blue-400 shrink-0" />}
-        <button onClick={onFilterToggle} className={`p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity ${hasFilter ? "opacity-100 text-blue-400" : "text-white/30 hover:text-white"}`}>
+        <button onClick={onFilterToggle} className={`p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity ${hasFilter ? "opacity-100 text-blue-400" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
           <Filter className="w-3 h-3" />
         </button>
       </div>
@@ -726,40 +726,40 @@ function ColumnFilterDropdown({ columnKey, allOrders, columnFilters, selectedVal
   }, [onClose]);
 
   return (
-    <div ref={ref} className="absolute top-full left-0 mt-1 z-50 bg-[#1e1e2e] border border-white/10 rounded-lg shadow-xl min-w-[220px] max-w-[300px]" onClick={e => e.stopPropagation()}>
-      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/10">
-        <button onClick={() => onSort(sort === "asc" ? null : "asc")} className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${sort === "asc" ? "bg-blue-600/20 text-blue-400" : "text-white/50 hover:text-white hover:bg-white/5"}`}>
+    <div ref={ref} className="absolute top-full left-0 mt-1 z-50 bg-[var(--table-header-bg)] border border-[var(--border)] rounded-lg shadow-xl min-w-[220px] max-w-[300px]" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
+        <button onClick={() => onSort(sort === "asc" ? null : "asc")} className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${sort === "asc" ? "bg-blue-600/20 text-blue-400" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"}`}>
           <ArrowUp className="w-3 h-3" /> 오름차순
         </button>
-        <button onClick={() => onSort(sort === "desc" ? null : "desc")} className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${sort === "desc" ? "bg-blue-600/20 text-blue-400" : "text-white/50 hover:text-white hover:bg-white/5"}`}>
+        <button onClick={() => onSort(sort === "desc" ? null : "desc")} className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${sort === "desc" ? "bg-blue-600/20 text-blue-400" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"}`}>
           <ArrowDown className="w-3 h-3" /> 내림차순
         </button>
       </div>
-      <div className="p-2 border-b border-white/10">
+      <div className="p-2 border-b border-[var(--border)]">
         <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="검색..."
-          className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none"
+          className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--text-primary)] outline-none"
           onKeyDown={e => { if (e.key === "Escape") onClose(); }} />
       </div>
-      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-white/10">
+      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-[var(--border)]">
         <button onClick={() => setPending([])} className={`text-xs ${allChecked ? "text-blue-400 font-medium" : "text-blue-400/60 hover:text-blue-300"}`}>전체 선택</button>
-        <span className="text-white/20">|</span>
-        <button onClick={() => setPending(["__NONE__"])} className={`text-xs ${noneChecked ? "text-white/70 font-medium" : "text-white/40 hover:text-white/60"}`}>전체 해제</button>
+        <span className="text-[var(--text-disabled)]">|</span>
+        <button onClick={() => setPending(["__NONE__"])} className={`text-xs ${noneChecked ? "text-[var(--text-secondary)] font-medium" : "text-[var(--text-muted)] hover:text-[var(--text-tertiary)]"}`}>전체 해제</button>
       </div>
       <div className="max-h-[250px] overflow-y-auto py-1">
         {filtered.map(({ value, count }) => (
-          <label key={value} className="flex items-center gap-2 px-2 py-1 hover:bg-white/5 cursor-pointer text-xs" onClick={e => { e.preventDefault(); toggle(value); }}>
-            <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${isChecked(value) ? "bg-blue-600 border-blue-600" : "border-white/30"}`}>
+          <label key={value} className="flex items-center gap-2 px-2 py-1 hover:bg-[var(--bg-hover)] cursor-pointer text-xs" onClick={e => { e.preventDefault(); toggle(value); }}>
+            <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${isChecked(value) ? "bg-blue-600 border-blue-600" : "border-[var(--border-strong)]"}`}>
               {isChecked(value) && <Check className="w-2.5 h-2.5 text-white" />}
             </div>
-            <span className="text-white/70 truncate flex-1">{value}</span>
-            <span className="text-white/30 shrink-0">{count}</span>
+            <span className="text-[var(--text-secondary)] truncate flex-1">{value}</span>
+            <span className="text-[var(--text-muted)] shrink-0">{count}</span>
           </label>
         ))}
-        {filtered.length === 0 && <p className="px-2 py-2 text-xs text-white/30 text-center">결과 없음</p>}
+        {filtered.length === 0 && <p className="px-2 py-2 text-xs text-[var(--text-muted)] text-center">결과 없음</p>}
       </div>
-      <div className="flex items-center gap-2 px-2 py-2 border-t border-white/10">
-        <button onClick={() => { onChange(pending); onClose(); }} className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${changed ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-blue-600/50 text-white/50 hover:bg-blue-600 hover:text-white"}`}>확인</button>
-        <button onClick={onClose} className="flex-1 px-3 py-1.5 rounded text-xs text-white/50 bg-white/5 hover:bg-white/10 transition-colors">취소</button>
+      <div className="flex items-center gap-2 px-2 py-2 border-t border-[var(--border)]">
+        <button onClick={() => { onChange(pending); onClose(); }} className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${changed ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-blue-600/50 text-[var(--text-tertiary)] hover:bg-blue-600 hover:text-[var(--text-primary)]"}`}>확인</button>
+        <button onClick={onClose} className="flex-1 px-3 py-1.5 rounded text-xs text-[var(--text-tertiary)] bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors">취소</button>
       </div>
     </div>
   );
