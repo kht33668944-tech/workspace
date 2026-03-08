@@ -27,11 +27,64 @@ function normalizeCourier(name: string): string {
   return COURIER_MAP[name] || name;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 단일 페이지에서 배송정보 추출 (캡차 감지 포함)
+ */
+async function extractTrackingFromPage(
+  page: import("playwright").Page
+): Promise<{ courier: string; trackingNo: string; hasCaptcha: boolean } | null> {
+  // 캡차 감지
+  const hasCaptcha = await page.locator('[id*="captcha"], [class*="captcha"], [id*="recaptcha"], iframe[src*="captcha"]').count() > 0;
+  if (hasCaptcha) {
+    return { courier: "", trackingNo: "", hasCaptcha: true };
+  }
+
+  // __NEXT_DATA__에서 배송정보 추출
+  const data = await page.evaluate(() => {
+    const el = document.getElementById("__NEXT_DATA__");
+    if (!el) return null;
+    try {
+      const json = JSON.parse(el.textContent || "");
+      const state = json?.props?.pageProps?.initialState;
+      if (!state?.shippingInfo) return null;
+      const info = state.shippingInfo;
+      return {
+        courier: info.shippingCompany || "",
+        trackingNo: Array.isArray(info.invoiceNo) ? info.invoiceNo[0] || "" : info.invoiceNo || "",
+      };
+    } catch {
+      return null;
+    }
+  });
+
+  if (data?.courier && data?.trackingNo) {
+    return { ...data, hasCaptcha: false };
+  }
+
+  // fallback: 텍스트 파싱 (같은 페이지에서)
+  const fallbackData = await page.evaluate(() => {
+    const text = document.body?.innerText || "";
+    const match = text.match(/(CJ대한통운|한진택배|롯데택배|우체국택배|로젠택배|경동택배|대신택배|일양로지스|합동택배|천일택배|건영택배|호남택배|한의사랑택배|SLX)\s+(\d{10,14})/);
+    if (match) return { courier: match[1], trackingNo: match[2] };
+    return null;
+  });
+
+  if (fallbackData?.courier && fallbackData?.trackingNo) {
+    return { ...fallbackData, hasCaptcha: false };
+  }
+
+  return null;
+}
+
 /**
  * Playwright 기반 옥션 배송정보 일괄 수집
- * 1. Chromium으로 로그인
- * 2. 각 주문번호별로 tracking.auction.co.kr에서 배송정보 직접 추출
- *    (옥션은 주문번호만으로 배송추적 페이지 접근 가능)
+ * - 단일 페이지 재사용 (봇 감지 최소화)
+ * - 요청 간 딜레이 적용
+ * - 실패 건 1회 재시도
  */
 export async function collectAuctionTracking(
   loginId: string,
@@ -82,35 +135,30 @@ export async function collectAuctionTracking(
     }
     console.log("[auction] 로그인 성공");
 
-    // 2. 각 주문번호별로 배송추적 페이지 방문하여 택배사/운송장 추출
+    // 2. 단일 페이지로 순차 조회 (딜레이 적용)
     console.log(`[auction] ${orderNos.length}건 배송추적 시작...`);
+    const trackingPage = await context.newPage();
+    const retryQueue: string[] = [];
 
-    for (const orderNo of orderNos) {
+    for (let i = 0; i < orderNos.length; i++) {
+      const orderNo = orderNos[i];
       try {
-        const trackingPage = await context.newPage();
+        // 첫 건이 아니면 딜레이
+        if (i > 0) await delay(2000);
+
         const url = `${TRACKING_URL}/?orderNo=${orderNo}`;
         await trackingPage.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+        await trackingPage.waitForTimeout(1000); // 페이지 로딩 안정화
 
-        // __NEXT_DATA__에서 배송정보 추출
-        // 옥션 구조: shippingInfo.shippingCompany (택배사), shippingInfo.invoiceNo (배열)
-        const data = await trackingPage.evaluate(() => {
-          const el = document.getElementById("__NEXT_DATA__");
-          if (!el) return null;
-          try {
-            const json = JSON.parse(el.textContent || "");
-            const state = json?.props?.pageProps?.initialState;
-            if (!state?.shippingInfo) return null;
-            const info = state.shippingInfo;
-            return {
-              courier: info.shippingCompany || "",
-              trackingNo: Array.isArray(info.invoiceNo) ? info.invoiceNo[0] || "" : info.invoiceNo || "",
-            };
-          } catch {
-            return null;
-          }
-        });
+        const data = await extractTrackingFromPage(trackingPage);
 
-        await trackingPage.close();
+        if (data?.hasCaptcha) {
+          console.log(`[auction] ${orderNo}: 캡차 감지 → 재시도 대기열에 추가`);
+          retryQueue.push(orderNo);
+          // 캡차 감지 시 긴 딜레이
+          await delay(5000);
+          continue;
+        }
 
         if (data?.courier && data?.trackingNo) {
           result.success.push({
@@ -121,39 +169,61 @@ export async function collectAuctionTracking(
           });
           console.log(`[auction] ${orderNo}: ${data.courier} ${data.trackingNo}`);
         } else {
-          // __NEXT_DATA__ 실패 시 텍스트 파싱 fallback
-          const fallbackPage = await context.newPage();
-          await fallbackPage.goto(url, { waitUntil: "networkidle", timeout: 15000 });
-          const fallbackData = await fallbackPage.evaluate(() => {
-            const text = document.body?.innerText || "";
-            const match = text.match(/(CJ대한통운|한진택배|롯데택배|우체국택배|로젠택배|경동택배|대신택배|일양로지스|합동택배|천일택배|건영택배|호남택배|한의사랑택배|SLX)\s+(\d{10,14})/);
-            if (match) return { courier: match[1], trackingNo: match[2] };
-            return null;
-          });
-          await fallbackPage.close();
-
-          if (fallbackData?.courier && fallbackData?.trackingNo) {
-            result.success.push({
-              orderNo,
-              courier: normalizeCourier(fallbackData.courier),
-              trackingNo: fallbackData.trackingNo,
-              status: "배송조회완료",
-            });
-            console.log(`[auction] ${orderNo}: ${fallbackData.courier} ${fallbackData.trackingNo} (fallback)`);
-          } else {
-            result.notFound.push(orderNo);
-            console.log(`[auction] ${orderNo}: 배송정보 없음`);
-          }
+          // 첫 시도 실패 → 재시도 대기열에 추가
+          retryQueue.push(orderNo);
+          console.log(`[auction] ${orderNo}: 배송정보 없음 → 재시도 예정`);
         }
       } catch (err) {
-        result.failed.push({
-          orderNo,
-          reason: `조회 오류: ${err instanceof Error ? err.message : String(err)}`,
-        });
-        console.log(`[auction] ${orderNo}: 오류 - ${err instanceof Error ? err.message : String(err)}`);
+        retryQueue.push(orderNo);
+        console.log(`[auction] ${orderNo}: 오류 → 재시도 예정 - ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
+    // 3. 실패 건 재시도 (더 긴 딜레이)
+    if (retryQueue.length > 0) {
+      console.log(`[auction] ${retryQueue.length}건 재시도 시작...`);
+      await delay(3000);
+
+      for (let i = 0; i < retryQueue.length; i++) {
+        const orderNo = retryQueue[i];
+        try {
+          if (i > 0) await delay(3000);
+
+          const url = `${TRACKING_URL}/?orderNo=${orderNo}`;
+          await trackingPage.goto(url, { waitUntil: "networkidle", timeout: 20000 });
+          await trackingPage.waitForTimeout(1500);
+
+          const data = await extractTrackingFromPage(trackingPage);
+
+          if (data?.hasCaptcha) {
+            result.failed.push({ orderNo, reason: "캡차 인증이 필요합니다. 잠시 후 다시 시도해주세요." });
+            console.log(`[auction] ${orderNo}: 재시도 실패 (캡차)`);
+            continue;
+          }
+
+          if (data?.courier && data?.trackingNo) {
+            result.success.push({
+              orderNo,
+              courier: normalizeCourier(data.courier),
+              trackingNo: data.trackingNo,
+              status: "배송조회완료",
+            });
+            console.log(`[auction] ${orderNo}: ${data.courier} ${data.trackingNo} (재시도 성공)`);
+          } else {
+            result.notFound.push(orderNo);
+            console.log(`[auction] ${orderNo}: 배송정보 없음 (재시도 후)`);
+          }
+        } catch (err) {
+          result.failed.push({
+            orderNo,
+            reason: `조회 오류: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          console.log(`[auction] ${orderNo}: 재시도 오류 - ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    await trackingPage.close();
     console.log("[auction] 수집 완료:", `성공=${result.success.length}, 실패=${result.failed.length}, 미발견=${result.notFound.length}`);
   } catch (err) {
     console.error("[auction] 수집 오류:", err);

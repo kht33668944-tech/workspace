@@ -40,3 +40,23 @@ export interface ConsultationLog {
 export type OrderInsert = Omit<Order, "id" | "margin" | "order_month" | "created_at" | "updated_at">;
 
 export type OrderUpdate = Partial<Omit<Order, "id" | "user_id" | "margin" | "order_month" | "created_at" | "updated_at">>;
+
+export type PurchasePlatform = "gmarket" | "auction" | "coupang" | "smartstore" | "11st";
+
+export interface PurchaseCredential {
+  id: string;
+  user_id: string;
+  platform: PurchasePlatform;
+  login_id: string;
+  label: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const PLATFORM_LABELS: Record<PurchasePlatform, string> = {
+  gmarket: "지마켓",
+  auction: "옥션",
+  coupang: "쿠팡",
+  smartstore: "스마트스토어",
+  "11st": "11번가",
+};

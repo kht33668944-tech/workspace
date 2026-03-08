@@ -1,26 +1,83 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { collectGmarketTracking } from "@/lib/scrapers/gmarket";
 import { collectAuctionTracking } from "@/lib/scrapers/auction";
-import type { CollectTrackingRequest } from "@/lib/scrapers/types";
+import { decrypt } from "@/lib/crypto";
+import type { ScrapeResult } from "@/lib/scrapers/types";
+
+function getSupabaseClient(accessToken: string) {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { global: { headers: { Authorization: `Bearer ${accessToken}` } } }
+  );
+}
+
+function getAccessToken(request: NextRequest): string | null {
+  const auth = request.headers.get("authorization");
+  if (auth?.startsWith("Bearer ")) return auth.slice(7);
+  return null;
+}
+
+interface CollectRequest {
+  // 자동 모드: 저장된 자격증명 사용
+  credentialId?: string;
+  // 수동 모드: 직접 입력 (기존 호환)
+  platform?: "gmarket" | "auction";
+  loginId?: string;
+  loginPw?: string;
+  // 공통
+  orderNos: string[];
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as CollectTrackingRequest;
+    const body = (await request.json()) as CollectRequest;
 
-    if (!body.loginId || !body.loginPw) {
-      return NextResponse.json({ error: "아이디와 비밀번호를 입력해주세요." }, { status: 400 });
-    }
     if (!body.orderNos || body.orderNos.length === 0) {
       return NextResponse.json({ error: "수집할 주문번호가 없습니다." }, { status: 400 });
     }
 
-    let result;
-    if (body.platform === "gmarket") {
-      result = await collectGmarketTracking(body.loginId, body.loginPw, body.orderNos);
-    } else if (body.platform === "auction") {
-      result = await collectAuctionTracking(body.loginId, body.loginPw, body.orderNos);
+    let platform: string;
+    let loginId: string;
+    let loginPw: string;
+
+    if (body.credentialId) {
+      // 자동 모드: DB에서 자격증명 조회
+      const token = getAccessToken(request);
+      if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+
+      const supabase = getSupabaseClient(token);
+      const { data: cred, error } = await supabase
+        .from("purchase_credentials")
+        .select("platform, login_id, login_pw_encrypted")
+        .eq("id", body.credentialId)
+        .single();
+
+      if (error || !cred) {
+        return NextResponse.json({ error: "등록된 계정을 찾을 수 없습니다." }, { status: 404 });
+      }
+
+      platform = cred.platform;
+      loginId = cred.login_id;
+      loginPw = decrypt(cred.login_pw_encrypted);
     } else {
-      return NextResponse.json({ error: `${body.platform}은(는) 아직 지원되지 않습니다.` }, { status: 400 });
+      // 수동 모드: 직접 입력 (기존 호환)
+      if (!body.platform || !body.loginId || !body.loginPw) {
+        return NextResponse.json({ error: "계정 정보가 필요합니다." }, { status: 400 });
+      }
+      platform = body.platform;
+      loginId = body.loginId;
+      loginPw = body.loginPw;
+    }
+
+    let result: ScrapeResult;
+    if (platform === "gmarket") {
+      result = await collectGmarketTracking(loginId, loginPw, body.orderNos);
+    } else if (platform === "auction") {
+      result = await collectAuctionTracking(loginId, loginPw, body.orderNos);
+    } else {
+      return NextResponse.json({ error: `${platform}은(는) 아직 지원되지 않습니다.` }, { status: 400 });
     }
 
     return NextResponse.json(result);
