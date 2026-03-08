@@ -18,6 +18,19 @@ import type { Order, OrderInsert } from "@/types/database";
 
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
 
+// Ctrl+S 브라우저 기본 동작(다른 이름으로 저장) 방지
+function usePreventBrowserSave() {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
+}
+
 // 현재 연도 기준 12개월 생성
 function generateMonthOptions(): string[] {
   const now = new Date();
@@ -35,6 +48,7 @@ function getCurrentMonth(): string {
 }
 
 export default function OrdersPage() {
+  usePreventBrowserSave();
   const { session } = useAuth();
   const [selectedMonth, setSelectedMonth] = useState<string | null>(getCurrentMonth);
   const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(null);
@@ -199,12 +213,13 @@ export default function OrdersPage() {
       원가: o.cost,
       마진: o.margin,
       결제방식: o.payment_method,
-      구매아이디: o.purchase_id,
       구매처: o.purchase_source,
+      구매아이디: o.purchase_id,
       주문번호: o.purchase_order_no,
       택배사: o.courier,
       운송장: o.tracking_no,
       배송상태: o.delivery_status,
+      최저가링크: o.purchase_url,
     }));
     const monthLabel = selectedMonth || "전체";
     exportOrdersToCSV(exportData, `발주서_${monthLabel}.xlsx`);

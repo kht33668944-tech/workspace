@@ -50,12 +50,12 @@ const COLUMNS: Col[] = [
   { key: "cost", label: "원가", minWidth: 75, align: "right" },
   { key: "margin", label: "마진", minWidth: 75, align: "right" },
   { key: "payment_method", label: "결제방식", minWidth: 75 },
-  { key: "purchase_id", label: "구매아이디", minWidth: 110 },
   { key: "purchase_source", label: "구매처", minWidth: 80 },
-  { key: "purchase_url", label: "최저가링크", minWidth: 130 },
+  { key: "purchase_id", label: "구매아이디", minWidth: 110 },
   { key: "purchase_order_no", label: "주문번호", minWidth: 120 },
   { key: "courier", label: "택배사", minWidth: 85 },
   { key: "tracking_no", label: "운송장", minWidth: 130 },
+  { key: "purchase_url", label: "최저가링크", minWidth: 130 },
 ];
 const COL_COUNT = COLUMNS.length;
 
@@ -110,7 +110,7 @@ function formatCell(key: string, val: unknown): React.ReactNode {
 }
 
 // ════════════════════════════════════
-// OrderTable
+// OrderTable (Google Sheets 스타일 듀얼 모드)
 // ════════════════════════════════════
 const PAGE_SIZE = 100;
 
@@ -125,6 +125,8 @@ function OrderTable({
   });
   const [filterOpen, setFilterOpen] = useState<string | null>(null);
   const [activeCell, setActiveCell] = useState<CellPos | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [initialChar, setInitialChar] = useState<string | null>(null);
   const [selection, setSelection] = useState<SelRange | null>(null);
   const [sort, setSort] = useState<{ key: string; dir: SortDir } | null>(null);
   const [fillDrag, setFillDrag] = useState<{ colIdx: number; startRow: number; endRow: number; value: unknown } | null>(null);
@@ -133,6 +135,8 @@ function OrderTable({
   const tableRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<CellPos | null>(null);
   const isDraggingRef = useRef(false);
+  // 편집 중 다른 셀 클릭 시 값을 잃지 않도록 보관
+  const pendingEditRef = useRef<{ row: number; col: number; value: string } | null>(null);
 
   // 데이터가 바뀌면 페이지 리셋
   const prevLenRef = useRef(rawOrders.length);
@@ -178,9 +182,12 @@ function OrderTable({
     }
   }, [orders, onUpdate]);
 
-  // Commit (save + navigate)
+  // Commit (save + navigate) — 편집 모드 종료 후 선택 모드로
   const handleCommit = useCallback((row: number, col: number, val: string | null, dir: string) => {
     if (val !== null) saveValue(row, col, val);
+    pendingEditRef.current = null; // 커밋 완료, pending 클리어
+    setEditing(false);
+    setInitialChar(null);
     const maxR = orders.length - 1, maxC = COL_COUNT - 1;
     let nr = row, nc = col;
     switch (dir) {
@@ -188,56 +195,103 @@ function OrderTable({
       case "up": nr = Math.max(row - 1, 0); break;
       case "right": nc = col + 1; if (nc > maxC) { nc = 0; nr = Math.min(row + 1, maxR); } break;
       case "left": nc = col - 1; if (nc < 0) { nc = maxC; nr = Math.max(row - 1, 0); } break;
-      case "blur": return;
-      case "none": setActiveCell(null); return;
+      case "blur": return; // 편집 종료, 선택 유지 (blur에서 save는 onBlurSave가 처리)
+      case "none": return; // Escape: 편집 취소, 선택 모드 유지
     }
     setActiveCell({ row: nr, col: nc });
     setSelection({ r1: nr, c1: nc, r2: nr, c2: nc });
+    // 커밋 후 테이블에 포커스 되돌리기 (선택 모드에서 키보드 작동)
+    setTimeout(() => tableRef.current?.focus(), 0);
   }, [orders.length, saveValue]);
 
-  // Mouse: cell mousedown
+  // Mouse: cell mousedown — 편집 중이면 현재 값을 먼저 저장
   const handleCellMouseDown = useCallback((row: number, col: number) => {
+    // 편집 중인 셀의 값을 즉시 저장 (blur보다 먼저 실행)
+    if (pendingEditRef.current) {
+      const { row: eRow, col: eCol, value } = pendingEditRef.current;
+      saveValue(eRow, eCol, value);
+      pendingEditRef.current = null;
+    }
+    setEditing(false);
+    setInitialChar(null);
     dragStartRef.current = { row, col };
     isDraggingRef.current = false;
     setSelection({ r1: row, c1: col, r2: row, c2: col });
-  }, []);
+  }, [saveValue]);
 
   // Mouse: cell mouseenter during drag
   const handleCellMouseEnter = useCallback((row: number, col: number) => {
     if (!dragStartRef.current) return;
     isDraggingRef.current = true;
     setActiveCell(null);
+    setEditing(false);
+    setInitialChar(null);
     setSelection(prev => prev ? { r1: prev.r1, c1: prev.c1, r2: row, c2: col } : null);
   }, []);
 
-  // Global mouseup
+  // Global mouseup → 클릭이면 선택 모드 (편집 아님)
   useEffect(() => {
     const handler = () => {
       if (!dragStartRef.current) return;
       if (!isDraggingRef.current) {
         setActiveCell({ ...dragStartRef.current });
+        setEditing(false);
+        setInitialChar(null);
       }
       dragStartRef.current = null;
       isDraggingRef.current = false;
+      // 선택 모드에서 키보드 이벤트를 받기 위해 테이블에 포커스
+      setTimeout(() => tableRef.current?.focus(), 0);
     };
     document.addEventListener("mouseup", handler);
     return () => document.removeEventListener("mouseup", handler);
   }, []);
 
-  // Click outside
+  // 편집 값이 변경될 때 pendingEditRef 업데이트
+  const handleEditValueChange = useCallback((row: number, col: number, value: string) => {
+    pendingEditRef.current = { row, col, value };
+  }, []);
+
+  // 더블클릭 → 편집 모드 진입
+  const handleCellDoubleClick = useCallback((row: number, col: number) => {
+    if (EDITABLE_KEYS.has(COLUMNS[col].key)) {
+      setActiveCell({ row, col });
+      setSelection({ r1: row, c1: col, r2: row, c2: col });
+      setEditing(true);
+      setInitialChar(null);
+    }
+  }, []);
+
+  // Click outside → 편집 값 저장 후 선택 해제
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (tableRef.current && !tableRef.current.contains(e.target as Node)) {
+        // 편집 중인 값 저장
+        if (pendingEditRef.current) {
+          const { row, col, value } = pendingEditRef.current;
+          saveValue(row, col, value);
+          pendingEditRef.current = null;
+        }
         setActiveCell(null);
+        setEditing(false);
+        setInitialChar(null);
         setSelection(null);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [saveValue]);
 
-  // Copy
+  // Copy (선택 모드에서)
   const handleCopy = useCallback(() => {
+    if (!selection && activeCell) {
+      // 단일 셀 복사
+      const o = orders[activeCell.row];
+      if (!o) return;
+      const v = o[COLUMNS[activeCell.col].key as keyof Order];
+      navigator.clipboard.writeText(v == null ? "" : String(v));
+      return;
+    }
     if (!selection) return;
     const { minR, maxR, minC, maxC } = norm(selection);
     const lines: string[] = [];
@@ -251,49 +305,147 @@ function OrderTable({
       lines.push(cells.join("\t"));
     }
     navigator.clipboard.writeText(lines.join("\n"));
-  }, [selection, orders]);
+  }, [selection, activeCell, orders]);
 
-  // Paste
+  // Paste (선택 모드에서 — 멀티셀 붙여넣기, 단일값→선택영역 채우기)
   const handlePaste = useCallback(async () => {
     const target = activeCell || (selection ? { row: norm(selection).minR, col: norm(selection).minC } : null);
     if (!target) return;
     try {
       const text = await navigator.clipboard.readText();
-      const rows = text.split(/\r?\n/).filter(r => r.length > 0);
-      for (let ri = 0; ri < rows.length; ri++) {
-        const cells = rows[ri].split("\t");
-        for (let ci = 0; ci < cells.length; ci++) {
-          const tR = target.row + ri, tC = target.col + ci;
-          if (tR >= orders.length || tC >= COL_COUNT) continue;
-          const o = orders[tR], k = COLUMNS[tC].key;
-          if (!EDITABLE_KEYS.has(k)) continue;
-          const v = processValue(k, cells[ci], o.revenue);
-          onUpdate(o.id, { [k]: v });
+      const clipRows = text.split(/\r?\n/).filter(r => r.length > 0);
+      const clipData = clipRows.map(r => r.split("\t"));
+      const clipRowCount = clipData.length;
+      const clipColCount = Math.max(...clipData.map(r => r.length));
+      const isSingleValue = clipRowCount === 1 && clipColCount === 1;
+
+      // 선택 영역이 있고 클립보드가 단일 값이면 → 선택 영역 전체에 채우기
+      if (isSingleValue && selection) {
+        const { minR, maxR, minC, maxC } = norm(selection);
+        const val = clipData[0][0];
+        for (let r = minR; r <= maxR; r++) {
+          for (let c = minC; c <= maxC; c++) {
+            if (r >= orders.length || c >= COL_COUNT) continue;
+            const o = orders[r], k = COLUMNS[c].key;
+            if (!EDITABLE_KEYS.has(k)) continue;
+            const v = processValue(k, val, o.revenue);
+            onUpdate(o.id, { [k]: v });
+          }
+        }
+      } else {
+        // 멀티셀 클립보드 → 타겟 위치부터 클립보드 크기만큼 붙여넣기
+        for (let ri = 0; ri < clipData.length; ri++) {
+          for (let ci = 0; ci < clipData[ri].length; ci++) {
+            const tR = target.row + ri, tC = target.col + ci;
+            if (tR >= orders.length || tC >= COL_COUNT) continue;
+            const o = orders[tR], k = COLUMNS[tC].key;
+            if (!EDITABLE_KEYS.has(k)) continue;
+            const v = processValue(k, clipData[ri][ci], o.revenue);
+            onUpdate(o.id, { [k]: v });
+          }
         }
       }
     } catch { /* clipboard denied */ }
   }, [activeCell, selection, orders, onUpdate]);
 
-  // Table keydown
+  // ═══ 테이블 키보드 핸들러 (듀얼 모드) ═══
   const handleTableKeyDown = useCallback((e: React.KeyboardEvent) => {
     const ctrl = e.ctrlKey || e.metaKey;
-    if (ctrl && e.key === "c" && selection) {
-      const { minR, maxR, minC, maxC } = norm(selection);
-      if ((minR !== maxR || minC !== maxC) || !activeCell) {
-        e.preventDefault();
-        handleCopy();
-      }
-    }
-    if (ctrl && e.key === "v") { e.preventDefault(); handlePaste(); }
+
+    // Ctrl+Z: 항상 작동
     if (ctrl && e.key === "z") { e.preventDefault(); onUndo?.(); return; }
 
-    // Delete key with checkbox-selected rows → delete rows
+    // 체크박스 선택된 행 삭제
     if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0 && onDeleteSelected) {
       e.preventDefault();
       onDeleteSelected();
       return;
     }
 
+    // ═══ 편집 모드일 때 — 인풋이 대부분 처리하므로 여기서는 최소한만 ═══
+    if (editing) {
+      // 편집 모드에서 Ctrl+C, Ctrl+V는 인풋의 기본 동작에 맡김 (가로채지 않음)
+      return;
+    }
+
+    // ═══ 선택 모드 ═══
+    // Ctrl+C: 복사
+    if (ctrl && e.key === "c") { e.preventDefault(); handleCopy(); return; }
+    // Ctrl+V: 붙여넣기
+    if (ctrl && e.key === "v") { e.preventDefault(); handlePaste(); return; }
+
+    if (activeCell) {
+      const { row, col } = activeCell;
+
+      // 방향키 → 셀 이동
+      if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
+        let nr = row, nc = col;
+        if (e.key === "ArrowDown") nr = Math.min(row + 1, orders.length - 1);
+        if (e.key === "ArrowUp") nr = Math.max(row - 1, 0);
+        if (e.key === "ArrowRight") nc = Math.min(col + 1, COL_COUNT - 1);
+        if (e.key === "ArrowLeft") nc = Math.max(col - 1, 0);
+        setActiveCell({ row: nr, col: nc });
+        setSelection({ r1: nr, c1: nc, r2: nr, c2: nc });
+        return;
+      }
+
+      // Enter, F2 → 편집 모드 진입
+      if (e.key === "Enter" || e.key === "F2") {
+        e.preventDefault();
+        if (EDITABLE_KEYS.has(COLUMNS[col].key)) {
+          setEditing(true);
+          setInitialChar(null);
+        }
+        return;
+      }
+
+      // Tab → 다음/이전 셀로 이동
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const maxR = orders.length - 1, maxC = COL_COUNT - 1;
+        let nr = row, nc = col + (e.shiftKey ? -1 : 1);
+        if (nc > maxC) { nc = 0; nr = Math.min(row + 1, maxR); }
+        if (nc < 0) { nc = maxC; nr = Math.max(row - 1, 0); }
+        setActiveCell({ row: nr, col: nc });
+        setSelection({ r1: nr, c1: nc, r2: nr, c2: nc });
+        return;
+      }
+
+      // Delete/Backspace → 선택 영역 값 삭제
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        if (selection) {
+          const { minR, maxR, minC, maxC } = norm(selection);
+          for (let r = minR; r <= maxR; r++) for (let c = minC; c <= maxC; c++) {
+            const o = orders[r], k = COLUMNS[c].key;
+            if (!o || !EDITABLE_KEYS.has(k)) continue;
+            onUpdate(o.id, { [k]: NUMERIC_KEYS.has(k) ? 0 : null });
+          }
+        }
+        return;
+      }
+
+      // Escape → 선택 해제
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setActiveCell(null);
+        setSelection(null);
+        return;
+      }
+
+      // 일반 문자 입력 → 편집 모드 진입 (기존 값을 대체)
+      if (e.key.length === 1 && !ctrl && !e.altKey && EDITABLE_KEYS.has(COLUMNS[col].key)) {
+        e.preventDefault();
+        setEditing(true);
+        setInitialChar(e.key);
+        return;
+      }
+
+      return;
+    }
+
+    // activeCell 없이 selection만 있을 때 (드래그 선택)
     if (!activeCell && selection) {
       const { minR, minC } = norm(selection);
       if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(e.key)) {
@@ -306,6 +458,8 @@ function OrderTable({
         setSelection({ r1: r, c1: c, r2: r, c2: c });
         setActiveCell({ row: r, col: c });
       }
+      if (ctrl && e.key === "c") { e.preventDefault(); handleCopy(); }
+      if (ctrl && e.key === "v") { e.preventDefault(); handlePaste(); }
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         const { minR: r1, maxR: r2, minC: c1, maxC: c2 } = norm(selection);
@@ -316,10 +470,15 @@ function OrderTable({
         }
       }
       if (e.key.length === 1 && !ctrl && !e.altKey) {
+        e.preventDefault();
         setActiveCell({ row: minR, col: minC });
+        if (EDITABLE_KEYS.has(COLUMNS[minC].key)) {
+          setEditing(true);
+          setInitialChar(e.key);
+        }
       }
     }
-  }, [activeCell, selection, orders, selectedIds, onDeleteSelected, onUndo, onUpdate, handleCopy, handlePaste]);
+  }, [activeCell, editing, selection, orders, selectedIds, onDeleteSelected, onUndo, onUpdate, handleCopy, handlePaste]);
 
   // Fill drag
   useEffect(() => {
@@ -372,20 +531,22 @@ function OrderTable({
   );
 
   const sn = selection ? norm(selection) : null;
+  const editingRow = editing && activeCell ? activeCell.row : -1;
+  const editingCol = editing && activeCell ? activeCell.col : -1;
 
   return (
     <div className="space-y-2">
       <div
         ref={tableRef}
         className="rounded-xl border border-[var(--border)] overflow-auto focus:outline-none"
-        style={{ maxHeight: "calc(100vh - 300px)" }}
+        style={{ maxHeight: "calc(100vh - 300px)", minHeight: "420px" }}
         tabIndex={0}
         onKeyDown={handleTableKeyDown}
       >
         <table className="w-max min-w-full text-sm border-collapse">
           <thead className="bg-[var(--table-header-bg)] sticky top-0 z-20">
             <tr>
-              <th className="px-2 py-2.5 w-10 sticky left-0 bg-[var(--table-header-bg)] z-30">
+              <th className="px-2 py-2.5 w-10 sticky left-0 bg-[var(--table-header-bg)] z-30 border-r border-[var(--border-subtle)]">
                 <input type="checkbox" checked={allSelected} onChange={onSelectAll} className="accent-blue-500" />
               </th>
               {COLUMNS.map(col => (
@@ -408,6 +569,7 @@ function OrderTable({
           <tbody>
             {orders.map((order, rowIdx) => {
               const ac = activeCell?.row === rowIdx ? activeCell.col : -1;
+              const ec = editingRow === rowIdx ? editingCol : -1;
               let selMinC = -1, selMaxC = -1;
               if (sn && rowIdx >= sn.minR && rowIdx <= sn.maxR) { selMinC = sn.minC; selMaxC = sn.maxC; }
               const showFill = sn ? rowIdx === sn.maxR : activeCell?.row === rowIdx;
@@ -418,11 +580,14 @@ function OrderTable({
               return (
                 <MemoRow
                   key={order.id} order={order} rowIdx={rowIdx} colWidths={colWidths}
-                  isChecked={selectedIds.has(order.id)} activeCol={ac}
+                  isChecked={selectedIds.has(order.id)} activeCol={ac} editingCol={ec}
+                  initialChar={editingRow === rowIdx ? initialChar : null}
                   selMinC={selMinC} selMaxC={selMaxC}
                   showFillHandle={!!showFill} fillHandleCol={fillCol} fillHighlightCol={fillHL}
                   onCellMouseDown={handleCellMouseDown} onCellMouseEnter={handleCellMouseEnter}
+                  onCellDoubleClick={handleCellDoubleClick}
                   onCommit={handleCommit} onBlurSave={saveValue}
+                  onEditValueChange={handleEditValueChange}
                   onSelectToggle={onSelectToggle} onFillStart={handleFillStart}
                   onRowClick={onRowClick}
                 />
@@ -499,65 +664,87 @@ function OrderTable({
 export default memo(OrderTable);
 
 // ════════════════════════════════════
-// Row
+// Row (듀얼 모드: 선택/편집 분리)
 // ════════════════════════════════════
 interface RowProps {
   order: Order; rowIdx: number; colWidths: Record<string, number>;
-  isChecked: boolean; activeCol: number;
+  isChecked: boolean; activeCol: number; editingCol: number;
+  initialChar: string | null;
   selMinC: number; selMaxC: number;
   showFillHandle: boolean; fillHandleCol: number; fillHighlightCol: number;
   onCellMouseDown: (r: number, c: number) => void;
   onCellMouseEnter: (r: number, c: number) => void;
+  onCellDoubleClick: (r: number, c: number) => void;
   onCommit: (r: number, c: number, v: string | null, dir: string) => void;
   onBlurSave: (r: number, c: number, v: string) => void;
+  onEditValueChange: (r: number, c: number, v: string) => void;
   onSelectToggle: (id: string) => void;
   onFillStart: (r: number, c: number, v: unknown) => void;
   onRowClick?: (order: Order) => void;
 }
 
 const MemoRow = memo(function Row({
-  order, rowIdx, colWidths, isChecked, activeCol,
+  order, rowIdx, colWidths, isChecked, activeCol, editingCol, initialChar,
   selMinC, selMaxC, showFillHandle, fillHandleCol, fillHighlightCol,
-  onCellMouseDown, onCellMouseEnter, onCommit, onBlurSave, onSelectToggle, onFillStart,
+  onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onCommit, onBlurSave, onEditValueChange, onSelectToggle, onFillStart,
   onRowClick,
 }: RowProps) {
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const editRef = useRef("");
 
+  // 편집 모드 진입 시 초기값 설정
   useEffect(() => {
-    if (activeCol >= 0) {
-      const val = order[COLUMNS[activeCol].key as keyof Order];
-      const s = val == null ? "" : String(val);
-      setEditValue(s);
-      editRef.current = s;
-      setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 0);
+    if (editingCol >= 0) {
+      let initVal: string;
+      if (initialChar !== null) {
+        initVal = initialChar;
+      } else {
+        const val = order[COLUMNS[editingCol].key as keyof Order];
+        initVal = val == null ? "" : String(val);
+      }
+      setEditValue(initVal);
+      editRef.current = initVal;
+      onEditValueChange(rowIdx, editingCol, initVal);
+      setTimeout(() => {
+        inputRef.current?.focus();
+        if (initialChar !== null) {
+          const len = initialChar.length;
+          inputRef.current?.setSelectionRange(len, len);
+        } else {
+          inputRef.current?.select();
+        }
+      }, 0);
     }
-  }, [activeCol]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editingCol, initialChar]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setEditValue(e.target.value);
     editRef.current = e.target.value;
-  }, []);
+    if (editingCol >= 0) onEditValueChange(rowIdx, editingCol, e.target.value);
+  }, [rowIdx, editingCol, onEditValueChange]);
 
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter") { e.preventDefault(); onCommit(rowIdx, activeCol, editRef.current, e.shiftKey ? "up" : "down"); }
-    else if (e.key === "Tab") { e.preventDefault(); onCommit(rowIdx, activeCol, editRef.current, e.shiftKey ? "left" : "right"); }
-    else if (e.key === "Escape") { e.preventDefault(); onCommit(rowIdx, activeCol, null, "none"); }
-  }, [rowIdx, activeCol, onCommit]);
+    if (e.key === "Enter") { e.preventDefault(); onCommit(rowIdx, editingCol, editRef.current, e.shiftKey ? "up" : "down"); }
+    else if (e.key === "Tab") { e.preventDefault(); onCommit(rowIdx, editingCol, editRef.current, e.shiftKey ? "left" : "right"); }
+    else if (e.key === "Escape") { e.preventDefault(); onCommit(rowIdx, editingCol, null, "none"); }
+    // 편집 모드에서는 방향키가 인풋 내부 커서 이동에 사용됨 (가로채지 않음)
+  }, [rowIdx, editingCol, onCommit]);
 
+  // blur 시 값 자동 저장 (다른 곳 클릭, 다른 셀 클릭 등)
   const onBlur = useCallback(() => {
-    if (activeCol >= 0) onBlurSave(rowIdx, activeCol, editRef.current);
-  }, [rowIdx, activeCol, onBlurSave]);
+    if (editingCol >= 0) onBlurSave(rowIdx, editingCol, editRef.current);
+  }, [rowIdx, editingCol, onBlurSave]);
 
   return (
     <tr className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)]">
-      <td className="px-2 py-1.5 sticky left-0 bg-[var(--cell-sticky-bg)] z-10">
+      <td className="px-2 py-1.5 sticky left-0 bg-[var(--cell-sticky-bg)] z-10 border-r border-[var(--border-subtle)]">
         <input type="checkbox" checked={isChecked} onChange={() => onSelectToggle(order.id)} className="accent-blue-500" />
       </td>
       {COLUMNS.map((col, ci) => {
         const val = order[col.key as keyof Order];
-        const isActive = ci === activeCol;
+        const isSelected = ci === activeCol;
+        const isEditing = ci === editingCol;
         const inSel = selMinC >= 0 && ci >= selMinC && ci <= selMaxC;
         const isFillHL = ci === fillHighlightCol;
         const isEditable = EDITABLE_KEYS.has(col.key);
@@ -565,13 +752,14 @@ const MemoRow = memo(function Row({
         return (
           <td
             key={col.key}
-            className={`relative px-2 py-1.5 overflow-hidden ${col.align === "right" ? "text-right" : "text-left"} ${
+            className={`relative px-2 py-1.5 overflow-hidden border-r border-[var(--border-subtle)] ${col.align === "right" ? "text-right" : "text-left"} ${
               isFillHL ? "bg-blue-500/10 ring-1 ring-blue-500/30 ring-inset" :
-              inSel && !isActive ? "bg-blue-500/10" : ""
+              inSel && !isSelected ? "bg-blue-500/10" : ""
             }`}
             style={{ width: colWidths[col.key], minWidth: colWidths[col.key], maxWidth: colWidths[col.key] }}
             onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); onCellMouseDown(rowIdx, ci); } }}
             onMouseEnter={() => onCellMouseEnter(rowIdx, ci)}
+            onDoubleClick={() => onCellDoubleClick(rowIdx, ci)}
           >
             {col.key === "delivery_status" ? (
               <button
@@ -582,7 +770,7 @@ const MemoRow = memo(function Row({
               >
                 {String(val || "결제전")}
               </button>
-            ) : isActive && isEditable ? (
+            ) : isEditing && isEditable ? (
               <input
                 ref={inputRef}
                 value={editValue}
@@ -594,7 +782,7 @@ const MemoRow = memo(function Row({
               />
             ) : (
               <div className={`text-xs truncate min-h-[22px] leading-[22px] px-1 ${
-                isActive ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""
+                isSelected ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""
               }`}>
                 {formatCell(col.key, val)}
               </div>
@@ -615,6 +803,8 @@ const MemoRow = memo(function Row({
   prev.isChecked === next.isChecked &&
   prev.colWidths === next.colWidths &&
   prev.activeCol === next.activeCol &&
+  prev.editingCol === next.editingCol &&
+  prev.initialChar === next.initialChar &&
   prev.selMinC === next.selMinC &&
   prev.selMaxC === next.selMaxC &&
   prev.showFillHandle === next.showFillHandle &&
@@ -644,7 +834,7 @@ function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilter
     document.addEventListener("mouseup", onUp);
   };
   return (
-    <th className={`relative px-2 py-2.5 text-xs font-medium text-[var(--text-tertiary)] whitespace-nowrap select-none group ${col.align === "right" ? "text-right" : "text-left"}`} style={{ width, minWidth: width }}>
+    <th className={`relative px-2 py-2.5 text-xs font-medium text-[var(--text-tertiary)] whitespace-nowrap select-none group border-r border-[var(--border-subtle)] ${col.align === "right" ? "text-right" : "text-left"}`} style={{ width, minWidth: width }}>
       <div className="flex items-center gap-1">
         <span className="truncate">{col.label}</span>
         {sort === "asc" && <ArrowUp className="w-3 h-3 text-blue-400 shrink-0" />}

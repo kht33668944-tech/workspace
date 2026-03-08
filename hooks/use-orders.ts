@@ -27,6 +27,10 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const [loading, setLoading] = useState(true);
   const [months, setMonths] = useState<string[]>([]);
   const undoStackRef = useRef<UndoEntry[]>([]);
+  const pinnedIdsRef = useRef<Set<string> | null>(null);
+  const prevFiltersKeyRef = useRef<string>("");
+  const fetchGenRef = useRef(0);
+  const prevFetchGenRef = useRef(0);
 
   const fetchOrders = useCallback(async () => {
     if (!user) return;
@@ -71,6 +75,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
     }
 
     setOrders(allData);
+    fetchGenRef.current++;
     setLoading(false);
   }, [user, options.month, options.marketplace, options.search]);
 
@@ -97,8 +102,25 @@ export function useOrders(options: UseOrdersOptions = {}) {
     fetchMonths();
   }, [fetchMonths]);
 
-  // 클라이언트 측 컬럼 필터링
-  const filteredOrders = applyColumnFilters(orders, options.columnFilters || {});
+  // 클라이언트 측 컬럼 필터링 (스냅샷 방식: 필터 설정 변경 또는 DB 재조회 시에만 재평가)
+  const filtersKey = JSON.stringify(options.columnFilters || {});
+  const hasActiveFilters = Object.entries(options.columnFilters || {}).some(([, v]) => v.length > 0);
+
+  if (filtersKey !== prevFiltersKeyRef.current || fetchGenRef.current !== prevFetchGenRef.current) {
+    prevFiltersKeyRef.current = filtersKey;
+    prevFetchGenRef.current = fetchGenRef.current;
+    if (!hasActiveFilters) {
+      pinnedIdsRef.current = null;
+    } else {
+      pinnedIdsRef.current = new Set(
+        applyColumnFilters(orders, options.columnFilters || {}).map((o) => o.id)
+      );
+    }
+  }
+
+  const filteredOrders = pinnedIdsRef.current
+    ? orders.filter((o) => pinnedIdsRef.current!.has(o.id))
+    : orders;
 
   const insertOrders = async (rows: OrderInsert[]) => {
     if (!user) return { error: "Not authenticated" };

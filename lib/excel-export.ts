@@ -22,12 +22,13 @@ export function generateOrderExcel(orders: Order[]): { buffer: ArrayBuffer; file
     원가: o.cost,
     마진: o.margin,
     결제방식: o.payment_method,
-    구매아이디: o.purchase_id,
     구매처: o.purchase_source,
+    구매아이디: o.purchase_id,
     주문번호: o.purchase_order_no,
     택배사: o.courier,
     운송장: o.tracking_no,
     배송상태: o.delivery_status,
+    최저가링크: o.purchase_url,
   }));
 
   const ws = XLSX.utils.json_to_sheet(data);
