@@ -77,7 +77,8 @@ export default function OrdersPage() {
       .then((res) => res.ok ? res.json() : null)
       .then((data) => {
         if (data && Array.isArray(data) && data.length > 0) {
-          const map: Record<string, number> = {};
+          // 기본값과 병합 (DB 커스텀 코드가 기본값을 덮어씀)
+          const map: Record<string, number> = { ...DEFAULT_COURIER_CODES };
           for (const c of data) map[c.courier_name] = c.courier_code;
           setCourierCodeMap(map);
         }

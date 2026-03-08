@@ -8,10 +8,17 @@ const DELIVERY_BASE_URL = "https://store.ohou.se/deliveries";
 // 택배사명 정규화
 const COURIER_MAP: Record<string, string> = {
   "CJ대한통운": "CJ대한통운",
+  "CJ택배": "CJ대한통운",
+  "대한통운": "CJ대한통운",
   "한진택배": "한진택배",
+  "한진": "한진택배",
   "롯데택배": "롯데택배",
+  "롯데": "롯데택배",
   "우체국택배": "우체국택배",
+  "우체국": "우체국택배",
+  "우편": "우체국택배",
   "로젠택배": "로젠택배",
+  "로젠": "로젠택배",
   "경동택배": "경동택배",
   "대신택배": "대신택배",
   "일양로지스": "일양로지스",
@@ -21,7 +28,6 @@ const COURIER_MAP: Record<string, string> = {
   "호남택배": "호남택배",
   "한의사랑택배": "한의사랑택배",
   "SLX": "SLX",
-  "우편": "우체국택배",
 };
 
 function normalizeCourier(name: string): string {
