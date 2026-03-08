@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar, Truck, ChevronDown } from "lucide-react";
+import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar, Truck, ChevronDown, ShoppingCart } from "lucide-react";
 import { useOrders } from "@/hooks/use-orders";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -13,6 +13,7 @@ import ExcelImport from "@/components/workspace/orders/excel-import";
 import OrderModal from "@/components/workspace/orders/order-modal";
 import OrderSidePanel from "@/components/workspace/orders/order-side-panel";
 import TrackingCollectModal from "@/components/workspace/orders/tracking-collect-modal";
+import AutoPurchaseModal from "@/components/workspace/orders/auto-purchase-modal";
 import type { Order, OrderInsert } from "@/types/database";
 
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
@@ -46,6 +47,7 @@ export default function OrdersPage() {
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [sidePanelOrder, setSidePanelOrder] = useState<Order | null>(null);
   const [showTrackingCollect, setShowTrackingCollect] = useState(false);
+  const [showAutoPurchase, setShowAutoPurchase] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -330,6 +332,14 @@ export default function OrdersPage() {
               {deleting ? "삭제 중..." : `${selectedIds.size}건 삭제`}
             </button>
           )}
+          <button
+            onClick={() => setShowAutoPurchase(true)}
+            disabled={selectedIds.size === 0}
+            className="flex items-center gap-1.5 px-3 py-2 bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 disabled:opacity-30 disabled:cursor-not-allowed text-sm rounded-lg transition-colors"
+          >
+            <ShoppingCart className="w-4 h-4" />
+            구매 자동화{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
+          </button>
           <div className="relative" ref={exportMenuRef}>
             <button
               onClick={() => setShowExportMenu(!showExportMenu)}
@@ -441,6 +451,16 @@ export default function OrdersPage() {
           order={orders.find((o) => o.id === sidePanelOrder.id) || sidePanelOrder}
           onUpdate={updateOrder}
           onClose={() => setSidePanelOrder(null)}
+        />
+      )}
+      {showAutoPurchase && (
+        <AutoPurchaseModal
+          orders={orders.filter((o) => selectedIds.has(o.id))}
+          onClose={() => setShowAutoPurchase(false)}
+          onComplete={() => {
+            setShowAutoPurchase(false);
+            window.location.reload();
+          }}
         />
       )}
       {showTrackingCollect && (

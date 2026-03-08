@@ -1,0 +1,640 @@
+- generic [ref=e1]:
+  - generic:
+    - strong [ref=e2]: 스킵 네비게이션
+    - list:
+      - listitem:
+        - link "검색창 바로가기" [ref=e3] [cursor=pointer]:
+          - /url: "#skip-navigation-search"
+      - listitem:
+        - link "전체카테고리 바로가기" [ref=e4] [cursor=pointer]:
+          - /url: "#skip-navigation-category-all"
+      - listitem:
+        - link "본문 바로가기" [ref=e5] [cursor=pointer]:
+          - /url: "#skip-navigation-container"
+  - generic [ref=e6]:
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - heading "G마켓" [level=1] [ref=e12]:
+          - link "G마켓" [ref=e13] [cursor=pointer]:
+            - /url: //www.gmarket.co.kr
+            - generic [ref=e14]: G마켓
+        - group "검색" [ref=e17]:
+          - generic [ref=e18]: 검색
+          - generic [ref=e19]:
+            - generic [ref=e20]: 상품검색
+            - textbox "상품검색" [ref=e21]
+            - button "검색" [ref=e22] [cursor=pointer]:
+              - img "검색" [ref=e23]
+        - generic [ref=e24]:
+          - generic [ref=e25]: 광고영역
+          - link "G마켓 2만원 쿠폰 증정 이벤트" [ref=e26] [cursor=pointer]:
+            - /url: https://event.bonus365.com/event/20260220156351/ysh_2603_gmarket_wide_2man_O?siteCode=596402&utm_source=gmarket_wide_2man_O&utm_medium=banner_gmarket&utm_campaign=596402&utm_term=ori
+            - img "G마켓 2만원 쿠폰 증정 이벤트" [ref=e27]
+        - list [ref=e29]:
+          - listitem [ref=e30]:
+            - link "마이페이지" [ref=e31] [cursor=pointer]:
+              - /url: https://my.gmarket.co.kr/ko/pc/main
+              - img "마이페이지" [ref=e32]
+          - listitem [ref=e33]:
+            - button "최근 본 상품" [ref=e34] [cursor=pointer]:
+              - img "최근 본 상품" [ref=e36]
+          - listitem [ref=e37]:
+            - link "1" [ref=e38] [cursor=pointer]:
+              - /url: https://cart.gmarket.co.kr/ko/cart
+              - generic [ref=e39]: "1"
+      - generic [ref=e40]:
+        - button "전체 카테고리" [ref=e42] [cursor=pointer]
+        - list [ref=e44]:
+          - listitem [ref=e45]:
+            - link "베스트" [ref=e46] [cursor=pointer]:
+              - /url: https://www.gmarket.co.kr/n/best
+          - listitem [ref=e47]:
+            - link "슈퍼딜" [ref=e48] [cursor=pointer]:
+              - /url: https://www.gmarket.co.kr/n/superdeal
+          - listitem [ref=e49]:
+            - link "쿠폰 · 출첵" [ref=e50] [cursor=pointer]:
+              - /url: https://promotion.gmarket.co.kr/Event/CouponZone.asp
+              - img "쿠폰 · 출첵" [ref=e51]
+          - listitem [ref=e52]:
+            - link "이마트몰" [ref=e53] [cursor=pointer]:
+              - /url: https://www.gmarket.co.kr/n/emartmall
+          - listitem [ref=e54]:
+            - link "스타배송" [ref=e55] [cursor=pointer]:
+              - /url: https://www.gmarket.co.kr/n/stardelivery
+          - listitem [ref=e56]:
+            - link "유니버스 클럽" [ref=e57] [cursor=pointer]:
+              - /url: https://club.gmarket.co.kr
+          - listitem [ref=e58]:
+            - link "사업자 클럽" [ref=e59] [cursor=pointer]:
+              - /url: https://www.gmarket.co.kr/n/biz
+              - img "사업자 클럽" [ref=e60]
+        - list [ref=e62]:
+          - listitem [ref=e63]:
+            - link "사업자클럽 회원입니다" [ref=e64] [cursor=pointer]:
+              - /url: https://www.gmarket.co.kr/n/biz
+              - generic [ref=e65]: 사업자클럽 회원입니다
+            - link "위드 님" [ref=e66] [cursor=pointer]:
+              - /url: https://my.gmarket.co.kr/ko/pc/main
+              - generic [ref=e67]: 위드
+              - text: 님
+          - listitem [ref=e68]:
+            - link "로그아웃" [ref=e69] [cursor=pointer]:
+              - /url: https://signinssl.gmarket.co.kr/logout/logoutproc
+          - listitem [ref=e70]:
+            - link "고객센터" [ref=e71] [cursor=pointer]:
+              - /url: https://help.gmarket.co.kr/tcs/Main
+          - listitem [ref=e72]:
+            - button "Global" [ref=e73] [cursor=pointer]
+    - generic [ref=e93]:
+      - generic [ref=e94]:
+        - heading "주문결제" [level=2] [ref=e95]
+        - list [ref=e96]:
+          - listitem [ref=e97]: 장바구니
+          - listitem [ref=e98]: 주문결제
+          - listitem [ref=e99]: 주문완료
+      - generic [ref=e101]:
+        - generic [ref=e102]:
+          - generic [ref=e105]:
+            - heading "집" [level=3] [ref=e107]
+            - generic [ref=e108]:
+              - generic [ref=e109]:
+                - generic [ref=e110]: 강신욱
+                - generic [ref=e111]: 010-6564-4459
+              - generic [ref=e112]:
+                - checkbox "안심번호 사용하기" [ref=e113]
+                - generic [ref=e114] [cursor=pointer]: 안심번호 사용하기
+                - button "안심번호 사용하기 안내" [ref=e115] [cursor=pointer]:
+                  - generic [ref=e116]: 안심번호 사용하기 안내
+              - generic [ref=e117]: 경기도 수원시 팔달구 월드컵로357번길 11-16 1층 좌
+              - generic [ref=e119]:
+                - generic [ref=e120]: 배송시 요청사항을 선택해 주세요.
+                - combobox "배송 요청사항 선택" [ref=e121]:
+                  - option "배송시 요청사항을 선택해 주세요." [selected]
+                  - option "직접 수령하겠습니다."
+                  - option "배송 전 연락바랍니다."
+                  - option "부재 시 경비실에 맡겨주세요."
+                  - option "부재 시 문 앞에 놓아주세요."
+                  - option "부재 시 택배함에 넣어주세요."
+                  - option "직접 입력"
+              - button "배송지 변경" [ref=e123] [cursor=pointer]
+          - generic [ref=e126]:
+            - generic [ref=e127]:
+              - heading "주문상품 1 개" [level=3] [ref=e128]:
+                - text: 주문상품
+                - generic [ref=e129]: 1 개
+              - generic [ref=e130]:
+                - button "할인쿠폰 적용하기" [ref=e131] [cursor=pointer]:
+                  - generic [ref=e132]: 할인쿠폰 적용하기
+                - generic [ref=e134]: 🎉 최대 할인 쿠폰 적용중
+                - img [ref=e136]
+            - list [ref=e147]:
+              - listitem [ref=e148]:
+                - generic [ref=e149]:
+                  - link "레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료" [ref=e151] [cursor=pointer]:
+                    - /url: https://item.gmarket.co.kr/Item?goodsCode=2752723958
+                    - img "레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료" [ref=e152]
+                  - generic [ref=e153]:
+                    - link "레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료" [ref=e155] [cursor=pointer]:
+                      - /url: https://item.gmarket.co.kr/Item?goodsCode=2752723958
+                      - generic [ref=e156]: 레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료
+                    - generic [ref=e157]:
+                      - text: 수량
+                      - generic [ref=e158]: 1개
+                    - generic [ref=e161]:
+                      - generic [ref=e163]: 스타배송
+                      - generic [ref=e164]: 내일(월) 도착보장
+                    - generic [ref=e165]:
+                      - button "쿠폰적용" [ref=e167] [cursor=pointer]
+                      - generic [ref=e168]:
+                        - strong [ref=e169]: "상품 금액 :"
+                        - generic [ref=e171]:
+                          - strong [ref=e172]: 22,980
+                          - text: 원
+                        - generic [ref=e173]:
+                          - strong [ref=e174]: 18,900
+                          - text: 원
+                - generic [ref=e175]:
+                  - generic [ref=e177]: 스타배송
+                  - paragraph [ref=e179]:
+                    - generic [ref=e180]: 15,000원 이상 구매시 배송비 무료
+                    - text: 무료배송
+          - generic [ref=e183]:
+            - generic [ref=e184]: 할인 및 스마일캐시·머니 사용
+            - generic [ref=e185]:
+              - term [ref=e186]:
+                - generic [ref=e187]:
+                  - heading "스마일캐시·머니" [level=4] [ref=e188]
+                  - button "더보기" [ref=e190] [cursor=pointer]:
+                    - generic [ref=e191]: 더보기
+                - generic [ref=e192]:
+                  - text: 보유
+                  - strong [ref=e193]: 0원
+              - definition [ref=e194]:
+                - list [ref=e195]:
+                  - listitem [ref=e196]:
+                    - generic [ref=e197]:
+                      - text: 스마일캐시
+                      - generic [ref=e198]: 우선사용
+                    - generic [ref=e199]: 0원
+                  - listitem [ref=e200]:
+                    - generic [ref=e201]: 스마일머니
+                    - generic [ref=e202]: 0원
+            - generic [ref=e204]:
+              - heading "전환하면 바로 사용할 수 있어요!" [level=4] [ref=e205]
+              - generic [ref=e206]:
+                - button "숨은 내 제휴포인트를 찾아보세요" [ref=e208] [cursor=pointer]
+                - generic [ref=e209]:
+                  - list [ref=e211]:
+                    - listitem [ref=e212]:
+                      - link "SSG MONEY" [ref=e213] [cursor=pointer]:
+                        - /url: "#"
+                    - listitem [ref=e214]:
+                      - link "마이신한포인트" [ref=e215] [cursor=pointer]:
+                        - /url: "#"
+                    - listitem [ref=e216]:
+                      - link "페이코" [ref=e217] [cursor=pointer]:
+                        - /url: "#"
+                    - listitem [ref=e218]:
+                      - link "엘포인트" [ref=e219] [cursor=pointer]:
+                        - /url: "#"
+                    - listitem [ref=e220]:
+                      - link "현대블루멤버스" [ref=e221] [cursor=pointer]:
+                        - /url: "#"
+                    - listitem [ref=e222]:
+                      - link "OK캐쉬백" [ref=e223] [cursor=pointer]:
+                        - /url: "#"
+                    - listitem [ref=e224]:
+                      - link "KB포인트리" [ref=e225] [cursor=pointer]:
+                        - /url: "#"
+                    - listitem [ref=e226]:
+                      - link "기아멤버스" [ref=e227] [cursor=pointer]:
+                        - /url: "#"
+                    - listitem [ref=e228]:
+                      - link "위비멤버스" [ref=e229] [cursor=pointer]:
+                        - /url: "#"
+                    - listitem [ref=e230]:
+                      - link "NH포인트" [ref=e231] [cursor=pointer]:
+                        - /url: "#"
+                    - listitem [ref=e232]:
+                      - link "하나멤버스" [ref=e233] [cursor=pointer]:
+                        - /url: "#"
+                  - button "Previous slide" [disabled]:
+                    - generic: 이전
+                  - button "Next slide" [ref=e234] [cursor=pointer]:
+                    - generic [ref=e235]: 다음
+          - generic [ref=e238]:
+            - generic [ref=e239]: 결제수단
+            - generic [ref=e240]:
+              - generic [ref=e241]:
+                - generic [ref=e242]:
+                  - radio "스마일페이 간편결제" [checked] [ref=e243]
+                  - generic [ref=e244] [cursor=pointer]:
+                    - generic [ref=e246]: 스마일페이
+                    - generic [ref=e247]: 간편결제
+                  - button "스마일페이 간편결제 설정" [ref=e248] [cursor=pointer]:
+                    - generic [ref=e249]: 스마일페이 간편결제
+                    - text: 설정
+                - generic [ref=e251]:
+                  - generic [ref=e252]:
+                    - button "추가적립부터 소득공제 혜택까지 지금 이용해보세요":
+                      - generic [ref=e253] [cursor=pointer]: 추가적립부터 소득공제 혜택까지
+                      - generic [ref=e254] [cursor=pointer]: 지금 이용해보세요
+                  - list [ref=e256]:
+                    - listitem [ref=e257]:
+                      - radio [ref=e258]
+                      - generic [ref=e260]:
+                        - generic [ref=e261]:
+                          - paragraph [ref=e262]: 머니충전결제
+                          - paragraph [ref=e263]:
+                            - text: 충전 계좌 설정하고 결제해서
+                            - emphasis [ref=e264]: 결제 금액의 1% 추가적립과
+                            - text: 소득공제 혜택을 받으세요.
+                        - button [ref=e265] [cursor=pointer]: 지금 이용하기
+                    - listitem [ref=e266]:
+                      - radio "삼성마스타" [checked] [ref=e267]
+                      - generic [ref=e268]:
+                        - generic [ref=e270]:
+                          - paragraph [ref=e271]: 삼성마스타
+                          - paragraph [ref=e272]: 5188 31** **** 6478
+                        - generic [ref=e273]:
+                          - button "5만원 미만은 일시불로 결제됩니다" [ref=e275] [cursor=pointer]:
+                            - emphasis [ref=e276]: 5만원 미만은 일시불로 결제됩니다
+                          - generic [ref=e277]:
+                            - checkbox "삼성카드 포인트 사용" [ref=e278]
+                            - generic [ref=e279] [cursor=pointer]: 삼성카드 포인트 사용
+                    - listitem [ref=e280]:
+                      - radio [ref=e281]
+                      - generic [ref=e282]:
+                        - generic [ref=e284]:
+                          - paragraph [ref=e285]: 국민마스타특별
+                          - paragraph [ref=e286]: 5236 12** **** 2027
+                        - button [ref=e289] [cursor=pointer]:
+                          - emphasis [ref=e290]: 5만원 미만은 일시불로 결제됩니다
+                    - listitem [ref=e291]:
+                      - radio [ref=e292]
+                      - generic [ref=e293]:
+                        - generic [ref=e295]:
+                          - paragraph [ref=e296]: NH체크카드
+                          - paragraph [ref=e297]: 5461 11** **** 5569
+                        - button [ref=e300] [cursor=pointer]:
+                          - emphasis [ref=e301]: 법인/체크카드는 일시불로 결제됩니다
+                    - listitem [ref=e302]:
+                      - radio [ref=e303]
+                      - generic [ref=e304]:
+                        - generic [ref=e306]:
+                          - paragraph [ref=e307]: 롯데카드
+                          - paragraph [ref=e308]: 9409 15** **** 3254
+                        - button [ref=e311] [cursor=pointer]:
+                          - emphasis [ref=e312]: 5만원 미만은 일시불로 결제됩니다
+                    - listitem [ref=e313]:
+                      - radio [ref=e314]
+                      - generic [ref=e315]:
+                        - generic [ref=e317]:
+                          - paragraph [ref=e318]: NH은행
+                          - paragraph [ref=e319]: 302*****94411
+                        - generic [ref=e321]:
+                          - paragraph [ref=e322]: 아래 정보로 현금영수증이 자동 발급됩니다.
+                          - list [ref=e323]:
+                            - listitem [ref=e324]: 사업자지출증빙
+                            - listitem [ref=e325]:
+                              - button [ref=e326] [cursor=pointer]: 604-27-44049
+                    - listitem [ref=e327]:
+                      - radio [ref=e328]
+                      - generic [ref=e329]:
+                        - generic [ref=e331]:
+                          - paragraph [ref=e332]: 신한카드
+                          - paragraph [ref=e333]: 9410 61** **** 6395
+                        - generic [ref=e334]:
+                          - button [ref=e336] [cursor=pointer]:
+                            - emphasis [ref=e337]: 5만원 미만은 일시불로 결제됩니다
+                          - generic [ref=e338]:
+                            - checkbox [ref=e339]
+                            - generic [ref=e340] [cursor=pointer]: 마이신한포인트 사용
+                    - listitem [ref=e341]:
+                      - radio [ref=e342]
+                      - generic [ref=e343]:
+                        - generic [ref=e345]:
+                          - paragraph [ref=e346]: 우리카드
+                          - paragraph [ref=e347]: 5522 20** **** 9400
+                        - generic [ref=e348]:
+                          - button [ref=e350] [cursor=pointer]:
+                            - emphasis [ref=e351]: 5만원 미만은 일시불로 결제됩니다
+                          - generic [ref=e352]:
+                            - checkbox [ref=e353]
+                            - generic [ref=e354] [cursor=pointer]: 우리WON꿀머니 사용
+                    - listitem [ref=e355]:
+                      - radio [ref=e356]
+                      - generic [ref=e357]:
+                        - img [ref=e359]
+                        - generic [ref=e360]:
+                          - button [ref=e362] [cursor=pointer]:
+                            - emphasis [ref=e363]: 일시불
+                            - generic [ref=e364]: 무이자 최대 3개월 가능
+                          - generic [ref=e365]:
+                            - checkbox [ref=e366]
+                            - generic [ref=e367] [cursor=pointer]: M포인트최고5%, 최대5천원
+                            - button [ref=e368] [cursor=pointer]:
+                              - generic [ref=e369]: 도움말
+                    - listitem [ref=e370]:
+                      - radio [ref=e371]
+                      - generic [ref=e372]:
+                        - img [ref=e374]
+                        - generic [ref=e375]:
+                          - button [ref=e377] [cursor=pointer]:
+                            - emphasis [ref=e378]: 일시불
+                            - generic [ref=e379]: 무이자 최대 3개월 가능
+                          - generic [ref=e380]:
+                            - checkbox [ref=e381]
+                            - generic [ref=e382] [cursor=pointer]: M포인트최고5%, 최대5천원
+                            - button [ref=e383] [cursor=pointer]:
+                              - generic [ref=e384]: 도움말
+                    - listitem [ref=e385]:
+                      - radio [ref=e386]
+                      - generic [ref=e387]:
+                        - generic [ref=e388]:
+                          - generic [ref=e390]: 최대 378 적립
+                          - generic [ref=e392]: smile card
+                          - generic [ref=e393]:
+                            - generic [ref=e394]: 최대 2% 스마일캐시 적립
+                            - generic [ref=e395]: 스마일카드 혜택 받으세요!
+                        - button [ref=e397] [cursor=pointer]: 스마일카드 혜택받기
+                    - listitem [ref=e398]:
+                      - radio [ref=e399]
+                      - button [ref=e401] [cursor=pointer]: 결제수단 등록
+                    - listitem [ref=e402]
+                    - listitem [ref=e403]
+                  - button "이전 결제수단" [ref=e404] [cursor=pointer]
+                  - button "다음 결제수단" [ref=e405] [cursor=pointer]
+              - generic [ref=e407]:
+                - radio "일반 결제 혜택" [ref=e408]
+                - generic [ref=e409] [cursor=pointer]: 일반 결제 혜택
+                - button "더보기" [ref=e410] [cursor=pointer]
+        - generic [ref=e411]:
+          - generic [ref=e415]:
+            - list [ref=e416]:
+              - listitem [ref=e417]:
+                - generic [ref=e418]:
+                  - generic [ref=e419]: 상품금액
+                  - generic [ref=e420]: 27,200원
+              - listitem [ref=e421]:
+                - button "할인금액 -8,300원" [ref=e423] [cursor=pointer]:
+                  - generic [ref=e424]: 할인금액
+                  - generic [ref=e425]: "-8,300원"
+            - list [ref=e426]:
+              - listitem [ref=e427]:
+                - generic [ref=e428]:
+                  - generic [ref=e429]: 총 결제금액
+                  - generic [ref=e430]: 18,900원
+                - button "리워드안내" [ref=e432]:
+                  - generic [ref=e433]: 리워드안내
+            - button "결제하기" [ref=e434] [cursor=pointer]
+          - list [ref=e438]:
+            - listitem [ref=e439]:
+              - button "개인정보 제 3자 제공고지" [ref=e440] [cursor=pointer]
+            - listitem [ref=e441]:
+              - button "전자상거래 구매안전 서비스 안내" [ref=e442] [cursor=pointer]
+      - dialog [ref=e543]:
+        - iframe [active] [ref=e545]:
+          - generic [ref=f169e2]:
+            - generic [ref=f169e6]:
+              - heading "배송지 변경" [level=1] [ref=f169e8]:
+                - generic [ref=f169e9]: 배송지 변경
+              - button "닫기" [ref=f169e11] [cursor=pointer]:
+                - generic [ref=f169e12]: 닫기
+            - generic [ref=f169e13]:
+              - main [ref=f169e14]:
+                - generic [ref=f169e15]:
+                  - heading [level=3] [ref=f169e16]
+                  - generic [ref=f169e17]:
+                    - button "배송지 추가하기" [ref=f169e18] [cursor=pointer]:
+                      - generic [ref=f169e19]: 배송지 추가하기
+                    - heading "배송지 목록" [level=4] [ref=f169e20]
+                    - list [ref=f169e21]:
+                      - listitem [ref=f169e22]:
+                        - generic [ref=f169e23]:
+                          - generic [ref=f169e24]:
+                            - generic [ref=f169e25]: 배송지명
+                            - text: 집
+                          - generic [ref=f169e26]:
+                            - generic [ref=f169e27]:
+                              - generic [ref=f169e28]: 수령인
+                              - text: 강신욱
+                            - generic [ref=f169e29]:
+                              - generic [ref=f169e30]: 연락처
+                              - text: 010-6564-4459
+                          - generic [ref=f169e31]:
+                            - generic [ref=f169e32]: 주소
+                            - generic [ref=f169e33]: 경기도 수원시 팔달구 월드컵로357번길 11-16 1층 좌
+                          - generic [ref=f169e35]:
+                            - generic [ref=f169e36]: 이마트몰
+                            - text: 새벽/낮밤배송 가능
+                          - generic [ref=f169e37]:
+                            - generic:
+                              - button "수정" [ref=f169e38] [cursor=pointer]
+                              - button "선택" [ref=f169e39] [cursor=pointer]
+                              - button "삭제" [ref=f169e40] [cursor=pointer]
+                      - listitem [ref=f169e41]:
+                        - generic [ref=f169e42]:
+                          - generic [ref=f169e43]:
+                            - generic [ref=f169e44]: 배송지명
+                            - text: 집
+                          - generic [ref=f169e45]:
+                            - generic [ref=f169e46]:
+                              - generic [ref=f169e47]: 수령인
+                              - text: 이다빈
+                            - generic [ref=f169e48]:
+                              - generic [ref=f169e49]: 연락처
+                              - text: 010-5810-6756
+                          - generic [ref=f169e50]:
+                            - generic [ref=f169e51]: 주소
+                            - generic [ref=f169e52]: 충청남도 아산시 배방읍 연화로 99 (천안아산역 더리브) 103-1105
+                          - generic [ref=f169e54]:
+                            - generic [ref=f169e55]: 이마트몰
+                            - text: 새벽/낮밤배송 가능
+                          - generic [ref=f169e56]:
+                            - generic:
+                              - button "수정" [ref=f169e57] [cursor=pointer]
+                              - button "선택" [ref=f169e58] [cursor=pointer]
+                              - button "삭제" [ref=f169e59] [cursor=pointer]
+                      - listitem [ref=f169e60]:
+                        - generic [ref=f169e61]:
+                          - generic [ref=f169e62]:
+                            - generic [ref=f169e63]: 배송지명
+                            - text: 배송지
+                          - generic [ref=f169e64]:
+                            - generic [ref=f169e65]:
+                              - generic [ref=f169e66]: 수령인
+                              - text: 장복희
+                            - generic [ref=f169e67]:
+                              - generic [ref=f169e68]: 연락처
+                              - text: 010-8474-6756
+                          - generic [ref=f169e69]:
+                            - generic [ref=f169e70]: 주소
+                            - generic [ref=f169e71]: 전북특별자치도 군산시 중정길 11 (맥시칸치킨) 1층 힐링과메기전문점
+                          - generic [ref=f169e72]:
+                            - generic:
+                              - button "수정" [ref=f169e73] [cursor=pointer]
+                              - button "선택" [ref=f169e74] [cursor=pointer]
+                              - button "삭제" [ref=f169e75] [cursor=pointer]
+                      - listitem [ref=f169e76]:
+                        - generic [ref=f169e77]:
+                          - generic [ref=f169e78]:
+                            - generic [ref=f169e79]: 배송지명
+                            - text: 배송지
+                          - generic [ref=f169e80]:
+                            - generic [ref=f169e81]:
+                              - generic [ref=f169e82]: 수령인
+                              - text: 김영규
+                            - generic [ref=f169e83]:
+                              - generic [ref=f169e84]: 연락처
+                              - text: 010-4820-6677
+                          - generic [ref=f169e85]:
+                            - generic [ref=f169e86]: 주소
+                            - generic [ref=f169e87]: 경상북도 포항시 북구 장량중앙로 33 (한양 수자인) 206동901호
+                          - generic [ref=f169e89]:
+                            - generic [ref=f169e90]: 이마트몰
+                            - text: 낮밤배송 가능
+                          - generic [ref=f169e91]:
+                            - generic:
+                              - button "수정" [ref=f169e92] [cursor=pointer]
+                              - button "선택" [ref=f169e93] [cursor=pointer]
+                              - button "삭제" [ref=f169e94] [cursor=pointer]
+                      - listitem [ref=f169e95]:
+                        - generic [ref=f169e96]:
+                          - generic [ref=f169e97]:
+                            - generic [ref=f169e98]: 배송지명
+                            - text: 배송지
+                          - generic [ref=f169e99]:
+                            - generic [ref=f169e100]:
+                              - generic [ref=f169e101]: 수령인
+                              - text: 박형곤
+                            - generic [ref=f169e102]:
+                              - generic [ref=f169e103]: 연락처
+                              - text: 010-8474-6756
+                          - generic [ref=f169e104]:
+                            - generic [ref=f169e105]: 주소
+                            - generic [ref=f169e106]: 경상남도 창원시 성산구 창원천로94번길 19 (더시티세븐 자이) 더시티세븐 자이 104동 402호
+                          - generic [ref=f169e107]:
+                            - generic [ref=f169e108]: 배송요청사항
+                            - text: 집 앞에 놓아주세요. 050439051923
+                          - generic [ref=f169e110]:
+                            - generic [ref=f169e111]: 이마트몰
+                            - text: 새벽/낮밤배송 가능
+                          - generic [ref=f169e112]:
+                            - generic:
+                              - button "수정" [ref=f169e113] [cursor=pointer]
+                              - button "선택" [ref=f169e114] [cursor=pointer]
+                              - button "삭제" [ref=f169e115] [cursor=pointer]
+                      - listitem [ref=f169e116]:
+                        - generic [ref=f169e117]:
+                          - generic [ref=f169e118]:
+                            - generic [ref=f169e119]: 배송지명
+                            - text: 배송지
+                          - generic [ref=f169e120]:
+                            - generic [ref=f169e121]:
+                              - generic [ref=f169e122]: 수령인
+                              - text: 김소영
+                            - generic [ref=f169e123]:
+                              - generic [ref=f169e124]: 연락처
+                              - text: 010-2259-8944
+                          - generic [ref=f169e125]:
+                            - generic [ref=f169e126]: 주소
+                            - generic [ref=f169e127]: 전라남도 무안군 일로읍 오남로 43 (한국아델리움 아파트) 102동 1504호
+                          - generic [ref=f169e128]:
+                            - generic [ref=f169e129]: 배송요청사항
+                            - text: 010-3648-4116
+                          - generic [ref=f169e131]:
+                            - generic [ref=f169e132]: 이마트몰
+                            - text: 낮밤배송 가능
+                          - generic [ref=f169e133]:
+                            - generic:
+                              - button "수정" [ref=f169e134] [cursor=pointer]
+                              - button "선택" [ref=f169e135] [cursor=pointer]
+                              - button "삭제" [ref=f169e136] [cursor=pointer]
+              - button [ref=f169e137] [cursor=pointer]:
+                - generic [ref=f169e139]: 위로 가기
+    - contentinfo [ref=e444]:
+      - generic [ref=e445]:
+        - list [ref=e447]:
+          - listitem [ref=e448]:
+            - link "주식회사 지마켓 소개" [ref=e449] [cursor=pointer]:
+              - /url: https://corp.gmarket.com/
+          - listitem [ref=e450]:
+            - link "채용정보" [ref=e451] [cursor=pointer]:
+              - /url: https://careers.gmarket.com/
+          - listitem [ref=e452]:
+            - link "이용약관" [ref=e453] [cursor=pointer]:
+              - /url: https://policy.gmarket.co.kr/terms-policy/buyer-use
+          - listitem [ref=e454]:
+            - link "개인정보처리방침" [ref=e455] [cursor=pointer]:
+              - /url: https://policy.gmarket.co.kr/terms-policy/privacy
+          - listitem [ref=e456]:
+            - link "청소년보호정책" [ref=e457] [cursor=pointer]:
+              - /url: https://policy.gmarket.co.kr/terms-policy/youth
+          - listitem [ref=e458]:
+            - link "광고안내" [ref=e459] [cursor=pointer]:
+              - /url: https://marketinghub.esmplus.com/ad-guide/index.html
+          - listitem [ref=e460]:
+            - link "스크린리더 매뉴얼" [ref=e461] [cursor=pointer]:
+              - /url: https://www.gmarket.co.kr/e/accessibility/screenreader
+        - button "판매자서비스" [ref=e463] [cursor=pointer]
+        - generic [ref=e464]:
+          - generic [ref=e465]:
+            - generic [ref=e466]: "상호명 및 호스팅 서비스 제공 : 주식회사 지마켓"
+            - paragraph [ref=e467]:
+              - text: 서울특별시 강남구 테헤란로 152 (역삼동, 강남파이낸스센터)
+              - text: "사업자등록번호 : 220-81-83676 | 통신판매업신고 : 강남 10630호"
+              - link "사업자정보확인" [ref=e468] [cursor=pointer]:
+                - /url: https://www.ftc.go.kr/bizCommPop.do?wrkr_no=2208183676
+              - text: "대표이사 : 장승환"
+          - generic [ref=e469]:
+            - link "고객센터" [ref=e470] [cursor=pointer]:
+              - /url: https://help.gmarket.co.kr/tcs/Main
+            - paragraph [ref=e471]:
+              - text: 경기도 부천시 원미구 부일로 223, 7층(상동)
+              - text: "Tel :"
+              - emphasis [ref=e472]: 1566-5701(유료)
+              - text: "| 신세계 유니버스 클럽 전용 Tel :"
+              - emphasis [ref=e473]: 1522-5700(유료)
+              - text: "Fax : 02-589-8842 | Mail :"
+              - link "gmarket@corp.gmarket.co.kr" [ref=e474] [cursor=pointer]:
+                - /url: https://help.gmarket.co.kr/Tcs/Inquiry/InquiryWriting
+        - list [ref=e476]:
+          - listitem [ref=e477]:
+            - link "전자금융분쟁처리" [ref=e478] [cursor=pointer]:
+              - /url: http://www.gmarket.co.kr/include/About01.asp
+            - text: "Tel : 1566-5701 | Fax : 02-589-8844 | Mail :"
+            - link "gmk_cs@corp.gmarket.co.kr" [ref=e479] [cursor=pointer]:
+              - /url: mailto:gmk_cs@corp.gmarket.co.kr
+          - listitem [ref=e480]:
+            - button "전자상거래법상의 소비자분쟁해결기준" [ref=e481] [cursor=pointer]
+          - listitem [ref=e482]:
+            - link "오픈마켓 자율준수규약" [ref=e483] [cursor=pointer]:
+              - /url: http://www.gmarket.co.kr/include/About02.asp
+          - listitem [ref=e484]:
+            - link "윤리경영" [ref=e485] [cursor=pointer]:
+              - /url: http://www.gmarket.co.kr/gmap/gmap_cp.asp
+          - listitem [ref=e486]:
+            - link "사이버범죄 신고시스템" [ref=e487] [cursor=pointer]:
+              - /url: https://ecrm.cyber.go.kr/minwon/main
+          - listitem [ref=e488]:
+            - link "VeRO Program" [ref=e489] [cursor=pointer]:
+              - /url: https://www.gmarket.co.kr/gmap/vero_main.asp
+          - listitem [ref=e490]:
+            - link "안전거래센터" [ref=e491] [cursor=pointer]:
+              - /url: https://help.gmarket.co.kr/SecurityCenter/Main
+          - listitem [ref=e492]:
+            - link "저작권침해신고" [ref=e493] [cursor=pointer]:
+              - /url: https://help.gmarket.co.kr/SecurityCenter/Main/SCSub03_1?skind=27
+        - generic [ref=e494]:
+          - paragraph [ref=e495]:
+            - text: 주식회사 지마켓은 통신판매중개자이며 통신판매의 당사자가 아닙니다. 따라서 주식회사 지마켓은 상품·거래 정보 및 가격에 대하여 책임을 지지 않습니다.
+            - text: 본 사이트의 모든 정보, 콘텐츠, UI 등에 대한 무단 복제, 전송, 배포, 스크래핑 등의 행위는 엄격히 금지됩니다.
+            - button "콘텐츠산업 진흥법에 따른 표시" [ref=e496] [cursor=pointer]
+          - paragraph [ref=e497]: Copyright Gmarket Inc. All rights reserved.
+          - paragraph [ref=e499]:
+            - link "KOLSA" [ref=e500] [cursor=pointer]:
+              - /url: http://kolsa.or.kr/neopress/index.php
+              - generic [ref=e501]: KOLSA
+            - text: 한국온라인쇼핑협회
+            - button "수상·인증 내역" [ref=e502] [cursor=pointer]

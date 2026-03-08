@@ -8,7 +8,19 @@
       "Bash(git push origin main)",
       "mcp__chrome-devtools__take_screenshot",
       "mcp__chrome-devtools__select_page",
-      "Bash(git add lib/scrapers/auction.ts app/api/orders/collect-tracking/route.ts app/workspace/orders/page.tsx components/workspace/orders/tracking-collect-modal.tsx)"
+      "Bash(git add lib/scrapers/auction.ts app/api/orders/collect-tracking/route.ts app/workspace/orders/page.tsx components/workspace/orders/tracking-collect-modal.tsx)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_click",
+      "Bash(node -e \":*)",
+      "mcp__playwright__browser_fill_form",
+      "mcp__playwright__browser_handle_dialog",
+      "Bash(grep -o 'Page URL[^\\\\\\\\]*' \"C:\\\\Users\\\\sksso\\\\.claude\\\\projects\\\\c--Users-sksso-Desktop----workspace\\\\328627f4-abc3-40c4-a8cd-25791fa30aed\\\\tool-results\\\\mcp-playwright-browser_click-1772952617643.txt\")",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_evaluate",
+      "mcp__playwright__browser_run_code",
+      "Bash(npm install sharp tesseract.js)"
     ],
     "additionalDirectories": [
       "c:\\Users\\sksso\\Desktop\\개발\\workspace\\app\\api\\archives"

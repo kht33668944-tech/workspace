@@ -25,7 +25,7 @@ const EDITABLE_KEYS = new Set([
   "bundle_no", "order_date", "marketplace", "recipient_name", "product_name",
   "quantity", "recipient_phone", "orderer_phone", "postal_code", "address", "address_detail",
   "delivery_memo", "revenue", "settlement", "cost", "payment_method",
-  "purchase_id", "purchase_source", "purchase_order_no", "courier", "tracking_no", "delivery_status", "memo",
+  "purchase_id", "purchase_source", "purchase_url", "purchase_order_no", "courier", "tracking_no", "delivery_status", "memo",
 ]);
 const NUMERIC_KEYS = new Set(["quantity", "revenue", "settlement", "cost"]);
 const FORMULA_KEYS = new Set(["settlement"]);
@@ -52,6 +52,7 @@ const COLUMNS: Col[] = [
   { key: "payment_method", label: "결제방식", minWidth: 75 },
   { key: "purchase_id", label: "구매아이디", minWidth: 110 },
   { key: "purchase_source", label: "구매처", minWidth: 80 },
+  { key: "purchase_url", label: "최저가링크", minWidth: 130 },
   { key: "purchase_order_no", label: "주문번호", minWidth: 120 },
   { key: "courier", label: "택배사", minWidth: 85 },
   { key: "tracking_no", label: "운송장", minWidth: 130 },
@@ -99,6 +100,10 @@ function formatCell(key: string, val: unknown): React.ReactNode {
   if (key === "marketplace") {
     const mp = MARKETPLACES[String(val)];
     if (mp) return <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${mp.color}`}>{mp.label}</span>;
+  }
+  if (key === "purchase_url") {
+    const url = String(val);
+    return <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-400 text-xs truncate block max-w-full hover:underline" title={url} onClick={e => e.stopPropagation()}>{url.replace(/^https?:\/\//, "").slice(0, 30)}...</a>;
   }
   if (NUMERIC_KEYS.has(key)) return <span className="text-white/70 text-xs">{Number(val).toLocaleString()}</span>;
   return <span title={String(val)} className="text-white/70 text-xs truncate block max-w-full">{String(val)}</span>;

@@ -20,6 +20,7 @@ export interface Order {
   payment_method: string | null;
   purchase_id: string | null;
   purchase_source: string | null;
+  purchase_url: string | null;
   purchase_order_no: string | null;
   courier: string | null;
   tracking_no: string | null;

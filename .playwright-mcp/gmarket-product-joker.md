@@ -1,0 +1,961 @@
+- generic [active] [ref=e1]:
+  - generic:
+    - strong [ref=e2]: 스킵 네비게이션
+    - list:
+      - listitem:
+        - link "본문 바로가기" [ref=e3] [cursor=pointer]:
+          - /url: "#container"
+      - listitem:
+        - link "상품 상세 바로가기" [ref=e4] [cursor=pointer]:
+          - /url: "#skip-item-detail"
+  - generic [ref=e5]:
+    - generic [ref=e8]:
+      - heading "G마켓" [level=1] [ref=e9]:
+        - link "G마켓" [ref=e10] [cursor=pointer]:
+          - /url: //www.gmarket.co.kr
+          - generic [ref=e11]: G마켓
+      - group "검색" [ref=e14]:
+        - generic [ref=e15]: 검색
+        - generic [ref=e16]:
+          - generic [ref=e17] [cursor=pointer]: 상품검색
+          - textbox "상품검색" [ref=e18]:
+            - /placeholder: 통합검색
+          - button "검색" [ref=e19] [cursor=pointer]:
+            - img "검색" [ref=e20]
+      - list [ref=e21]:
+        - listitem [ref=e22]:
+          - button "카테고리" [ref=e23] [cursor=pointer]
+        - listitem [ref=e24]:
+          - button "서비스" [ref=e25] [cursor=pointer]
+      - list [ref=e26]:
+        - listitem [ref=e27]:
+          - link "사업자클럽 회원입니다" [ref=e28] [cursor=pointer]:
+            - /url: https://www.gmarket.co.kr/n/biz
+            - generic [ref=e29]: 사업자클럽 회원입니다
+          - link "위드 님" [ref=e30] [cursor=pointer]:
+            - /url: https://my.gmarket.co.kr/ko/pc/main
+            - generic [ref=e31]: 위드
+            - text: 님
+        - listitem [ref=e32]:
+          - link "로그아웃" [ref=e33] [cursor=pointer]:
+            - /url: https://signinssl.gmarket.co.kr/logout/logoutproc
+        - listitem [ref=e34]:
+          - link "나의 G마켓" [ref=e35] [cursor=pointer]:
+            - /url: https://my.gmarket.co.kr/ko/pc/main
+        - listitem [ref=e36]:
+          - button "최근본상품" [ref=e37] [cursor=pointer]
+        - listitem [ref=e38]:
+          - link "장바구니" [ref=e39] [cursor=pointer]:
+            - /url: https://cart.gmarket.co.kr/ko/cart
+        - listitem [ref=e40]:
+          - link "고객센터" [ref=e41] [cursor=pointer]:
+            - /url: https://help.gmarket.co.kr/tcs/Main
+    - generic [ref=e43]:
+      - generic [ref=e44]:
+        - link "전체메뉴" [ref=e46] [cursor=pointer]:
+          - /url: javascript:;
+          - paragraph [ref=e47]: 전체메뉴
+          - emphasis [ref=e48]
+        - heading "스타배송" [level=1] [ref=e52]:
+          - link "스타배송" [ref=e53] [cursor=pointer]:
+            - /url: //www.gmarket.co.kr/n/stardelivery
+            - img "스타배송" [ref=e54]
+        - generic [ref=e57]:
+          - textbox "검색어입력" [ref=e58]
+          - button "검색" [ref=e59] [cursor=pointer]
+      - generic [ref=e60]:
+        - link "스타배송 알아보기" [ref=e61] [cursor=pointer]:
+          - /url: https://www.gmarket.co.kr/e/spt/stardelivery
+        - link "장바구니에 담긴 상품수" [ref=e63] [cursor=pointer]:
+          - /url: https://cart.gmarket.co.kr/ko/pc/cart/stardelivery
+          - generic [ref=e64]: 장바구니에 담긴 상품수
+  - generic [ref=e65]:
+    - list:
+      - listitem [ref=e66]:
+        - link "스타배송 홈" [ref=e67] [cursor=pointer]:
+          - /url: https://www.gmarket.co.kr/n/stardelivery
+      - listitem [ref=e68]:
+        - link "생필품 쟁이기" [ref=e69] [cursor=pointer]:
+          - /url: https://www.gmarket.co.kr/n/stardelivery/category?categoryCode=100000003
+        - link "열기" [ref=e70] [cursor=pointer]:
+          - /url: "#loc-cate1"
+      - listitem [ref=e71]:
+        - link "음료/생수/커피" [ref=e72] [cursor=pointer]:
+          - /url: https://www.gmarket.co.kr/n/stardelivery/category?categoryCode=200002004
+        - link "열기" [ref=e73] [cursor=pointer]:
+          - /url: "#loc-cate2"
+      - listitem [ref=e74]:
+        - link "음료/생수" [ref=e75] [cursor=pointer]:
+          - /url: https://www.gmarket.co.kr/n/stardelivery/category?categoryCode=300003005
+        - link "열기" [ref=e76] [cursor=pointer]:
+          - /url: "#loc-cate3"
+    - generic [ref=e77]: "상품번호 : 2752723958"
+  - main [ref=e78]:
+    - generic [ref=e79]:
+      - generic [ref=e80]:
+        - list [ref=e82]:
+          - listitem [ref=e83]:
+            - link "구매매장 레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료 상품이미지" [ref=e84]:
+              - /url: javascript:;
+              - generic [ref=e85]: 구매매장
+              - img "레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료 상품이미지" [ref=e86]
+        - list [ref=e88]:
+          - listitem [ref=e89]:
+            - link "레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료 상품이미지" [ref=e90] [cursor=pointer]:
+              - /url: "javascript:"
+              - img "레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료 상품이미지" [ref=e91]
+          - listitem [ref=e92]:
+            - link "상품 이미지1" [ref=e93] [cursor=pointer]:
+              - /url: "javascript:"
+              - img "상품 이미지1" [ref=e94]
+          - listitem [ref=e95]:
+            - link "상품 이미지1" [ref=e96] [cursor=pointer]:
+              - /url: "javascript:"
+              - img "상품 이미지1" [ref=e97]
+          - listitem [ref=e98]:
+            - link "상품 이미지1" [ref=e99] [cursor=pointer]:
+              - /url: "javascript:"
+              - img "상품 이미지1" [ref=e100]
+      - generic [ref=e101]:
+        - generic [ref=e102]:
+          - generic [ref=e103]:
+            - generic [ref=e105]: 생필품 쟁이기 G마켓 베스트
+            - generic [ref=e106]:
+              - generic [ref=e107]: 공식
+              - generic [ref=e108]: 롯데칠성
+            - link "스타배송" [ref=e110] [cursor=pointer]:
+              - /url: https://www.gmarket.co.kr/n/stardelivery
+            - generic [ref=e111]:
+              - generic [ref=e112]:
+                - text: 가격비교 끝
+                - strong [ref=e113]: 온라인 최저가 도전!
+              - button "최저가 안내레이어 열기" [ref=e114] [cursor=pointer]:
+                - generic [ref=e115]: 최저가 안내레이어 열기
+          - generic [ref=e117]:
+            - generic [ref=e118]:
+              - heading "레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료" [level=1] [ref=e119]
+              - generic [ref=e120]: "원산지 : 상세설명 참조"
+              - link "평점 4.8 리뷰 4,383개" [ref=e122] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e123]:
+                  - generic [ref=e124]: 평점
+                  - text: "4.8"
+                - generic [ref=e125]: 리뷰 4,383개
+              - generic:
+                - button "관심상품 추가" [ref=e126] [cursor=pointer]:
+                  - generic: 관심상품 추가
+                - button "SNS 공유" [ref=e127] [cursor=pointer]:
+                  - generic: SNS 공유
+            - generic [ref=e129]:
+              - generic [ref=e130]:
+                - strong [ref=e131]: 유니버스 클럽
+                - generic [ref=e132]: 멤버십으로 더 할인 받았어요👏
+              - generic [ref=e134]:
+                - generic [ref=e135]:
+                  - generic [ref=e136]:
+                    - generic [ref=e137]:
+                      - generic [ref=e138]: 할인률
+                      - text: 30%
+                    - generic [ref=e139]:
+                      - generic [ref=e140]:
+                        - generic [ref=e141]: 기존가
+                        - text: 27,200
+                      - text: 원
+                  - strong [ref=e142]: 22,980원
+                - generic [ref=e143]:
+                  - strong [ref=e144]: 18,900원
+                  - generic [ref=e146]: 유니버스클럽
+                  - button "클럽쿠폰가" [expanded] [ref=e147] [cursor=pointer]
+                  - generic [ref=e148]: (100mL당 158원)
+                  - button "쿠폰받기" [ref=e149] [cursor=pointer]:
+                    - generic [ref=e150]: 쿠폰받기
+                - paragraph [ref=e151]: 가격인하! 오늘 3,410원 저렴해졌어요
+                - text: )
+          - paragraph [ref=e154]:
+            - text: 카드사별 무이자할부 / 최대 3개월
+            - button "무이자 할부 안내창 열기" [ref=e155] [cursor=pointer]:
+              - generic [ref=e156]: 무이자 할부 안내창 열기
+        - list [ref=e158]:
+          - listitem [ref=e159]:
+            - generic [ref=e160]:
+              - generic [ref=e161]:
+                - generic [ref=e163]: 배송안내
+                - generic [ref=e165]: 스타배송
+              - button "열기" [ref=e166] [cursor=pointer]
+            - generic [ref=e168]:
+              - generic [ref=e169]:
+                - paragraph [ref=e170]: 팔달구 월드컵로357번길
+                - button "변경" [ref=e171] [cursor=pointer]
+              - generic [ref=e172]:
+                - generic [ref=e173]:
+                  - text: "\"> 내일(월) 3/9 도착보장"
+                  - generic [ref=e174]: 오후 10시 전 주문 시
+                  - button "스타배송 안내" [ref=e176] [cursor=pointer]:
+                    - generic [ref=e177]: 스타배송 안내
+                - generic [ref=e178]:
+                  - emphasis [ref=e179]: 무료배송
+                  - generic [ref=e180]: (1.5만원 이상 구매 시)
+          - listitem [ref=e181]:
+            - generic [ref=e182]:
+              - generic [ref=e183]:
+                - generic [ref=e185]: 스마일카드안내
+                - text: 스마일카드
+                - emphasis [ref=e186]: 최대 2%
+                - text: 캐시 적립
+              - button "열기" [ref=e187] [cursor=pointer]
+          - listitem [ref=e188]:
+            - generic [ref=e189]:
+              - generic [ref=e190]:
+                - generic [ref=e192]: 신세계포인트안내
+                - text: 신세계포인트 적립
+              - button "열기" [ref=e193] [cursor=pointer]
+          - listitem [ref=e194]:
+            - generic [ref=e195]:
+              - generic [ref=e196]:
+                - generic [ref=e198]: 카드할인안내
+                - text: 카드추가혜택
+              - button "열기" [ref=e199] [cursor=pointer]
+          - listitem [ref=e200]:
+            - generic [ref=e202]:
+              - generic [ref=e204]: 배송안내
+              - text: 본 상품은 국내배송만 가능합니다
+        - generic [ref=e206]:
+          - link "G마켓&옥션 한도 없는 2% 적립 혜택!" [ref=e208] [cursor=pointer]:
+            - /url: https://www.gmarket.co.kr/n/showroom/smilecard?closeBtn=false
+            - img "G마켓&옥션 한도 없는 2% 적립 혜택!" [ref=e209]
+          - link "혜택받기" [ref=e211] [cursor=pointer]:
+            - /url: https://www.gmarket.co.kr/n/showroom/smilecard?closeBtn=false
+        - generic [ref=e212]:
+          - button "썸네일이미지 상품 01 레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료 열기" [ref=e217] [cursor=pointer]:
+            - generic [ref=e218]:
+              - img "썸네일이미지" [ref=e220]
+              - generic [ref=e221]:
+                - generic [ref=e222]:
+                  - text: 상품
+                  - emphasis [ref=e223]: "01"
+                - generic [ref=e224]: 레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료
+            - generic [ref=e225]: 열기
+          - generic [ref=e228]:
+            - heading "수량" [level=2] [ref=e229]
+            - generic [ref=e230]:
+              - generic:
+                - button "수량증가" [ref=e231] [cursor=pointer]:
+                  - generic: 수량증가
+                - button "수량감소" [ref=e232] [cursor=pointer]:
+                  - generic: 수량감소
+                - textbox "수량" [ref=e233]: "1"
+            - button "선택" [ref=e234] [cursor=pointer]
+          - generic [ref=e236]:
+            - generic [ref=e237]:
+              - generic [ref=e238]: 마음을 선물하세요
+              - button "선물하기" [ref=e239] [cursor=pointer]:
+                - emphasis [ref=e240]: 선물하기
+            - button "장바구니" [ref=e242] [cursor=pointer]:
+              - emphasis [ref=e243]: 장바구니
+            - button "구매하기" [ref=e244] [cursor=pointer]:
+              - emphasis [ref=e245]: 구매하기
+    - generic [ref=e247]:
+      - heading "함께 보면 좋은 상품이에요 더보기" [level=3] [ref=e248]:
+        - text: 함께 보면 좋은 상품이에요
+        - link "더보기":
+          - /url: "#"
+          - generic: 더보기
+      - list [ref=e250]:
+        - listitem [ref=e251]:
+          - link "레쓰비그란데라떼 500ml 24펫 라떼 커피 / 대용량 커피 / 커피음료 / 부드러운 커피/ 라떼음료 22,980원 무료배송" [ref=e252] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=2632236101&utparam-url=%7B%22x_object_id%22%3A%222632236101%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%226573e966-c010-4cfe-bfa3-1a07a1e76963%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2227200%22%2C%22promotion_price%22%3A%2222980%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e254]: 레쓰비그란데라떼 500ml 24펫 라떼 커피 / 대용량 커피 / 커피음료 / 부드러운 커피/ 라떼음료
+            - strong [ref=e255]: 22,980원
+            - paragraph [ref=e256]:
+              - generic [ref=e257]: 무료배송
+        - listitem [ref=e258]:
+          - link "레쓰비 마일드 175mlx30캔+모카라떼 175mlx30캔 (총 60캔) 21,800원 무료배송" [ref=e259] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=4641573204&utparam-url=%7B%22x_object_id%22%3A%224641573204%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22a30f77e2-bd19-4d01-84ee-fee4cb4b9852%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2226000%22%2C%22promotion_price%22%3A%2221800%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e261]: 레쓰비 마일드 175mlx30캔+모카라떼 175mlx30캔 (총 60캔)
+            - strong [ref=e262]: 21,800원
+            - paragraph [ref=e263]:
+              - generic [ref=e264]: 무료배송
+        - listitem [ref=e265]:
+          - link "레쓰비 카페타임 헤이즐넛 240ml 30캔/커피음료 19,000원 무료배송" [ref=e266] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=2632242759&utparam-url=%7B%22x_object_id%22%3A%222632242759%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22867efbbd-0735-41cc-a60c-241ebd51506b%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2221000%22%2C%22promotion_price%22%3A%2219000%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e268]: 레쓰비 카페타임 헤이즐넛 240ml 30캔/커피음료
+            - strong [ref=e269]: 19,000원
+            - paragraph [ref=e270]:
+              - generic [ref=e271]: 무료배송
+        - listitem [ref=e272]:
+          - link "레쓰비 그란데 라떼 500ml6입 9,800원 배송비 3,000원" [ref=e273] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=3878527717&utparam-url=%7B%22x_object_id%22%3A%223878527717%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%225a7638ed-3fbc-4de9-b2cd-2de724ff8f08%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%229800%22%2C%22promotion_price%22%3A%229800%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e275]: 레쓰비 그란데 라떼 500ml6입
+            - strong [ref=e276]: 9,800원
+            - paragraph [ref=e277]:
+              - generic [ref=e278]: 배송비 3,000원
+        - listitem [ref=e279]:
+          - link "레쓰비 마일드 캔커피 175ml x 60캔 캔커피 / 업소용 커피 / 커피 / 라떼 23,100원 무료배송" [ref=e280] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=2260661525&utparam-url=%7B%22x_object_id%22%3A%222260661525%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22d5b09185-2adb-4fc7-bb35-93e0caf5ce85%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2228000%22%2C%22promotion_price%22%3A%2223100%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e282]: 레쓰비 마일드 캔커피 175ml x 60캔 캔커피 / 업소용 커피 / 커피 / 라떼
+            - strong [ref=e283]: 23,100원
+            - paragraph [ref=e284]:
+              - generic [ref=e285]: 무료배송
+        - listitem [ref=e286]:
+          - link "레쓰비 그란데 헤이즐럿 500ML 24펫x2박스 (48입) 42,100원 무료배송" [ref=e287] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=4641615195&utparam-url=%7B%22x_object_id%22%3A%224641615195%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%2238ea9b63-4bf9-4330-bd64-2e3824ca827f%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2248000%22%2C%22promotion_price%22%3A%2242100%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e289]: 레쓰비 그란데 헤이즐럿 500ML 24펫x2박스 (48입)
+            - strong [ref=e290]: 42,100원
+            - paragraph [ref=e291]:
+              - generic [ref=e292]: 무료배송
+        - listitem [ref=e293]:
+          - link "레쓰비 그란데 라떼 500ML 24펫x2박스 (48입) 42,100원 무료배송" [ref=e294] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=4641612731&utparam-url=%7B%22x_object_id%22%3A%224641612731%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22f4e1c8a2-d425-430a-b38d-d2899978a9ff%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2248000%22%2C%22promotion_price%22%3A%2242100%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e296]: 레쓰비 그란데 라떼 500ML 24펫x2박스 (48입)
+            - strong [ref=e297]: 42,100원
+            - paragraph [ref=e298]:
+              - generic [ref=e299]: 무료배송
+        - listitem [ref=e300]:
+          - link "칸타타 콘트라베이스 콜드브루 블랙커피500ml18pet+ 디카페인 블랙커피 500ml6pet (총24pet) 28,150원 무료배송" [ref=e301] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=4672037942&utparam-url=%7B%22x_object_id%22%3A%224672037942%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%225b9194c3-dde3-4494-80c1-97dab52a5d13%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2235000%22%2C%22promotion_price%22%3A%2228150%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e303]: 칸타타 콘트라베이스 콜드브루 블랙커피500ml18pet+ 디카페인 블랙커피 500ml6pet (총24pet)
+            - strong [ref=e304]: 28,150원
+            - paragraph [ref=e305]:
+              - generic [ref=e306]: 무료배송
+        - listitem [ref=e307]:
+          - link "칸타타 콘트라베이스 콜드브루 블랙커피500ml 18pet + 저칼로리 라떼 500ml 6pet (총24pet) 28,150원 무료배송" [ref=e308] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=4672751126&utparam-url=%7B%22x_object_id%22%3A%224672751126%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%220e6ff24e-52f6-42eb-bffe-8481b3ad8d30%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2235000%22%2C%22promotion_price%22%3A%2228150%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e310]: 칸타타 콘트라베이스 콜드브루 블랙커피500ml 18pet + 저칼로리 라떼 500ml 6pet (총24pet)
+            - strong [ref=e311]: 28,150원
+            - paragraph [ref=e312]:
+              - generic [ref=e313]: 무료배송
+        - listitem [ref=e314]:
+          - link "레쓰비 카페타임 라떼 240ml 30캔/커피음료 19,000원 무료배송" [ref=e315] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=2632240458&utparam-url=%7B%22x_object_id%22%3A%222632240458%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%2278b0c8e9-ad66-470e-ae1b-00928f8e537a%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2221000%22%2C%22promotion_price%22%3A%2219000%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e317]: 레쓰비 카페타임 라떼 240ml 30캔/커피음료
+            - strong [ref=e318]: 19,000원
+            - paragraph [ref=e319]:
+              - generic [ref=e320]: 무료배송
+        - listitem [ref=e321]:
+          - link "삼도씨 더치커피 대용량 230ml 파우치 콜드브루 편의점 액상 커피 10팩+10팩 10,300원 무료배송" [ref=e322] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=4353792001&utparam-url=%7B%22x_object_id%22%3A%224353792001%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22ed71ad7b-04ce-4e3f-9109-e1454e976b69%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2220000%22%2C%22promotion_price%22%3A%2210300%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22A%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e324]: 삼도씨 더치커피 대용량 230ml 파우치 콜드브루 편의점 액상 커피 10팩+10팩
+            - strong [ref=e325]: 10,300원
+            - paragraph [ref=e326]:
+              - generic [ref=e327]: 무료배송
+        - listitem [ref=e328]:
+          - link "레쓰비 모카라떼 캔커피 175ml x 60캔 캔커피 / 업소용 커피 / 커피 / 라떼 / 모카 24,300원 무료배송" [ref=e329] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=2260663495&utparam-url=%7B%22x_object_id%22%3A%222260663495%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%220dc645f5-685f-4218-af92-00936be0ec24%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2227500%22%2C%22promotion_price%22%3A%2224300%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e331]: 레쓰비 모카라떼 캔커피 175ml x 60캔 캔커피 / 업소용 커피 / 커피 / 라떼 / 모카
+            - strong [ref=e332]: 24,300원
+            - paragraph [ref=e333]:
+              - generic [ref=e334]: 무료배송
+        - listitem [ref=e335]:
+          - link "칸타타 콘트라베이스 콜드브루 스위트블랙 500ml 6pet/ 커피 / 음료 11,000원 배송비 3,000원" [ref=e336] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=1659481003&utparam-url=%7B%22x_object_id%22%3A%221659481003%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22946b6581-2e72-4e04-a43c-fdaa951a7b03%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2212000%22%2C%22promotion_price%22%3A%2211000%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e338]: 칸타타 콘트라베이스 콜드브루 스위트블랙 500ml 6pet/ 커피 / 음료
+            - strong [ref=e339]: 11,000원
+            - paragraph [ref=e340]:
+              - generic [ref=e341]: 배송비 3,000원
+        - listitem [ref=e342]:
+          - link "칸타타 콘트라베이스 콜드브루블랙+저칼로리 라떼+스위트블랙 각 6pet(총 18pet) 27,100원 무료배송" [ref=e343] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=1906029580&utparam-url=%7B%22x_object_id%22%3A%221906029580%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22b2e9ed82-78dd-4639-a64e-ed5ac4ee84ab%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2227100%22%2C%22promotion_price%22%3A%2227100%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e345]: 칸타타 콘트라베이스 콜드브루블랙+저칼로리 라떼+스위트블랙 각 6pet(총 18pet)
+            - strong [ref=e346]: 27,100원
+            - paragraph [ref=e347]:
+              - generic [ref=e348]: 무료배송
+        - listitem [ref=e349]:
+          - link "칸타타 아이스 블랙커피 파우치 190ml x 30입 / 커피 / 음료 19,300원 무료배송" [ref=e350] [cursor=pointer]:
+            - /url: https://item.gmarket.co.kr/Item?goodscode=1578548560&utparam-url=%7B%22x_object_id%22%3A%221578548560%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%220717e984-a9e9-4c4a-b494-1d12b491b11a%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2219800%22%2C%22promotion_price%22%3A%2219300%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461742_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+            - paragraph [ref=e352]: 칸타타 아이스 블랙커피 파우치 190ml x 30입 / 커피 / 음료
+            - strong [ref=e353]: 19,300원
+            - paragraph [ref=e354]:
+              - generic [ref=e355]: 무료배송
+      - generic:
+        - button "앞으로" [ref=e356] [cursor=pointer]:
+          - generic: 앞으로
+        - generic [ref=e357]: 1 / 3
+        - button "뒤로" [ref=e358] [cursor=pointer]:
+          - generic: 뒤로
+        - button "광고" [ref=e360] [cursor=pointer]: 광고
+        - link "상품등록" [ref=e363] [cursor=pointer]:
+          - /url: http://ad.esmplus.com
+    - generic [ref=e364]:
+      - list [ref=e366]:
+        - listitem [ref=e367]:
+          - link "상세설명" [ref=e368] [cursor=pointer]:
+            - /url: "#vip-tab_detail"
+        - listitem [ref=e369]:
+          - link "상품평4,383" [ref=e370] [cursor=pointer]:
+            - /url: "#vip-tab_comment"
+        - listitem [ref=e371]:
+          - link "상품문의20" [ref=e372] [cursor=pointer]:
+            - /url: "#vip-tab_qna"
+        - listitem [ref=e373]:
+          - link "교환/반품" [ref=e374] [cursor=pointer]:
+            - /url: "#vip-tab_exchange"
+        - listitem [ref=e375]:
+          - link "연관상품5" [ref=e376] [cursor=pointer]:
+            - /url: "#layer_relate-items"
+      - generic [ref=e377]:
+        - generic [ref=e379]:
+          - generic:
+            - generic [ref=e380]:
+              - heading "이 판매자의 인기상품이에요 더보기" [level=3] [ref=e381]:
+                - text: 이 판매자의 인기상품이에요
+                - link "더보기" [ref=e382] [cursor=pointer]:
+                  - /url: http://minishop.gmarket.co.kr/gmktag425
+                  - generic: 더보기
+              - list [ref=e384]:
+                - listitem [ref=e385]:
+                  - link "판매자대표상품0 레쓰비 마일드 캔커피 175ml x 60캔 캔커피 / 업소용 커피 / 커피 / 라떼 23,100원 무료배송" [ref=e386] [cursor=pointer]:
+                    - /url: /Item?goodsCode=2260661525&utparam-url=%7B%22x_object_id%22%3A%222260661525%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%2257d05b7e-48fe-4e6a-8f93-fab5e3373ec4%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2228000%22%2C%22promotion_price%22%3A%2223100%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품0" [ref=e388]
+                    - paragraph [ref=e389]: 레쓰비 마일드 캔커피 175ml x 60캔 캔커피 / 업소용 커피 / 커피 / 라떼
+                    - strong [ref=e390]: 23,100원
+                    - generic [ref=e392]: 무료배송
+                - listitem [ref=e393]:
+                  - link "판매자대표상품1 펩시제로 라임 210ml 60캔 (30캔 2박스) 펩시/펩제라/제로탄산/콜라 30,300원 무료배송" [ref=e394] [cursor=pointer]:
+                    - /url: /Item?goodsCode=2945646109&utparam-url=%7B%22x_object_id%22%3A%222945646109%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22fc5116df-fa9b-4f6c-8e5a-38dd13a240d0%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2236000%22%2C%22promotion_price%22%3A%2230300%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품1" [ref=e396]
+                    - paragraph [ref=e397]: 펩시제로 라임 210ml 60캔 (30캔 2박스) 펩시/펩제라/제로탄산/콜라
+                    - strong [ref=e398]: 30,300원
+                    - generic [ref=e400]: 무료배송
+                - listitem [ref=e401]:
+                  - link "판매자대표상품2 펩시제로 라임 355ml 48캔 /제로음료/펩시/콜라 35,200원 무료배송" [ref=e402] [cursor=pointer]:
+                    - /url: /Item?goodsCode=3162898676&utparam-url=%7B%22x_object_id%22%3A%223162898676%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%2212895e7a-d069-48f8-b213-298866af9563%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2242000%22%2C%22promotion_price%22%3A%2235200%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품2" [ref=e404]
+                    - paragraph [ref=e405]: 펩시제로 라임 355ml 48캔 /제로음료/펩시/콜라
+                    - strong [ref=e406]: 35,200원
+                    - generic [ref=e408]: 무료배송
+                - listitem [ref=e409]:
+                  - link "판매자대표상품3 칠성사이다 350ml 48캔/탄산음료/사이다/음료수 사이다/칠성/오리지널 32,900원 무료배송" [ref=e410] [cursor=pointer]:
+                    - /url: /Item?goodsCode=4553648588&utparam-url=%7B%22x_object_id%22%3A%224553648588%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%221e72870b-f559-4504-bfd8-4ac62d1407ca%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2240000%22%2C%22promotion_price%22%3A%2232900%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품3" [ref=e412]
+                    - paragraph [ref=e413]: 칠성사이다 350ml 48캔/탄산음료/사이다/음료수 사이다/칠성/오리지널
+                    - strong [ref=e414]: 32,900원
+                    - generic [ref=e416]: 무료배송
+                - listitem [ref=e417]:
+                  - link "판매자대표상품4 펩시제로슈거라임 310mlx24입+칠성사이다 제로 310mlx24입 33,900원 무료배송" [ref=e418] [cursor=pointer]:
+                    - /url: /Item?goodsCode=4659473213&utparam-url=%7B%22x_object_id%22%3A%224659473213%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22c0080c4d-bb99-4e5e-851b-bc59b29366ef%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2240000%22%2C%22promotion_price%22%3A%2233900%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품4" [ref=e420]
+                    - paragraph [ref=e421]: 펩시제로슈거라임 310mlx24입+칠성사이다 제로 310mlx24입
+                    - strong [ref=e422]: 33,900원
+                    - generic [ref=e424]: 무료배송
+                - listitem [ref=e425]:
+                  - link "판매자대표상품5 펩시제로 210ml 30캔 +사이다제로 210ml 30캔 제로칼로리 / 다이어트 콜라 / 청량음료 / 탄산음료 / 탄산 29,150원 무료배송" [ref=e426] [cursor=pointer]:
+                    - /url: /Item?goodsCode=3384154261&utparam-url=%7B%22x_object_id%22%3A%223384154261%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%2226ab7306-e558-46e2-b876-709751c31083%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2235000%22%2C%22promotion_price%22%3A%2229150%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품5" [ref=e428]
+                    - paragraph [ref=e429]: 펩시제로 210ml 30캔 +사이다제로 210ml 30캔 제로칼로리 / 다이어트 콜라 / 청량음료 / 탄산음료 / 탄산
+                    - strong [ref=e430]: 29,150원
+                    - generic [ref=e432]: 무료배송
+                - listitem [ref=e433]:
+                  - link "판매자대표상품6 칠성사이다 210ml x 60캔 청량음료 / 탄산음료 / 탄산 31,600원 무료배송" [ref=e434] [cursor=pointer]:
+                    - /url: /Item?goodsCode=2945650020&utparam-url=%7B%22x_object_id%22%3A%222945650020%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22b2a63fad-730c-4da7-89be-0bae321a6ba2%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2237500%22%2C%22promotion_price%22%3A%2231600%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품6" [ref=e436]
+                    - paragraph [ref=e437]: 칠성사이다 210ml x 60캔 청량음료 / 탄산음료 / 탄산
+                    - strong [ref=e438]: 31,600원
+                    - generic [ref=e440]: 무료배송
+                - listitem [ref=e441]:
+                  - link "판매자대표상품7 펩시콜라 210ml x 30캔 + 칠성사이다 210ml x 30캔 27,850원 무료배송" [ref=e442] [cursor=pointer]:
+                    - /url: /Item?goodsCode=3539324312&utparam-url=%7B%22x_object_id%22%3A%223539324312%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22603bc920-deba-4290-a693-290b185df499%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2233000%22%2C%22promotion_price%22%3A%2227850%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품7" [ref=e444]
+                    - paragraph [ref=e445]: 펩시콜라 210ml x 30캔 + 칠성사이다 210ml x 30캔
+                    - strong [ref=e446]: 27,850원
+                    - generic [ref=e448]: 무료배송
+                - listitem [ref=e449]:
+                  - link "판매자대표상품8 레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료 22,980원 무료배송" [ref=e450] [cursor=pointer]:
+                    - /url: /Item?goodsCode=2752723958&utparam-url=%7B%22x_object_id%22%3A%222752723958%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%2254bcdb36-49fc-4296-a03f-2f91159a8a6b%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2227200%22%2C%22promotion_price%22%3A%2222980%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품8" [ref=e452]
+                    - paragraph [ref=e453]: 레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료
+                    - strong [ref=e454]: 22,980원
+                    - generic [ref=e456]: 무료배송
+                - listitem [ref=e457]:
+                  - link "판매자대표상품9 펩시콜라 제로 라임향 ECO무라벨 300ml 40펫 30,000원 무료배송" [ref=e458] [cursor=pointer]:
+                    - /url: /Item?goodsCode=2248530747&utparam-url=%7B%22x_object_id%22%3A%222248530747%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%229992b2bd-cba0-45be-b62c-e10ae270d56b%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2234000%22%2C%22promotion_price%22%3A%2230000%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품9" [ref=e460]
+                    - paragraph [ref=e461]: 펩시콜라 제로 라임향 ECO무라벨 300ml 40펫
+                    - strong [ref=e462]: 30,000원
+                    - generic [ref=e464]: 무료배송
+                - listitem [ref=e465]:
+                  - link "판매자대표상품10 오랑지나 420mlX24pet 과즙음료/청량음료/과일맛음료/오렌지음료/탄산음료 26,730원 무료배송" [ref=e466] [cursor=pointer]:
+                    - /url: /Item?goodsCode=1752760154&utparam-url=%7B%22x_object_id%22%3A%221752760154%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%225f80c35b-d9de-488c-a1ba-bed1913969e6%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2232200%22%2C%22promotion_price%22%3A%2226730%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품10" [ref=e468]
+                    - paragraph [ref=e469]: 오랑지나 420mlX24pet 과즙음료/청량음료/과일맛음료/오렌지음료/탄산음료
+                    - strong [ref=e470]: 26,730원
+                    - generic [ref=e472]: 무료배송
+                - listitem [ref=e473]:
+                  - link "판매자대표상품11 아이시스 8.0 300ml 20펫 3묶음(60펫) 생수 / 휴대용 생수 / 워터 17,200원 무료배송" [ref=e474] [cursor=pointer]:
+                    - /url: /Item?goodsCode=1752706460&utparam-url=%7B%22x_object_id%22%3A%221752706460%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22ba04844a-ba6d-4c52-8c4d-f743afec8a76%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2222000%22%2C%22promotion_price%22%3A%2217200%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%22%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+                    - img "판매자대표상품11" [ref=e476]
+                    - paragraph [ref=e477]: 아이시스 8.0 300ml 20펫 3묶음(60펫) 생수 / 휴대용 생수 / 워터
+                    - strong [ref=e478]: 17,200원
+                    - generic [ref=e480]: 무료배송
+              - generic:
+                - button "앞으로" [ref=e481] [cursor=pointer]:
+                  - generic: 앞으로
+                - generic [ref=e482]: 1 / 2
+                - button "뒤로" [ref=e483] [cursor=pointer]:
+                  - generic: 뒤로
+            - generic [ref=e484]:
+              - link:
+                - /url: http://minishop.gmarket.co.kr/gmktag425
+              - strong [ref=e485]:
+                - link "롯데칠성스타배송" [ref=e486] [cursor=pointer]:
+                  - /url: http://minishop.gmarket.co.kr/gmktag425
+              - paragraph
+              - button "관심매장 추가" [ref=e487] [cursor=pointer]:
+                - generic: 관심매장 추가
+              - link "스토어 바로가기 새창" [ref=e488] [cursor=pointer]:
+                - /url: http://minishop.gmarket.co.kr/gmktag425
+                - generic: 스토어 바로가기 새창
+        - generic [ref=e490]:
+          - generic [ref=e492]:
+            - paragraph [ref=e493]:
+              - link "끝장세일 보물같은 특가가 준비된 봄맞이 세일 특가 보러가기" [ref=e494] [cursor=pointer]:
+                - /url: https://rpp.gmarket.co.kr/?exhib=260757
+                - img "끝장세일 보물같은 특가가 준비된 봄맞이 세일 특가 보러가기" [ref=e495]
+            - paragraph [ref=e496]:
+              - link "새로운 시작을 준비하는 학급 필수템 모음" [ref=e497] [cursor=pointer]:
+                - /url: https://rpp.gmarket.co.kr/?exhib=228723
+                - img "새로운 시작을 준비하는 학급 필수템 모음" [ref=e498]
+          - paragraph [ref=e501]:
+            - text: 판매자가 현금결제를 통한 직거래를 유도하는 경우 절대 결제하지 마시고,
+            - link "G마켓으로 신고" [ref=e502] [cursor=pointer]:
+              - /url: https://help.gmarket.co.kr/Tcs/InquiryType/FaqDetail?code=1107
+            - text: 해 주세요.
+          - generic [ref=e503]:
+            - heading "스타배송 공지" [level=3] [ref=e504]
+            - link "G_3월 1주차_주말에도 도착보장" [ref=e506] [cursor=pointer]:
+              - /url: https://rpp.gmarket.co.kr/?exhib=259464
+              - img "G_3월 1주차_주말에도 도착보장" [ref=e507]
+          - generic [ref=e508]:
+            - iframe [ref=e510]:
+              - generic [active] [ref=f64e1]:
+                - generic:
+                  - button "이미지 OCR 대체 텍스트 음성지원 받기" [ref=f64e2]
+                  - paragraph [ref=f64e3]: 상품상세 이미지 OCR 대체 텍스트 지원받기 사용 가능
+                - generic [ref=f64e4]:
+                  - generic [ref=f64e6]:
+                    - img "상품 상세 이미지입니다." [ref=f64e9]
+                    - img "상품 상세 이미지입니다." [ref=f64e12]
+                    - img "상품 상세 이미지입니다." [ref=f64e15]
+                    - img "상품 상세 이미지입니다." [ref=f64e18]
+                    - img "상품 상세 이미지입니다." [ref=f64e21]
+                    - img "상품 상세 이미지입니다." [ref=f64e24]
+                    - img "상품 상세 이미지입니다." [ref=f64e27]
+                  - generic [ref=f64e28]:
+                    - img "쉽고 빠른 교환/반품" [ref=f64e29]
+                    - generic:
+                      - list:
+                        - listitem: 나의 G마켓(myG) 메뉴에서 신청하세요. (상품 수령 후 7일 이내)
+                        - listitem: 상품을 배송된 박스에 재포장 후 택배기사님 방문 시 전달해주세요.
+                      - list:
+                        - listitem: 파손/오배송 및 신선/냉장/냉동 식품의 배송지연 등 상품에 이상이 있는 경우 (1) 배송된 상품의 파손/오배송 확인 가능한 사진 (2) 운송장이 보이는 박스 겉면의 사진을 함께 첨부하여 교환/반품 신청 하시거나 고객센터로 문의 해주세요.
+                        - listitem: 일부 상품의 경우 상품 특성 단순 변심에 의한 반품/교환이 제한 될 수 있으며 사전에 협의 후 가능합니다.(신선/냉장/냉동식품, 디지털 상품 등)
+                      - strong: G마켓 스타배송 고객센터 1644-5718
+                      - list:
+                        - listitem: 평일 09시~18시 (주말 및 공휴일 09시~13시)
+                        - listitem: 배송 및 서비스 외에 상품 관련 문의는 판매자에게 직접 문의해주세요.
+            - button "상세정보 더보기" [ref=e512] [cursor=pointer]
+          - generic [ref=e513]:
+            - list:
+              - listitem [ref=e514]:
+                - img "01상품이미지" [ref=e516]
+                - generic [ref=e517]:
+                  - generic [ref=e518]: 상품01
+                  - strong [ref=e519]: 레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료
+                  - generic [ref=e520]:
+                    - generic [ref=e521]:
+                      - generic [ref=e522]:
+                        - generic [ref=e523]: 할인률
+                        - text: 30%
+                      - generic [ref=e524]:
+                        - generic [ref=e525]:
+                          - generic [ref=e526]: 기존가
+                          - text: 27,200
+                        - text: 원
+                    - strong [ref=e527]:
+                      - text: 18,900
+                      - generic [ref=e528]: 원
+                      - generic [ref=e529]: 쿠폰적용가
+                  - paragraph [ref=e530]:
+                    - generic [ref=e531]: 무료배송
+              - listitem [ref=e533]:
+                - img "02상품이미지" [ref=e535]
+                - generic [ref=e536]:
+                  - generic [ref=e537]: 상품02
+                  - strong [ref=e538]: 레쓰비 모카라떼 캔커피 175ml x 60캔 캔커피 / 업소용 커피 / 커피 / 라떼 / 모카
+                  - generic [ref=e539]:
+                    - generic [ref=e540]:
+                      - generic [ref=e541]:
+                        - generic [ref=e542]: 할인률
+                        - text: 26%
+                      - generic [ref=e543]:
+                        - generic [ref=e544]:
+                          - generic [ref=e545]: 기존가
+                          - text: 27,500
+                        - text: 원
+                    - strong [ref=e546]:
+                      - text: 20,180
+                      - generic [ref=e547]: 원
+                      - generic [ref=e548]: 쿠폰적용가
+                  - paragraph [ref=e549]:
+                    - generic [ref=e550]: 무료배송
+                - generic:
+                  - button "상세보기" [ref=e551] [cursor=pointer]:
+                    - generic: 상세보기
+                  - button "선택하기" [ref=e552] [cursor=pointer]:
+                    - generic: 선택하기
+              - listitem [ref=e553]:
+                - img "03상품이미지" [ref=e555]
+                - generic [ref=e556]:
+                  - generic [ref=e557]: 상품03
+                  - strong [ref=e558]: 레쓰비 카페타임 라떼 240ml 30캔/커피음료
+                  - generic [ref=e559]:
+                    - generic [ref=e560]:
+                      - generic [ref=e561]:
+                        - generic [ref=e562]: 할인률
+                        - text: 25%
+                      - generic [ref=e563]:
+                        - generic [ref=e564]:
+                          - generic [ref=e565]: 기존가
+                          - text: 21,000
+                        - text: 원
+                    - strong [ref=e566]:
+                      - text: 15,750
+                      - generic [ref=e567]: 원
+                      - generic [ref=e568]: 쿠폰적용가
+                  - paragraph [ref=e569]:
+                    - generic [ref=e570]: 무료배송
+                - generic:
+                  - button "상세보기" [ref=e571] [cursor=pointer]:
+                    - generic: 상세보기
+                  - button "선택하기" [ref=e572] [cursor=pointer]:
+                    - generic: 선택하기
+              - listitem [ref=e573]:
+                - img "04상품이미지" [ref=e575]
+                - generic [ref=e576]:
+                  - generic [ref=e577]: 상품04
+                  - strong [ref=e578]: 레쓰비 카페타임 헤이즐넛 240ml 30캔/커피음료
+                  - generic [ref=e579]:
+                    - generic [ref=e580]:
+                      - generic [ref=e581]:
+                        - generic [ref=e582]: 할인률
+                        - text: 25%
+                      - generic [ref=e583]:
+                        - generic [ref=e584]:
+                          - generic [ref=e585]: 기존가
+                          - text: 21,000
+                        - text: 원
+                    - strong [ref=e586]:
+                      - text: 15,750
+                      - generic [ref=e587]: 원
+                      - generic [ref=e588]: 쿠폰적용가
+                  - paragraph [ref=e589]:
+                    - generic [ref=e590]: 무료배송
+                - generic:
+                  - button "상세보기" [ref=e591] [cursor=pointer]:
+                    - generic: 상세보기
+                  - button "선택하기" [ref=e592] [cursor=pointer]:
+                    - generic: 선택하기
+              - listitem [ref=e593]:
+                - img "05상품이미지" [ref=e595]
+                - generic [ref=e596]:
+                  - generic [ref=e597]: 상품05
+                  - strong [ref=e598]: 레쓰비 모카라떼 캔커피 175ml x 30캔/커피음료
+                  - generic [ref=e599]:
+                    - generic [ref=e600]:
+                      - generic [ref=e601]:
+                        - generic [ref=e602]: 할인률
+                        - text: 25%
+                      - generic [ref=e603]:
+                        - generic [ref=e604]:
+                          - generic [ref=e605]: 기존가
+                          - text: 18,000
+                        - text: 원
+                    - strong [ref=e606]:
+                      - text: 13,500
+                      - generic [ref=e607]: 원
+                      - generic [ref=e608]: 쿠폰적용가
+                  - paragraph [ref=e609]:
+                    - generic [ref=e610]: 무료배송
+                - generic:
+                  - button "상세보기" [ref=e611] [cursor=pointer]:
+                    - generic: 상세보기
+                  - button "선택하기" [ref=e612] [cursor=pointer]:
+                    - generic: 선택하기
+          - generic [ref=e613]:
+            - heading "상품 정보 제공 고시[전자상거래에 관한 상품정보 제공에 관한 고시] 항목에 의거 [롯데칠성스타배송]에 의해 등록된 정보입니다." [level=3] [ref=e614]
+            - generic [ref=e615]:
+              - table "상품상태, 제조사, 브랜드, 원산지, 제조일자에 관한 테이블" [ref=e616]:
+                - rowgroup [ref=e620]:
+                  - row "상품번호 2752723958" [ref=e621]:
+                    - rowheader "상품번호" [ref=e622]
+                    - cell "2752723958" [ref=e623]
+                  - row "상품상태 새상품" [ref=e624]:
+                    - rowheader "상품상태" [ref=e625]
+                    - cell "새상품" [ref=e626]
+                  - row "부가세 면세여부 과세상품" [ref=e627]:
+                    - rowheader "부가세 면세여부" [ref=e628]
+                    - cell "과세상품" [ref=e629]
+                  - row "영수증발행 발행가능 - 신용카드 전표, 온라인 현금영수증" [ref=e630]:
+                    - rowheader "영수증발행" [ref=e631]
+                    - cell "발행가능 - 신용카드 전표, 온라인 현금영수증" [ref=e632]
+                  - row "사업자구분 개인사업자" [ref=e633]:
+                    - rowheader "사업자구분" [ref=e634]
+                    - cell "개인사업자" [ref=e635]
+              - table "제품소재, 색상, 치수, 제조사/수입자, 세탁방법 및 취급시 주의사항에 관한 테이블" [ref=e636]:
+                - rowgroup
+            - button "필수 표기 정보 더보기" [ref=e638] [cursor=pointer]
+          - generic [ref=e640]:
+            - generic [ref=e641]:
+              - heading "주의사항" [level=3] [ref=e642]
+              - list [ref=e643]:
+                - listitem [ref=e644]:
+                  - text: 전자상거래 등에서의 소비자보호법에 관한 법률에 의거하여 미성년자가 물품을 구매하는 경우,
+                  - text: 법정대리인이 동의하지 않으면 미성년자 본인 또는 법정대리인이 구매를 취소할 수 있습니다.
+                - listitem [ref=e645]:
+                  - text: G마켓에 등록된 판매 상품과 상품의 내용, 거래 정보 및 가격은 판매자가 등록한 것으로
+                  - text: G마켓은 해당 내용에 대하여 일체의 책임을 지지 않습니다.
+                - listitem [ref=e646]:
+                  - text: G마켓의 결제시스템을 이용하지 않고 판매자와 직접 거래하실 경우 상품을 받지 못하거나 구매한 상품과 상이한 상품을 받는 등
+                  - text: 피해가 발생할 수 있으니 유의 바랍니다. 직거래로 인해 발생한 피해에 대해 G마켓은 책임을 지지 않습니다.
+            - generic [ref=e647]:
+              - paragraph [ref=e648]: 교환/반품에 어려움이 있다면, G마켓이 도와 드릴게요!
+              - link "고객센터" [ref=e649] [cursor=pointer]:
+                - /url: https://help.gmarket.co.kr/tcs/InquiryType/FaqCategorizationType?code=C105&deviceTypeCd=M&siteCode=GMK&siteCodeNation=KOR
+            - generic [ref=e650]:
+              - paragraph [ref=e651]: 유해/불법 상품을 발견하시면, G마켓 안전거래센터에 신고해 주세요!
+              - link "신고하기" [ref=e652] [cursor=pointer]:
+                - /url: javascript:callLoginOrLink('https://help.gmarket.co.kr/tcs/Inquiry/SecurityReportWriting?goodscode=2752723958')
+      - generic [ref=e654]:
+        - generic [ref=e655]:
+          - heading "함께 구매하면 좋은 상품이에요" [level=3] [ref=e656]
+          - button "광고" [ref=e658] [cursor=pointer]:
+            - generic [ref=e659]: 광고
+        - list [ref=e661]:
+          - listitem [ref=e662]:
+            - link "광고상품 레쓰비그란데라떼 500ml 24펫 라떼 커피 / 대용량 커피 / 커피음료 / 부드러운 커피/ 라떼음료 22,980원 무료배송" [ref=e663] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=2632236101&utparam-url=%7B%22x_object_id%22%3A%222632236101%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22d3493b31-06db-4fcb-ab59-8a8e2d6fa0de%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2227200%22%2C%22promotion_price%22%3A%2222980%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - generic [ref=e666]: 광고상품
+              - paragraph [ref=e667]: 레쓰비그란데라떼 500ml 24펫 라떼 커피 / 대용량 커피 / 커피음료 / 부드러운 커피/ 라떼음료
+              - strong [ref=e668]: 22,980원
+              - paragraph [ref=e669]:
+                - generic [ref=e670]: 무료배송
+          - listitem [ref=e671]:
+            - link "광고상품 레쓰비 마일드 175mlx30캔+모카라떼 175mlx30캔 (총 60캔) 21,800원 무료배송" [ref=e672] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=4641573204&utparam-url=%7B%22x_object_id%22%3A%224641573204%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%222a159caf-71eb-453e-a2e2-4e43f91b2885%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2226000%22%2C%22promotion_price%22%3A%2221800%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - generic [ref=e675]: 광고상품
+              - paragraph [ref=e676]: 레쓰비 마일드 175mlx30캔+모카라떼 175mlx30캔 (총 60캔)
+              - strong [ref=e677]: 21,800원
+              - paragraph [ref=e678]:
+                - generic [ref=e679]: 무료배송
+          - listitem [ref=e680]:
+            - link "광고상품 레쓰비 카페타임 헤이즐넛 240ml 30캔/커피음료 19,000원 무료배송" [ref=e681] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=2632242759&utparam-url=%7B%22x_object_id%22%3A%222632242759%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22f71cc7e3-8f4b-4c31-bf16-76272eaced84%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2221000%22%2C%22promotion_price%22%3A%2219000%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22ad%22%2C%22ad_product%22%3A%22J%22%2C%22ad_sub_product%22%3A%22F%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - generic [ref=e684]: 광고상품
+              - paragraph [ref=e685]: 레쓰비 카페타임 헤이즐넛 240ml 30캔/커피음료
+              - strong [ref=e686]: 19,000원
+              - paragraph [ref=e687]:
+                - generic [ref=e688]: 무료배송
+          - listitem [ref=e689]:
+            - link "롯데칠성 레쓰비 카페타임 240ML 60캔 (라떼/아메리카노) 30,840원 무료배송" [ref=e690] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=4132909268&utparam-url=%7B%22x_object_id%22%3A%224132909268%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%226faf3cc3-e76a-45d1-93f7-1569d9987cb5%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2234260%22%2C%22promotion_price%22%3A%2230840%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e692]: 롯데칠성 레쓰비 카페타임 240ML 60캔 (라떼/아메리카노)
+              - strong [ref=e693]: 30,840원
+              - paragraph [ref=e694]:
+                - generic [ref=e695]: 무료배송
+          - listitem [ref=e696]:
+            - link "레쓰비 그란데라떼 500ml x 24개 SD 30,030원 무료배송" [ref=e697] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=3716919021&utparam-url=%7B%22x_object_id%22%3A%223716919021%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22cede806a-bbf3-4c53-ac0d-1489e79706e0%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2230030%22%2C%22promotion_price%22%3A%2230030%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e699]: 레쓰비 그란데라떼 500ml x 24개 SD
+              - strong [ref=e700]: 30,030원
+              - paragraph [ref=e701]:
+                - generic [ref=e702]: 무료배송
+          - listitem [ref=e703]:
+            - link "레쓰비 그란데 라떼 믹스 커피 500ml 12입 12,100원 배송비 3,000원" [ref=e704] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=3934683361&utparam-url=%7B%22x_object_id%22%3A%223934683361%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%224aefaea1-9d61-433c-b5f7-67fbc42eb6fe%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2212100%22%2C%22promotion_price%22%3A%2212100%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e706]: 레쓰비 그란데 라떼 믹스 커피 500ml 12입
+              - strong [ref=e707]: 12,100원
+              - paragraph [ref=e708]:
+                - generic [ref=e709]: 배송비 3,000원
+          - listitem [ref=e710]:
+            - link "칠성 레쓰비 그란데 라떼 500ml 24개 25,500원 무료배송" [ref=e711] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=4375858258&utparam-url=%7B%22x_object_id%22%3A%224375858258%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22af2a83c4-16a4-4a4f-bff3-03bdf356eba7%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2225500%22%2C%22promotion_price%22%3A%2225500%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e713]: 칠성 레쓰비 그란데 라떼 500ml 24개
+              - strong [ref=e714]: 25,500원
+              - paragraph [ref=e715]:
+                - generic [ref=e716]: 무료배송
+          - listitem [ref=e717]:
+            - link "레쓰비 그란데 라떼 500ML 24개 오픈세일 23,250원 무료배송" [ref=e718] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=4634522574&utparam-url=%7B%22x_object_id%22%3A%224634522574%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22581b4e10-c1d2-430f-9345-7d2342ad0576%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2223250%22%2C%22promotion_price%22%3A%2223250%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e720]: 레쓰비 그란데 라떼 500ML 24개 오픈세일
+              - strong [ref=e721]: 23,250원
+              - paragraph [ref=e722]:
+                - generic [ref=e723]: 무료배송
+          - listitem [ref=e724]:
+            - link "레쓰비 그란데 헤이즐넛 500mlx12개 18,500원 무료배송" [ref=e725] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=3785793857&utparam-url=%7B%22x_object_id%22%3A%223785793857%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22980106ab-075d-44c9-a42e-709c78af3269%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2218500%22%2C%22promotion_price%22%3A%2218500%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e727]: 레쓰비 그란데 헤이즐넛 500mlx12개
+              - strong [ref=e728]: 18,500원
+              - paragraph [ref=e729]:
+                - generic [ref=e730]: 무료배송
+          - listitem [ref=e731]:
+            - link "레쓰비 그란데 라떼 500ml 24개 24,900원 무료배송" [ref=e732] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=4638562375&utparam-url=%7B%22x_object_id%22%3A%224638562375%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%224dd8ac9b-7be0-43a8-b150-3751a45d3f97%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2224900%22%2C%22promotion_price%22%3A%2224900%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e734]: 레쓰비 그란데 라떼 500ml 24개
+              - strong [ref=e735]: 24,900원
+              - paragraph [ref=e736]:
+                - generic [ref=e737]: 무료배송
+          - listitem [ref=e738]:
+            - link "롯데칠성 레쓰비 카페타임 240ML 60캔 (라떼/아메리카노) 30,840원 무료배송" [ref=e739] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=1951092747&utparam-url=%7B%22x_object_id%22%3A%221951092747%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%2255084a1a-ab59-4c74-9c90-fea4087d7082%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2234260%22%2C%22promotion_price%22%3A%2230840%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e741]: 롯데칠성 레쓰비 카페타임 240ML 60캔 (라떼/아메리카노)
+              - strong [ref=e742]: 30,840원
+              - paragraph [ref=e743]:
+                - generic [ref=e744]: 무료배송
+          - listitem [ref=e745]:
+            - link "레쓰비 그란데 헤이즐넛 500ml 24개 24,900원 무료배송" [ref=e746] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=4638562352&utparam-url=%7B%22x_object_id%22%3A%224638562352%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%22ac52fb68-754d-4337-9df2-d369ef22dc9e%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2224900%22%2C%22promotion_price%22%3A%2224900%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e748]: 레쓰비 그란데 헤이즐넛 500ml 24개
+              - strong [ref=e749]: 24,900원
+              - paragraph [ref=e750]:
+                - generic [ref=e751]: 무료배송
+          - listitem [ref=e752]:
+            - link "레쓰비 카페타임 헤이즐넛 240ml 30캔 16,600원 배송비 3,000원" [ref=e753] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=4596932511&utparam-url=%7B%22x_object_id%22%3A%224596932511%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%228e1ab068-7aca-4f27-b968-331fc588d7fc%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2216600%22%2C%22promotion_price%22%3A%2216600%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e755]: 레쓰비 카페타임 헤이즐넛 240ml 30캔
+              - strong [ref=e756]: 16,600원
+              - paragraph [ref=e757]:
+                - generic [ref=e758]: 배송비 3,000원
+          - listitem [ref=e759]:
+            - link "롯데 레쓰비 그란데 헤이즐넛 500ml 6개 커피음료 라떼커피 6,900원 배송비 3,000원" [ref=e760] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=3623228059&utparam-url=%7B%22x_object_id%22%3A%223623228059%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%225dae39c7-82d8-47f5-89ca-6279629466a6%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%226900%22%2C%22promotion_price%22%3A%226900%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e762]: 롯데 레쓰비 그란데 헤이즐넛 500ml 6개 커피음료 라떼커피
+              - strong [ref=e763]: 6,900원
+              - paragraph [ref=e764]:
+                - generic [ref=e765]: 배송비 3,000원
+          - listitem [ref=e766]:
+            - link "레쓰비 카페타임 240ML 60캔 (라떼/아메리카노) 33,900원 무료배송" [ref=e767] [cursor=pointer]:
+              - /url: https://item.gmarket.co.kr/Item?goodscode=4002172862&utparam-url=%7B%22x_object_id%22%3A%224002172862%22%2C%22x_object_type%22%3A%22item%22%2C%22pvid%22%3A%2229b286aa-8bf4-46ff-96e7-38697e14ea4f%22%2C%22pvid_sys%22%3A%22gmarket%20server%22%2C%22origin_price%22%3A%2233900%22%2C%22promotion_price%22%3A%2233900%22%2C%22coupon_price%22%3A%22%22%2C%22trafficType%22%3A%22organic%22%2C%22ad_product%22%3A%22%22%2C%22ad_sub_product%22%3A%22%22%2C%22ab_buckets%22%3A%2249692%2360334%23536969_49692%230%23461743_49692%23%5E%23%22%2C%22query%22%3A%22%22%2C%22search_session_id%22%3A%22%22%7D
+              - paragraph [ref=e769]: 레쓰비 카페타임 240ML 60캔 (라떼/아메리카노)
+              - strong [ref=e770]: 33,900원
+              - paragraph [ref=e771]:
+                - generic [ref=e772]: 무료배송
+        - generic:
+          - button "앞으로" [ref=e773] [cursor=pointer]:
+            - generic: 앞으로
+          - generic [ref=e774]: 1 / 3
+          - button "뒤로" [ref=e775] [cursor=pointer]:
+            - generic: 뒤로
+          - link "상품등록" [ref=e776] [cursor=pointer]:
+            - /url: http://ad.esmplus.com
+      - generic [ref=e779]:
+        - button "썸네일이미지 상품 01 레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료 열기" [ref=e784] [cursor=pointer]:
+          - generic [ref=e785]:
+            - img "썸네일이미지" [ref=e787]
+            - generic [ref=e788]:
+              - generic [ref=e789]:
+                - text: 상품
+                - emphasis [ref=e790]: "01"
+              - generic [ref=e791]: 레쓰비 그란데 헤이즐넛 500ml 24펫 헤이즐넛커피/대용량커피/커피음료/부드러운커피/라떼음료
+          - generic [ref=e792]: 열기
+        - generic [ref=e795]:
+          - heading "수량" [level=2] [ref=e796]
+          - generic [ref=e797]:
+            - generic:
+              - button "수량증가" [ref=e798] [cursor=pointer]:
+                - generic: 수량증가
+              - button "수량감소" [ref=e799] [cursor=pointer]:
+                - generic: 수량감소
+              - textbox "수량" [ref=e800]: "1"
+          - button "선택" [ref=e801] [cursor=pointer]
+        - generic [ref=e803]:
+          - button "선물하기" [ref=e805] [cursor=pointer]:
+            - emphasis [ref=e806]: 선물하기
+          - button "장바구니" [ref=e808] [cursor=pointer]:
+            - emphasis [ref=e809]: 장바구니
+          - button "구매하기" [ref=e810] [cursor=pointer]:
+            - emphasis [ref=e811]: 구매하기
+      - iframe
+  - contentinfo [ref=e813]:
+    - generic [ref=e814]:
+      - list [ref=e816]:
+        - listitem [ref=e817]:
+          - link "주식회사 지마켓 소개" [ref=e818] [cursor=pointer]:
+            - /url: https://corp.gmarket.com/
+        - listitem [ref=e819]:
+          - link "채용정보" [ref=e820] [cursor=pointer]:
+            - /url: https://careers.gmarket.com/
+        - listitem [ref=e821]:
+          - link "이용약관" [ref=e822] [cursor=pointer]:
+            - /url: https://policy.gmarket.co.kr/terms-policy/buyer-use
+        - listitem [ref=e823]:
+          - link "개인정보처리방침" [ref=e824] [cursor=pointer]:
+            - /url: https://policy.gmarket.co.kr/terms-policy/privacy
+        - listitem [ref=e825]:
+          - link "청소년보호정책" [ref=e826] [cursor=pointer]:
+            - /url: https://policy.gmarket.co.kr/terms-policy/youth
+        - listitem [ref=e827]:
+          - link "광고안내" [ref=e828] [cursor=pointer]:
+            - /url: https://marketinghub.esmplus.com/ad-guide/index.html
+        - listitem [ref=e829]:
+          - link "스크린리더 매뉴얼" [ref=e830] [cursor=pointer]:
+            - /url: https://www.gmarket.co.kr/e/accessibility/screenreader
+      - button "판매자서비스" [ref=e832] [cursor=pointer]
+      - generic [ref=e833]:
+        - generic [ref=e834]:
+          - generic [ref=e835]: "상호명 및 호스팅 서비스 제공 : 주식회사 지마켓"
+          - paragraph [ref=e836]:
+            - text: 서울특별시 강남구 테헤란로 152 (역삼동, 강남파이낸스센터)
+            - text: "사업자등록번호 : 220-81-83676 | 통신판매업신고 : 강남 10630호"
+            - link "사업자정보확인" [ref=e837] [cursor=pointer]:
+              - /url: https://www.ftc.go.kr/bizCommPop.do?wrkr_no=2208183676
+            - text: "대표이사 : 장승환"
+        - generic [ref=e838]:
+          - link "고객센터" [ref=e839] [cursor=pointer]:
+            - /url: https://help.gmarket.co.kr/tcs/Main
+          - paragraph [ref=e840]:
+            - text: 경기도 부천시 원미구 부일로 223, 7층(상동)
+            - text: "Tel :"
+            - emphasis [ref=e841]: 1566-5701(유료)
+            - text: "| 신세계 유니버스 클럽 전용 Tel :"
+            - emphasis [ref=e842]: 1522-5700(유료)
+            - text: "Fax : 02-589-8842 | Mail :"
+            - link "gmarket@corp.gmarket.co.kr" [ref=e843] [cursor=pointer]:
+              - /url: https://help.gmarket.co.kr/Tcs/Inquiry/InquiryWriting
+      - list [ref=e845]:
+        - listitem [ref=e846]:
+          - link "전자금융분쟁처리" [ref=e847] [cursor=pointer]:
+            - /url: http://www.gmarket.co.kr/include/About01.asp
+          - text: "Tel : 1566-5701 | Fax : 02-589-8844 | Mail :"
+          - link "gmk_cs@corp.gmarket.co.kr" [ref=e848] [cursor=pointer]:
+            - /url: mailto:gmk_cs@corp.gmarket.co.kr
+        - listitem [ref=e849]:
+          - button "전자상거래법상의 소비자분쟁해결기준" [ref=e850] [cursor=pointer]
+        - listitem [ref=e851]:
+          - link "오픈마켓 자율준수규약" [ref=e852] [cursor=pointer]:
+            - /url: http://www.gmarket.co.kr/include/About02.asp
+        - listitem [ref=e853]:
+          - link "윤리경영" [ref=e854] [cursor=pointer]:
+            - /url: http://www.gmarket.co.kr/gmap/gmap_cp.asp
+        - listitem [ref=e855]:
+          - link "사이버범죄 신고시스템" [ref=e856] [cursor=pointer]:
+            - /url: https://ecrm.cyber.go.kr/minwon/main
+        - listitem [ref=e857]:
+          - link "VeRO Program" [ref=e858] [cursor=pointer]:
+            - /url: https://www.gmarket.co.kr/gmap/vero_main.asp
+        - listitem [ref=e859]:
+          - link "안전거래센터" [ref=e860] [cursor=pointer]:
+            - /url: https://help.gmarket.co.kr/SecurityCenter/Main
+        - listitem [ref=e861]:
+          - link "저작권침해신고" [ref=e862] [cursor=pointer]:
+            - /url: https://help.gmarket.co.kr/SecurityCenter/Main/SCSub03_1?skind=27
+      - generic [ref=e863]:
+        - paragraph [ref=e864]:
+          - text: 주식회사 지마켓은 통신판매중개자이며 통신판매의 당사자가 아닙니다. 따라서 주식회사 지마켓은 상품·거래 정보 및 가격에 대하여 책임을 지지 않습니다.
+          - text: 본 사이트의 모든 정보, 콘텐츠, UI 등에 대한 무단 복제, 전송, 배포, 스크래핑 등의 행위는 엄격히 금지됩니다.
+          - button "콘텐츠산업 진흥법에 따른 표시" [ref=e865] [cursor=pointer]
+        - paragraph [ref=e866]: Copyright Gmarket Inc. All rights reserved.
+        - paragraph [ref=e868]:
+          - link "KOLSA" [ref=e869] [cursor=pointer]:
+            - /url: http://kolsa.or.kr/neopress/index.php
+            - generic [ref=e870]: KOLSA
+          - text: 한국온라인쇼핑협회
+          - button "수상·인증 내역" [ref=e871] [cursor=pointer]

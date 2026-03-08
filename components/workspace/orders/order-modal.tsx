@@ -69,6 +69,7 @@ export default function OrderModal({ onSave, onClose }: OrderModalProps) {
       payment_method: form.payment_method || null,
       purchase_id: form.purchase_id || null,
       purchase_source: form.purchase_source || null,
+      purchase_url: null,
       purchase_order_no: form.purchase_order_no || null,
       courier: form.courier || null,
       tracking_no: form.tracking_no || null,
