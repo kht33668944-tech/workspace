@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
-import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar, Truck } from "lucide-react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar, Truck, ChevronDown } from "lucide-react";
 import { useOrders } from "@/hooks/use-orders";
+import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { exportOrdersToCSV } from "@/lib/excel-parser";
+import { generateOrderExcel, generatePlayAutoTrackingExcel, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
+import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import OrderTable from "@/components/workspace/orders/order-table";
 import ExcelImport from "@/components/workspace/orders/excel-import";
 import OrderModal from "@/components/workspace/orders/order-modal";
@@ -31,6 +34,7 @@ function getCurrentMonth(): string {
 }
 
 export default function OrdersPage() {
+  const { session } = useAuth();
   const [selectedMonth, setSelectedMonth] = useState<string | null>(getCurrentMonth);
   const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -42,8 +46,39 @@ export default function OrdersPage() {
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [sidePanelOrder, setSidePanelOrder] = useState<Order | null>(null);
   const [showTrackingCollect, setShowTrackingCollect] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   const monthOptions = useMemo(() => generateMonthOptions(), []);
+
+  // 택배사 코드 로드
+  useEffect(() => {
+    if (!session?.access_token) return;
+    fetch("/api/courier-codes", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (data && Array.isArray(data) && data.length > 0) {
+          const map: Record<string, number> = {};
+          for (const c of data) map[c.courier_name] = c.courier_code;
+          setCourierCodeMap(map);
+        }
+      })
+      .catch(() => {});
+  }, [session?.access_token]);
+
+  // 내보내기 메뉴 외부 클릭 닫기
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    if (showExportMenu) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showExportMenu]);
 
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") setActiveSearch(search);
@@ -135,8 +170,16 @@ export default function OrdersPage() {
     });
   }, []);
 
-  const handleExport = () => {
-    const exportData = orders.map((o) => ({
+  // 내보내기할 대상 결정 (선택된 주문 또는 전체)
+  const exportTargetOrders = useMemo(() => {
+    if (selectedIds.size > 0) {
+      return orders.filter((o) => selectedIds.has(o.id));
+    }
+    return orders;
+  }, [orders, selectedIds]);
+
+  const handleExportOrder = () => {
+    const exportData = exportTargetOrders.map((o) => ({
       묶음번호: o.bundle_no,
       주문일시: o.order_date ? o.order_date.slice(0, 16).replace("T", " ") : null,
       판매처: o.marketplace,
@@ -163,6 +206,31 @@ export default function OrdersPage() {
     }));
     const monthLabel = selectedMonth || "전체";
     exportOrdersToCSV(exportData, `발주서_${monthLabel}.xlsx`);
+    setShowExportMenu(false);
+  };
+
+  const handleExportPlayAuto = () => {
+    const { buffer, filename } = generatePlayAutoTrackingExcel(exportTargetOrders, courierCodeMap);
+    downloadExcel(buffer, filename);
+    setShowExportMenu(false);
+
+    // 보관함에 자동 저장
+    if (session?.access_token) {
+      const base64 = arrayBufferToBase64(buffer);
+      fetch("/api/archives", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          file_name: filename,
+          file_type: "playauto_tracking",
+          file_data: base64,
+          order_count: exportTargetOrders.filter((o) => o.tracking_no).length,
+        }),
+      }).catch(() => {});
+    }
   };
 
   // 데이터가 있는 월 + 전체 12개월 병합
@@ -262,13 +330,34 @@ export default function OrdersPage() {
               {deleting ? "삭제 중..." : `${selectedIds.size}건 삭제`}
             </button>
           )}
-          <button
-            onClick={handleExport}
-            className="flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 text-white/60 hover:text-white text-sm rounded-lg transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            내보내기
-          </button>
+          <div className="relative" ref={exportMenuRef}>
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 text-white/60 hover:text-white text-sm rounded-lg transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              내보내기{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+            {showExportMenu && (
+              <div className="absolute top-full right-0 mt-1 z-50 bg-[#1e1e2e] border border-white/10 rounded-lg shadow-xl py-1 min-w-44">
+                <button
+                  onClick={handleExportOrder}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white transition-colors"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-blue-400" />
+                  발주서 양식
+                </button>
+                <button
+                  onClick={handleExportPlayAuto}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white transition-colors"
+                >
+                  <Truck className="w-4 h-4 text-purple-400" />
+                  플레이오토 운송장
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setShowTrackingCollect(true)}
             className="flex items-center gap-1.5 px-3 py-2 bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 text-sm rounded-lg transition-colors"
@@ -357,6 +446,7 @@ export default function OrdersPage() {
       {showTrackingCollect && (
         <TrackingCollectModal
           orders={orders}
+          courierCodeMap={courierCodeMap}
           onClose={() => setShowTrackingCollect(false)}
           onApply={async (updates) => {
             const { data: { session } } = await supabase.auth.getSession();

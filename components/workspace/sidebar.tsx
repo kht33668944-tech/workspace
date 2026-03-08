@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ShoppingCart, Package, Settings, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Package, Settings, ChevronsLeft, ChevronsRight, Archive } from "lucide-react";
 
 const menuItems = [
   { label: "대시보드", href: "/workspace", icon: LayoutDashboard },
   { label: "발주서", href: "/workspace/orders", icon: ShoppingCart },
+  { label: "보관함", href: "/workspace/archive", icon: Archive },
   { label: "상품 소싱", href: "/workspace/products", icon: Package },
   { label: "설정", href: "/workspace/settings", icon: Settings },
 ];

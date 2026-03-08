@@ -1,15 +1,17 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { X, Truck, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, KeyRound, Settings } from "lucide-react";
+import { X, Truck, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, KeyRound, Settings, Download, FileSpreadsheet } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import type { Order, PurchaseCredential } from "@/types/database";
 import { PLATFORM_LABELS } from "@/types/database";
 import type { ScrapeResult, TrackingInfo } from "@/lib/scrapers/types";
+import { generateOrderExcel, generatePlayAutoTrackingExcel, arrayBufferToBase64, downloadExcel } from "@/lib/excel-export";
 
 interface TrackingCollectModalProps {
   orders: Order[];
+  courierCodeMap?: Record<string, number>;
   onClose: () => void;
   onApply: (updates: { purchase_order_no: string; courier: string; tracking_no: string }[]) => Promise<void>;
 }
@@ -25,7 +27,7 @@ const PLATFORM_NAME_MAP: Record<string, Platform> = {
   "오늘의집": "ohouse",
 };
 
-export default function TrackingCollectModal({ orders, onClose, onApply }: TrackingCollectModalProps) {
+export default function TrackingCollectModal({ orders, courierCodeMap = {}, onClose, onApply }: TrackingCollectModalProps) {
   const { session } = useAuth();
   const [step, setStep] = useState<Step>("config");
   const [credentials, setCredentials] = useState<PurchaseCredential[]>([]);
@@ -43,6 +45,7 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
   const [results, setResults] = useState<ScrapeResult[]>([]);
   const [error, setError] = useState("");
   const [applying, setApplying] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null); // "order" | "playauto" | null
 
   // 등록된 자격증명 조회
   const fetchCredentials = useCallback(async () => {
@@ -210,6 +213,93 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
     }
   };
 
+  // 수집 성공한 주문 목록 (원본 Order 객체에 수집된 운송장 반영)
+  const collectedOrders = useMemo(() => {
+    if (!mergedResult?.success.length) return [];
+    return mergedResult.success
+      .map((t: TrackingInfo) => {
+        const order = orders.find((o) => o.purchase_order_no === t.orderNo);
+        if (!order) return null;
+        return { ...order, courier: t.courier, tracking_no: t.trackingNo, delivery_status: "배송완료" };
+      })
+      .filter((o) => o !== null) as Order[];
+  }, [mergedResult, orders]);
+
+  // 엑셀 내보내기 + 보관함 자동 저장 (단일 양식)
+  const handleExport = async (type: "order" | "playauto") => {
+    if (collectedOrders.length === 0) return;
+    setExporting(type);
+
+    try {
+      const { buffer, filename } = type === "order"
+        ? generateOrderExcel(collectedOrders)
+        : generatePlayAutoTrackingExcel(collectedOrders, courierCodeMap);
+
+      downloadExcel(buffer, filename);
+
+      if (session?.access_token) {
+        const base64 = arrayBufferToBase64(buffer);
+        await fetch("/api/archives", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            file_name: filename,
+            file_type: type === "order" ? "order_export" : "playauto_tracking",
+            file_data: base64,
+            order_count: collectedOrders.length,
+          }),
+        });
+      }
+    } catch (err) {
+      console.error("엑셀 내보내기 실패:", err);
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  // 양쪽 양식 모두 자동 다운로드 + 보관함 저장
+  const autoExportAll = async (targetOrders: Order[]) => {
+    if (targetOrders.length === 0) return;
+    try {
+      // 1) 발주서 양식
+      const orderResult = generateOrderExcel(targetOrders);
+      downloadExcel(orderResult.buffer, orderResult.filename);
+
+      // 2) 플레이오토 운송장 양식
+      const playAutoResult = generatePlayAutoTrackingExcel(targetOrders, courierCodeMap);
+      downloadExcel(playAutoResult.buffer, playAutoResult.filename);
+
+      // 보관함 저장
+      if (session?.access_token) {
+        const saves = [
+          { ...orderResult, file_type: "order_export" as const },
+          { ...playAutoResult, file_type: "playauto_tracking" as const },
+        ];
+        for (const s of saves) {
+          const base64 = arrayBufferToBase64(s.buffer);
+          await fetch("/api/archives", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              file_name: s.filename,
+              file_type: s.file_type,
+              file_data: base64,
+              order_count: targetOrders.length,
+            }),
+          });
+        }
+      }
+    } catch (err) {
+      console.error("자동 엑셀 내보내기 실패:", err);
+    }
+  };
+
   const handleApply = async () => {
     if (!mergedResult?.success.length) return;
     setApplying(true);
@@ -221,6 +311,9 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
         courier: t.courier,
         tracking_no: t.trackingNo,
       }));
+
+    // 자동 내보내기 (적용 전에 실행 - collectedOrders에 이미 운송장 반영됨)
+    await autoExportAll(collectedOrders);
 
     await onApply(updates);
     setApplying(false);
@@ -508,6 +601,32 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* 엑셀 내보내기 */}
+                {collectedOrders.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-medium text-white/50 mb-2">엑셀 내보내기</h3>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleExport("order")}
+                        disabled={exporting !== null}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-xs text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        {exporting === "order" ? "저장 중..." : "발주서 양식"}
+                      </button>
+                      <button
+                        onClick={() => handleExport("playauto")}
+                        disabled={exporting !== null}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-purple-500/10 border border-purple-500/20 rounded-lg text-xs text-purple-400 hover:bg-purple-500/20 disabled:opacity-50 transition-colors"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                        {exporting === "playauto" ? "저장 중..." : "플레이오토 운송장"}
+                      </button>
+                    </div>
+                    <p className="text-xs text-white/20 mt-1.5">다운로드와 동시에 보관함에 자동 저장됩니다</p>
                   </div>
                 )}
               </>

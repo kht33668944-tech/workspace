@@ -53,6 +53,17 @@ export interface PurchaseCredential {
   updated_at: string;
 }
 
+export interface ExcelArchive {
+  id: string;
+  user_id: string;
+  file_name: string;
+  file_type: "order_export" | "playauto_tracking";
+  file_data: string; // base64 encoded xlsx
+  order_count: number;
+  created_at: string;
+  expires_at: string;
+}
+
 export const PLATFORM_LABELS: Record<PurchasePlatform, string> = {
   gmarket: "지마켓",
   auction: "옥션",

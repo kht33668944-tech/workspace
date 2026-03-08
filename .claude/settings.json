@@ -9,6 +9,9 @@
       "mcp__chrome-devtools__take_screenshot",
       "mcp__chrome-devtools__select_page",
       "Bash(git add lib/scrapers/auction.ts app/api/orders/collect-tracking/route.ts app/workspace/orders/page.tsx components/workspace/orders/tracking-collect-modal.tsx)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\sksso\\Desktop\\개발\\workspace\\app\\api\\archives"
     ]
   }
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import CredentialManager from "@/components/workspace/settings/credential-manager";
+import CourierCodeManager from "@/components/workspace/settings/courier-code-manager";
 
 export default function SettingsPage() {
   return (
@@ -11,6 +12,7 @@ export default function SettingsPage() {
       </div>
 
       <CredentialManager />
+      <CourierCodeManager />
     </div>
   );
 }
