@@ -393,6 +393,7 @@ function OrderTable({
                   selectedValues={columnFilters[col.key] || []}
                   onFilterChange={v => onColumnFilterChange(col.key, v)}
                   allOrders={allOrders}
+                  columnFilters={columnFilters}
                   sort={sort?.key === col.key ? sort.dir : null}
                   onSort={dir => handleSort(col.key, dir)}
                 />
@@ -619,10 +620,11 @@ const MemoRow = memo(function Row({
 // ════════════════════════════════════
 // ResizableHeader
 // ════════════════════════════════════
-function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allOrders, sort, onSort }: {
+function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allOrders, columnFilters, sort, onSort }: {
   col: Col; width: number; onResize: (w: number) => void;
   hasFilter: boolean; filterOpen: boolean; onFilterToggle: () => void;
   selectedValues: string[]; onFilterChange: (v: string[]) => void; allOrders: Order[];
+  columnFilters: Record<string, string[]>;
   sort: SortDir; onSort: (d: SortDir) => void;
 }) {
   const sx = useRef(0), sw = useRef(0);
@@ -646,7 +648,7 @@ function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilter
           <Filter className="w-3 h-3" />
         </button>
       </div>
-      {filterOpen && <ColumnFilterDropdown columnKey={col.key} allOrders={allOrders} selectedValues={selectedValues} onChange={onFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} />}
+      {filterOpen && <ColumnFilterDropdown columnKey={col.key} allOrders={allOrders} columnFilters={columnFilters} selectedValues={selectedValues} onChange={onFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} />}
       <div onMouseDown={onMouseDown} className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group/resize z-10 flex items-center justify-center">
         <div className="w-[2px] h-full opacity-0 group-hover/resize:opacity-100 bg-blue-500/60 transition-opacity" />
       </div>
@@ -657,8 +659,9 @@ function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilter
 // ════════════════════════════════════
 // ColumnFilterDropdown (확인 버튼 + 정렬)
 // ════════════════════════════════════
-function ColumnFilterDropdown({ columnKey, allOrders, selectedValues, onChange, onClose, sort, onSort }: {
-  columnKey: string; allOrders: Order[]; selectedValues: string[];
+function ColumnFilterDropdown({ columnKey, allOrders, columnFilters, selectedValues, onChange, onClose, sort, onSort }: {
+  columnKey: string; allOrders: Order[]; columnFilters: Record<string, string[]>;
+  selectedValues: string[];
   onChange: (v: string[]) => void; onClose: () => void; sort: SortDir; onSort: (d: SortDir) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -666,15 +669,31 @@ function ColumnFilterDropdown({ columnKey, allOrders, selectedValues, onChange, 
   const ref = useRef<HTMLDivElement>(null);
   const changed = JSON.stringify(pending) !== JSON.stringify(selectedValues);
 
+  // 다른 컬럼 필터가 적용된 데이터에서 유니크 값 추출 (현재 컬럼 필터는 제외)
+  const crossFilteredOrders = useMemo(() => {
+    const otherFilters = Object.entries(columnFilters).filter(
+      ([key, v]) => key !== columnKey && v.length > 0
+    );
+    if (otherFilters.length === 0) return allOrders;
+    return allOrders.filter((order) =>
+      otherFilters.every(([key, allowedValues]) => {
+        if (allowedValues.length === 1 && allowedValues[0] === "__NONE__") return false;
+        const raw = order[key as keyof Order];
+        const cellVal = raw === null || raw === undefined || raw === "" ? "(빈 값)" : String(raw);
+        return allowedValues.includes(cellVal);
+      })
+    );
+  }, [allOrders, columnFilters, columnKey]);
+
   const unique = useMemo(() => {
     const m = new Map<string, number>();
-    for (const o of allOrders) {
+    for (const o of crossFilteredOrders) {
       const raw = o[columnKey as keyof Order];
       const v = raw == null || raw === "" ? "(빈 값)" : String(raw);
       m.set(v, (m.get(v) || 0) + 1);
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([value, count]) => ({ value, count }));
-  }, [allOrders, columnKey]);
+  }, [crossFilteredOrders, columnKey]);
 
   const filtered = useMemo(() => {
     if (!search) return unique;

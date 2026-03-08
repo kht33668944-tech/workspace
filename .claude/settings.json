@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx playwright install chromium)",
+      "mcp__supabase__execute_sql",
+      "Bash(git add app/api/orders/collect-tracking/route.ts app/api/orders/bulk-update-tracking/route.ts lib/scrapers/types.ts lib/scrapers/gmarket.ts components/workspace/orders/tracking-collect-modal.tsx app/workspace/orders/page.tsx package.json package-lock.json)",
+      "Bash(git commit:*)",
+      "Bash(git push origin main)",
+      "mcp__chrome-devtools__take_screenshot",
+      "mcp__chrome-devtools__select_page",
+      "Bash(git add lib/scrapers/auction.ts app/api/orders/collect-tracking/route.ts app/workspace/orders/page.tsx components/workspace/orders/tracking-collect-modal.tsx)"
+    ]
+  }
+}
