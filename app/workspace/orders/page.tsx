@@ -105,7 +105,7 @@ export default function OrdersPage() {
     setActiveSearch("");
   };
 
-  const { orders, allOrders, loading, months, insertOrders, updateOrder, deleteOrders, undo } = useOrders({
+  const { orders, allOrders, loading, months, insertOrders, updateOrder, deleteOrders, undo, refetch } = useOrders({
     month: selectedMonth,
     marketplace: selectedMarketplace,
     search: activeSearch,
@@ -475,7 +475,7 @@ export default function OrdersPage() {
           onClose={() => setShowAutoPurchase(false)}
           onComplete={() => {
             setShowAutoPurchase(false);
-            window.location.reload();
+            refetch();
           }}
         />
       )}
@@ -500,7 +500,7 @@ export default function OrdersPage() {
             } else if (data.failCount > 0) {
               alert(`업데이트: 성공 ${data.successCount}건, 실패 ${data.failCount}건\n${data.errors?.slice(0, 5).join("\n")}`);
             }
-            window.location.reload();
+            await refetch();
           }}
         />
       )}
