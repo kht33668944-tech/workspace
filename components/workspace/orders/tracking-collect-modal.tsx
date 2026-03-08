@@ -15,13 +15,14 @@ interface TrackingCollectModalProps {
 }
 
 type Step = "config" | "collecting" | "result";
-type Platform = "gmarket" | "auction";
+type Platform = "gmarket" | "auction" | "ohouse";
 
-const SUPPORTED_PLATFORMS: Platform[] = ["gmarket", "auction"];
+const SUPPORTED_PLATFORMS: Platform[] = ["gmarket", "auction", "ohouse"];
 
 const PLATFORM_NAME_MAP: Record<string, Platform> = {
   "지마켓": "gmarket",
   "옥션": "auction",
+  "오늘의집": "ohouse",
 };
 
 export default function TrackingCollectModal({ orders, onClose, onApply }: TrackingCollectModalProps) {
@@ -79,7 +80,7 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
         const p = cred.platform as Platform;
         if (!SUPPORTED_PLATFORMS.includes(p)) return null;
 
-        const platformName = p === "gmarket" ? "지마켓" : "옥션";
+        const platformName = p === "gmarket" ? "지마켓" : p === "auction" ? "옥션" : "오늘의집";
         // 해당 플랫폼 주문 중, purchase_id가 이 계정의 login_id를 포함하는 것만
         const targets = pendingOrders.filter(
           (o) =>
@@ -106,7 +107,7 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
 
   // 수동 모드: 선택된 플랫폼의 전체 타겟
   const manualTargets = useMemo(() => {
-    const platformName = platform === "gmarket" ? "지마켓" : "옥션";
+    const platformName = platform === "gmarket" ? "지마켓" : platform === "auction" ? "옥션" : "오늘의집";
     return pendingOrders.filter((o) => o.purchase_source === platformName);
   }, [pendingOrders, platform]);
 
@@ -272,7 +273,9 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
                               <span className={`px-2 py-0.5 rounded text-xs font-medium border ${
                                 p === "gmarket"
                                   ? "bg-green-500/10 text-green-400 border-green-500/20"
-                                  : "bg-orange-500/10 text-orange-400 border-orange-500/20"
+                                  : p === "auction"
+                                    ? "bg-orange-500/10 text-orange-400 border-orange-500/20"
+                                    : "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
                               }`}>
                                 {PLATFORM_LABELS[p]}
                               </span>
@@ -361,7 +364,9 @@ export default function TrackingCollectModal({ orders, onClose, onApply }: Track
                               platform === p
                                 ? p === "gmarket"
                                   ? "bg-green-600/20 text-green-400 border border-green-500/30"
-                                  : "bg-orange-600/20 text-orange-400 border border-orange-500/30"
+                                  : p === "auction"
+                                    ? "bg-orange-600/20 text-orange-400 border border-orange-500/30"
+                                    : "bg-cyan-600/20 text-cyan-400 border border-cyan-500/30"
                                 : "bg-white/5 text-white/40 border border-white/10 hover:text-white/60"
                             }`}
                           >

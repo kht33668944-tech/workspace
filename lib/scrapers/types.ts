@@ -15,7 +15,7 @@ export interface ScrapeResult {
 }
 
 export interface CollectTrackingRequest {
-  platform: "gmarket" | "auction";
+  platform: "gmarket" | "auction" | "ohouse";
   loginId: string;
   loginPw: string;
   orderNos: string[];

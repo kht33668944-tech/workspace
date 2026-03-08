@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { collectGmarketTracking } from "@/lib/scrapers/gmarket";
 import { collectAuctionTracking } from "@/lib/scrapers/auction";
+import { collectOhouseTracking } from "@/lib/scrapers/ohouse";
 import { decrypt } from "@/lib/crypto";
 import type { ScrapeResult } from "@/lib/scrapers/types";
 
@@ -23,7 +24,7 @@ interface CollectRequest {
   // 자동 모드: 저장된 자격증명 사용
   credentialId?: string;
   // 수동 모드: 직접 입력 (기존 호환)
-  platform?: "gmarket" | "auction";
+  platform?: "gmarket" | "auction" | "ohouse";
   loginId?: string;
   loginPw?: string;
   // 공통
@@ -76,6 +77,8 @@ export async function POST(request: NextRequest) {
       result = await collectGmarketTracking(loginId, loginPw, body.orderNos);
     } else if (platform === "auction") {
       result = await collectAuctionTracking(loginId, loginPw, body.orderNos);
+    } else if (platform === "ohouse") {
+      result = await collectOhouseTracking(loginId, loginPw, body.orderNos);
     } else {
       return NextResponse.json({ error: `${platform}은(는) 아직 지원되지 않습니다.` }, { status: 400 });
     }

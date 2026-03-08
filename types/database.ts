@@ -41,7 +41,7 @@ export type OrderInsert = Omit<Order, "id" | "margin" | "order_month" | "created
 
 export type OrderUpdate = Partial<Omit<Order, "id" | "user_id" | "margin" | "order_month" | "created_at" | "updated_at">>;
 
-export type PurchasePlatform = "gmarket" | "auction" | "coupang" | "smartstore" | "11st";
+export type PurchasePlatform = "gmarket" | "auction" | "ohouse" | "coupang" | "smartstore" | "11st";
 
 export interface PurchaseCredential {
   id: string;
@@ -56,6 +56,7 @@ export interface PurchaseCredential {
 export const PLATFORM_LABELS: Record<PurchasePlatform, string> = {
   gmarket: "지마켓",
   auction: "옥션",
+  ohouse: "오늘의집",
   coupang: "쿠팡",
   smartstore: "스마트스토어",
   "11st": "11번가",

@@ -6,11 +6,12 @@ import { useAuth } from "@/context/AuthContext";
 import type { PurchaseCredential, PurchasePlatform } from "@/types/database";
 import { PLATFORM_LABELS } from "@/types/database";
 
-const PLATFORMS: PurchasePlatform[] = ["gmarket", "auction", "coupang", "smartstore", "11st"];
+const PLATFORMS: PurchasePlatform[] = ["gmarket", "auction", "ohouse", "coupang", "smartstore", "11st"];
 
 const PLATFORM_COLORS: Record<PurchasePlatform, string> = {
   gmarket: "bg-green-500/10 text-green-400 border-green-500/20",
   auction: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+  ohouse: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
   coupang: "bg-red-500/10 text-red-400 border-red-500/20",
   smartstore: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   "11st": "bg-pink-500/10 text-pink-400 border-pink-500/20",

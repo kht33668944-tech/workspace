@@ -1,0 +1,14 @@
+[     408ms] [WARNING] Datadog Browser SDK: SDK is loaded more than once. This is unsupported and might have unexpected behavior. @ https://asset.ohousecdn.com/_m/common/web/js/169-f516c0d30214ce23e7cc.chunk.js:1
+[     472ms] [WARNING] 이미 초기화 되었습니다. @ https://asset.ohousecdn.com/_m/common/web/js/88-2c35f75a274afd75e84b.chunk.js:0
+[    1313ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/user_shopping_pages/order_list?status=-1&before=-1:0
+[    1682ms] [WARNING] [Meta Pixel] - Duplicate Pixel ID: 1367101360682944. @ https://connect.facebook.net/en_US/fbevents.js:175
+[    1729ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/user_shopping_pages/order_list?status=-1&before=-1:0
+[    1906ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/user_shopping_pages/order_list?status=-1&before=-1:0
+[    1916ms] [WARNING] [TikTok Pixel] - Duplicate Pixel ID
+Issue: The pixel ID is duplicate. This could impact the pixel data accuracy.
+Suggestion: Please double check and delete any unnecessary pixel code. @ https://analytics.tiktok.com/i18n/pixel/static/main.MTEwMjY2ZTExMA.js:0
+[   11049ms] [WARNING] Failed to execute 'postMessage' on 'DOMWindow': The target origin provided ('https://insights.hotjar.com') does not match the recipient window's origin ('https://ohou.se'). @ https://script.hotjar.com/modules.ddd41caee2adfc4aedb8.js:3
+[  872392ms] [WARNING] Datadog Browser SDK: SDK is loaded more than once. This is unsupported and might have unexpected behavior. @ https://asset.ohousecdn.com/_m/common/web/js/169-f516c0d30214ce23e7cc.chunk.js:1
+[  872493ms] [WARNING] 이미 초기화 되었습니다. @ https://asset.ohousecdn.com/_m/common/web/js/88-2c35f75a274afd75e84b.chunk.js:0
+[  873702ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/:0
+[  873815ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/:0
