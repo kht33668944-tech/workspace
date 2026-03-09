@@ -15,6 +15,8 @@ interface OrderTableProps {
   onUpdate: (id: string, updates: OrderUpdate) => void;
   onUndo?: () => void;
   onDeleteSelected?: () => void;
+  onStartBatchUndo?: () => void;
+  onEndBatchUndo?: () => void;
   onRowClick?: (order: Order) => void;
   columnFilters: Record<string, string[]>;
   onColumnFilterChange: (key: string, values: string[]) => void;
@@ -116,7 +118,7 @@ const PAGE_SIZE = 100;
 
 function OrderTable({
   orders: rawOrders, allOrders, loading, selectedIds, onSelectToggle, onSelectAll, onUpdate,
-  onUndo, onDeleteSelected, onRowClick, columnFilters, onColumnFilterChange,
+  onUndo, onDeleteSelected: _onDeleteSelected, onStartBatchUndo, onEndBatchUndo, onRowClick, columnFilters, onColumnFilterChange,
 }: OrderTableProps) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const o: Record<string, number> = {};
@@ -319,6 +321,9 @@ function OrderTable({
       const clipColCount = Math.max(...clipData.map(r => r.length));
       const isSingleValue = clipRowCount === 1 && clipColCount === 1;
 
+      // 배치 undo 시작
+      onStartBatchUndo?.();
+
       // 선택 영역이 있고 클립보드가 단일 값이면 → 선택 영역 전체에 채우기
       if (isSingleValue && selection) {
         const { minR, maxR, minC, maxC } = norm(selection);
@@ -333,20 +338,42 @@ function OrderTable({
           }
         }
       } else {
-        // 멀티셀 클립보드 → 타겟 위치부터 클립보드 크기만큼 붙여넣기
-        for (let ri = 0; ri < clipData.length; ri++) {
-          for (let ci = 0; ci < clipData[ri].length; ci++) {
-            const tR = target.row + ri, tC = target.col + ci;
-            if (tR >= orders.length || tC >= COL_COUNT) continue;
-            const o = orders[tR], k = COLUMNS[tC].key;
-            if (!EDITABLE_KEYS.has(k)) continue;
-            const v = processValue(k, clipData[ri][ci], o.revenue);
-            onUpdate(o.id, { [k]: v });
+        // 멀티셀 클립보드 → 선택 영역이 있으면 반복(타일링)해서 채우기
+        if (selection) {
+          const { minR, maxR, minC, maxC } = norm(selection);
+          const selRows = maxR - minR + 1;
+          const selCols = maxC - minC + 1;
+          for (let ri = 0; ri < selRows; ri++) {
+            for (let ci = 0; ci < selCols; ci++) {
+              const tR = minR + ri, tC = minC + ci;
+              if (tR >= orders.length || tC >= COL_COUNT) continue;
+              const clipRow = clipData[ri % clipRowCount];
+              const clipVal = clipRow[ci % clipRow.length];
+              const o = orders[tR], k = COLUMNS[tC].key;
+              if (!EDITABLE_KEYS.has(k)) continue;
+              const v = processValue(k, clipVal, o.revenue);
+              onUpdate(o.id, { [k]: v });
+            }
+          }
+        } else {
+          // 선택 영역 없이 단일 셀에서 붙여넣기 → 클립보드 크기만큼
+          for (let ri = 0; ri < clipData.length; ri++) {
+            for (let ci = 0; ci < clipData[ri].length; ci++) {
+              const tR = target.row + ri, tC = target.col + ci;
+              if (tR >= orders.length || tC >= COL_COUNT) continue;
+              const o = orders[tR], k = COLUMNS[tC].key;
+              if (!EDITABLE_KEYS.has(k)) continue;
+              const v = processValue(k, clipData[ri][ci], o.revenue);
+              onUpdate(o.id, { [k]: v });
+            }
           }
         }
       }
+
+      // 배치 undo 종료
+      onEndBatchUndo?.();
     } catch { /* clipboard denied */ }
-  }, [activeCell, selection, orders, onUpdate]);
+  }, [activeCell, selection, orders, onUpdate, onStartBatchUndo, onEndBatchUndo]);
 
   // ═══ 테이블 키보드 핸들러 (듀얼 모드) ═══
   const handleTableKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -355,12 +382,8 @@ function OrderTable({
     // Ctrl+Z: 항상 작동
     if (ctrl && e.key === "z") { e.preventDefault(); onUndo?.(); return; }
 
-    // 체크박스 선택된 행 삭제
-    if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0 && onDeleteSelected) {
-      e.preventDefault();
-      onDeleteSelected();
-      return;
-    }
+    // Delete/Backspace 키로 행 삭제하지 않음 (데이터 유실 방지)
+    // 행 삭제는 체크 후 "N건 삭제" 버튼으로만 가능
 
     // ═══ 편집 모드일 때 — 인풋이 대부분 처리하므로 여기서는 최소한만 ═══
     if (editing) {
@@ -416,12 +439,14 @@ function OrderTable({
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         if (selection) {
+          onStartBatchUndo?.();
           const { minR, maxR, minC, maxC } = norm(selection);
           for (let r = minR; r <= maxR; r++) for (let c = minC; c <= maxC; c++) {
             const o = orders[r], k = COLUMNS[c].key;
             if (!o || !EDITABLE_KEYS.has(k)) continue;
             onUpdate(o.id, { [k]: NUMERIC_KEYS.has(k) ? 0 : null });
           }
+          onEndBatchUndo?.();
         }
         return;
       }
@@ -462,12 +487,14 @@ function OrderTable({
       if (ctrl && e.key === "v") { e.preventDefault(); handlePaste(); }
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
+        onStartBatchUndo?.();
         const { minR: r1, maxR: r2, minC: c1, maxC: c2 } = norm(selection);
         for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) {
           const o = orders[r], k = COLUMNS[c].key;
           if (!o || !EDITABLE_KEYS.has(k)) continue;
           onUpdate(o.id, { [k]: NUMERIC_KEYS.has(k) ? 0 : null });
         }
+        onEndBatchUndo?.();
       }
       if (e.key.length === 1 && !ctrl && !e.altKey) {
         e.preventDefault();
@@ -478,7 +505,7 @@ function OrderTable({
         }
       }
     }
-  }, [activeCell, editing, selection, orders, selectedIds, onDeleteSelected, onUndo, onUpdate, handleCopy, handlePaste]);
+  }, [activeCell, editing, selection, orders, selectedIds, onUndo, onUpdate, handleCopy, handlePaste, onStartBatchUndo, onEndBatchUndo]);
 
   // Fill drag
   useEffect(() => {
@@ -752,7 +779,7 @@ const MemoRow = memo(function Row({
         return (
           <td
             key={col.key}
-            className={`relative px-2 py-1.5 overflow-hidden border-r border-[var(--border-subtle)] ${col.align === "right" ? "text-right" : "text-left"} ${
+            className={`relative px-2 py-1.5 ${isEditing ? "overflow-visible" : "overflow-hidden"} border-r border-[var(--border-subtle)] ${col.align === "right" ? "text-right" : "text-left"} ${
               isFillHL ? "bg-blue-500/10 ring-1 ring-blue-500/30 ring-inset" :
               inSel && !isSelected ? "bg-blue-500/10" : ""
             }`}
@@ -777,8 +804,9 @@ const MemoRow = memo(function Row({
                 onChange={onChange}
                 onKeyDown={onKeyDown}
                 onBlur={onBlur}
+                onMouseDown={(e) => e.stopPropagation()}
                 placeholder={FORMULA_KEYS.has(col.key) ? "=매출*0.9" : undefined}
-                className="w-full bg-[var(--bg-active)] border border-blue-500/50 rounded px-1.5 py-0.5 text-xs text-[var(--text-primary)] outline-none"
+                className="absolute left-0 top-0 h-full min-w-[280px] w-max bg-[var(--bg-card)] border-2 border-blue-500 rounded px-1.5 text-xs text-[var(--text-primary)] outline-none z-30 shadow-lg"
               />
             ) : (
               <div className={`text-xs truncate min-h-[22px] leading-[22px] px-1 ${

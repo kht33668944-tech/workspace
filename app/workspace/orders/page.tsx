@@ -105,7 +105,7 @@ export default function OrdersPage() {
     setActiveSearch("");
   };
 
-  const { orders, allOrders, loading, months, insertOrders, updateOrder, deleteOrders, undo, refetch } = useOrders({
+  const { orders, allOrders, loading, months, insertOrders, updateOrder, deleteOrders, undo, startBatchUndo, endBatchUndo, refetch } = useOrders({
     month: selectedMonth,
     marketplace: selectedMarketplace,
     search: activeSearch,
@@ -451,6 +451,8 @@ export default function OrdersPage() {
         onUpdate={updateOrder}
         onUndo={undo}
         onDeleteSelected={handleBulkDelete}
+        onStartBatchUndo={startBatchUndo}
+        onEndBatchUndo={endBatchUndo}
         onRowClick={(order) => setSidePanelOrder(order)}
         columnFilters={columnFilters}
         onColumnFilterChange={handleColumnFilterChange}

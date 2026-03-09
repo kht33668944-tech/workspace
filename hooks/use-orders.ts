@@ -19,6 +19,10 @@ interface UndoEntry {
   next: OrderUpdate;
 }
 
+interface UndoGroup {
+  entries: UndoEntry[];
+}
+
 const MAX_UNDO = 20;
 
 export function useOrders(options: UseOrdersOptions = {}) {
@@ -26,7 +30,8 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [months, setMonths] = useState<string[]>([]);
-  const undoStackRef = useRef<UndoEntry[]>([]);
+  const undoStackRef = useRef<UndoGroup[]>([]);
+  const batchUndoRef = useRef<UndoEntry[] | null>(null);
   const pinnedIdsRef = useRef<Set<string> | null>(null);
   const prevFiltersKeyRef = useRef<string>("");
   const fetchGenRef = useRef(0);
@@ -151,8 +156,15 @@ export function useOrders(options: UseOrdersOptions = {}) {
         for (const key of Object.keys(autoStatusUpdates) as (keyof OrderUpdate)[]) {
           (prev as Record<string, unknown>)[key] = order[key as keyof Order];
         }
-        undoStackRef.current.push({ type: "update", id, prev, next: autoStatusUpdates });
-        if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+        const entry: UndoEntry = { type: "update", id, prev, next: autoStatusUpdates };
+        if (batchUndoRef.current) {
+          // 배치 모드: 그룹에 추가
+          batchUndoRef.current.push(entry);
+        } else {
+          // 단일 업데이트: 개별 그룹으로 push
+          undoStackRef.current.push({ entries: [entry] });
+          if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+        }
       }
     }
 
@@ -196,11 +208,28 @@ export function useOrders(options: UseOrdersOptions = {}) {
       });
   };
 
+  // 배치 undo 시작/종료: 여러 업데이트를 하나의 그룹으로 묶음
+  const startBatchUndo = useCallback(() => {
+    batchUndoRef.current = [];
+  }, []);
+
+  const endBatchUndo = useCallback(() => {
+    if (batchUndoRef.current && batchUndoRef.current.length > 0) {
+      undoStackRef.current.push({ entries: batchUndoRef.current });
+      if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+    }
+    batchUndoRef.current = null;
+  }, []);
+
   const undo = useCallback(() => {
-    const entry = undoStackRef.current.pop();
-    if (!entry) return;
-    if (entry.type === "update") {
-      updateOrder(entry.id, entry.prev, true);
+    const group = undoStackRef.current.pop();
+    if (!group) return;
+    // 그룹 내 모든 엔트리를 역순으로 되돌림
+    for (let i = group.entries.length - 1; i >= 0; i--) {
+      const entry = group.entries[i];
+      if (entry.type === "update") {
+        updateOrder(entry.id, entry.prev, true);
+      }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -226,6 +255,8 @@ export function useOrders(options: UseOrdersOptions = {}) {
     updateOrder,
     deleteOrders,
     undo,
+    startBatchUndo,
+    endBatchUndo,
   };
 }
 
