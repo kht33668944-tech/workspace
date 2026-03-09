@@ -222,13 +222,18 @@ export async function collectOhouseTracking(
       }
 
       await emailInput.waitFor({ state: "visible", timeout: 30000 });
-      await emailInput.fill(loginId);
+      // fill() 대신 click + pressSequentially로 React 상태 업데이트 보장
+      await emailInput.click();
+      await emailInput.fill("");
+      await emailInput.pressSequentially(loginId, { delay: 50 });
       console.log("[ohouse] 이메일 입력 완료");
 
       const pwInput = page.locator('input[type="password"]');
       const pwCount = await pwInput.count();
       console.log(`[ohouse] 비밀번호 필드 → ${pwCount}개 발견`);
-      await pwInput.fill(loginPw);
+      await pwInput.click();
+      await pwInput.fill("");
+      await pwInput.pressSequentially(loginPw, { delay: 50 });
       console.log("[ohouse] 비밀번호 입력 완료");
 
       // 로그인 버튼 찾기
