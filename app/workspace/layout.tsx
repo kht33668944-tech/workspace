@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import Sidebar from "@/components/workspace/sidebar";
@@ -10,9 +10,18 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   const { user, loading } = useAuth();
   const router = useRouter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // 한 번이라도 인증된 적이 있으면 일시적 null에 반응하지 않음
+  const wasAuthenticatedRef = useRef(false);
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (user) {
+      wasAuthenticatedRef.current = true;
+    }
+  }, [user]);
+
+  useEffect(() => {
+    // 초기 로딩 완료 후 user가 없고, 이전에 인증된 적도 없을 때만 리다이렉트
+    if (!loading && !user && !wasAuthenticatedRef.current) {
       router.replace("/");
     }
   }, [user, loading, router]);
@@ -25,7 +34,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
     );
   }
 
-  if (!user) return null;
+  if (!user && !wasAuthenticatedRef.current) return null;
 
   return (
     <div className="min-h-screen bg-[var(--bg-main)]">

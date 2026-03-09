@@ -49,35 +49,66 @@ export async function purchaseGmarket(
     await login(page, context, loginId, loginPw);
     console.log("[gmarket-purchase] 로그인 성공");
 
-    // 2. 각 주문건 순차 처리
+    // 2. 각 주문건 순차 처리 (수량 > 1이면 1개씩 여러 번 구매)
     let activePage = page;
     for (const order of orders) {
-      onProgress?.(order.orderId, "processing", "구매 진행 중...");
+      const totalQty = Math.max(order.quantity, 1);
+      onProgress?.(order.orderId, "processing", totalQty > 1 ? `구매 진행 중... (0/${totalQty})` : "구매 진행 중...");
+
+      let lastOrderNo = "";
+      let totalCost = 0;
+      let lastPaymentMethod: string | undefined;
+      let successCount = 0;
+
       try {
-        // 페이지 상태 확인 및 복구
-        if (activePage.isClosed()) {
-          console.log("[gmarket-purchase] 주문 시작 전 페이지 닫힘 감지, 복구...");
-          activePage = await recoverPage(context, "about:blank");
+        for (let q = 1; q <= totalQty; q++) {
+          if (totalQty > 1) {
+            console.log(`[gmarket-purchase] 주문 ${order.orderId} - ${q}/${totalQty}번째 구매`);
+            onProgress?.(order.orderId, "processing", `구매 진행 중... (${q - 1}/${totalQty})`);
+          }
+
+          // 페이지 상태 확인 및 복구
+          if (activePage.isClosed()) {
+            console.log("[gmarket-purchase] 주문 시작 전 페이지 닫힘 감지, 복구...");
+            activePage = await recoverPage(context, "about:blank");
+          }
+
+          // 이전 주문의 다이얼로그/팝업 정리
+          try {
+            await activePage.evaluate(() => {
+              document.querySelectorAll('.box__layer, [class*="popup"], [class*="modal"]').forEach(el => {
+                (el as HTMLElement).style.display = "none";
+              });
+            });
+          } catch { /* 무시 */ }
+
+          // 항상 수량 1로 구매 (order의 quantity를 무시)
+          // 2번째 이후 구매는 배송지가 이미 저장되어 있으므로 빠른 검증만 수행
+          const singleOrder = { ...order, quantity: 1 };
+          const isRepeat = q > 1;
+          const { purchaseOrderNo, cost, paymentMethod } = await processSingleOrder(activePage, context, singleOrder, paymentPin, isRepeat);
+
+          lastOrderNo = purchaseOrderNo;
+          if (cost) totalCost += cost;
+          if (paymentMethod) lastPaymentMethod = paymentMethod;
+          successCount++;
+
+          if (totalQty > 1) {
+            console.log(`[gmarket-purchase] ${q}/${totalQty}번째 구매 성공: ${purchaseOrderNo} (단가: ${cost ?? "미확인"})`);
+          }
         }
 
-        // 이전 주문의 다이얼로그/팝업 정리
-        try {
-          await activePage.evaluate(() => {
-            document.querySelectorAll('.box__layer, [class*="popup"], [class*="modal"]').forEach(el => {
-              (el as HTMLElement).style.display = "none";
-            });
-          });
-        } catch { /* 무시 */ }
-
-        const { purchaseOrderNo, cost, paymentMethod } = await processSingleOrder(activePage, context, order, paymentPin);
-        result.success.push({ orderId: order.orderId, purchaseOrderNo, cost, paymentMethod });
-        onProgress?.(order.orderId, "success", `주문번호: ${purchaseOrderNo}${cost ? ` (원가: ${cost.toLocaleString()}원)` : ""}${paymentMethod ? ` [${paymentMethod}]` : ""}`, purchaseOrderNo);
-        console.log(`[gmarket-purchase] 주문 성공: ${order.orderId} → ${purchaseOrderNo} (원가: ${cost ?? "미확인"}, 카드: ${paymentMethod ?? "미확인"})`);
+        // 모든 수량 구매 완료 → 마지막 주문번호 + 원가 합산으로 결과 기록
+        const finalCost = totalCost > 0 ? totalCost : undefined;
+        result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod });
+        onProgress?.(order.orderId, "success", `주문번호: ${lastOrderNo}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${lastPaymentMethod ? ` [${lastPaymentMethod}]` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`, lastOrderNo);
+        console.log(`[gmarket-purchase] 주문 성공: ${order.orderId} → ${lastOrderNo} (총 원가: ${finalCost ?? "미확인"}, ${totalQty}개, 카드: ${lastPaymentMethod ?? "미확인"})`);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
-        result.failed.push({ orderId: order.orderId, reason });
-        onProgress?.(order.orderId, "failed", reason);
-        console.error(`[gmarket-purchase] 주문 실패: ${order.orderId}`, reason);
+        const failMsg = totalQty > 1 ? `${reason} (${successCount}/${totalQty}개 구매 후 실패)` : reason;
+        result.failed.push({ orderId: order.orderId, reason: failMsg });
+        onProgress?.(order.orderId, "failed", failMsg);
+        console.error(`[gmarket-purchase] 주문 실패: ${order.orderId}`, failMsg);
 
         // 실패 후 페이지 상태 복구 시도
         try {
@@ -98,7 +129,6 @@ export async function purchaseGmarket(
             activePage = await context.newPage();
           } catch {
             console.error("[gmarket-purchase] 브라우저 컨텍스트 사용 불가, 남은 주문 중단");
-            // 남은 주문 모두 실패 처리
             break;
           }
         }
@@ -159,13 +189,14 @@ async function processSingleOrder(
   page: Page,
   context: BrowserContext,
   order: PurchaseOrderInfo,
-  paymentPin: string
+  paymentPin: string,
+  isRepeatPurchase = false
 ): Promise<SingleOrderResult> {
   // 현재 작업 페이지 (쿠폰 등에서 새 탭이 열릴 수 있음)
   let activePage = page;
 
   // 1. 상품 페이지 이동
-  console.log(`[gmarket-purchase] 상품 페이지 이동: ${order.productUrl}`);
+  console.log(`[gmarket-purchase] 상품 페이지 이동: ${order.productUrl}${isRepeatPurchase ? " (반복구매)" : ""}`);
   await activePage.goto(order.productUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
   await activePage.waitForTimeout(2000);
 
@@ -178,12 +209,7 @@ async function processSingleOrder(
     activePage = await recoverPage(context, order.productUrl);
   }
 
-  // 3. 수량 선택 (1인 경우 기본값)
-  if (order.quantity > 1) {
-    await setQuantity(activePage, order.quantity);
-  }
-
-  // 4. 쿠폰 적용 (할인 최대화)
+  // 3. 쿠폰 적용 (할인 최대화) — 수량은 항상 1개 (여러 개는 반복 구매)
   await applyCoupon(activePage);
 
   // 페이지 닫힘 시 복구
@@ -192,11 +218,20 @@ async function processSingleOrder(
     activePage = await recoverPage(context, order.productUrl);
   }
 
+  // 4. 쿠폰 적용 후 오버레이/inert 최종 정리
+  await dismissCouponOverlays(activePage).catch(() => {});
+
   // 5. 구매하기 클릭
   await clickPurchaseButton(activePage);
 
-  // 6. 주문 결제 페이지에서 배송지 변경
-  await changeShippingAddress(activePage, order);
+  // 6. 배송지 처리
+  if (isRepeatPurchase) {
+    // 반복 구매: 배송지가 이전 주문에서 이미 설정됨 → 검증만 수행
+    await verifyAndPrepareCheckout(activePage, order);
+  } else {
+    // 첫 구매: 새 배송지 입력
+    await changeShippingAddress(activePage, order);
+  }
 
   // 7. 결제하기 클릭 + 비밀번호 입력
   await processPayment(activePage, paymentPin);
@@ -205,6 +240,111 @@ async function processSingleOrder(
   const orderInfo = await extractOrderInfo(activePage, context);
 
   return orderInfo;
+}
+
+// ═══════════════════════════════════
+// 반복 구매 시 주문 페이지 검증 (배송지 변경 생략)
+// ═══════════════════════════════════
+async function verifyAndPrepareCheckout(page: Page, order: PurchaseOrderInfo) {
+  try {
+    console.log("[gmarket-purchase] 반복구매: 배송지 확인 중...");
+
+    // 1. 주문 결제 페이지에서 배송지 정보 확인
+    const addressText = await page.evaluate(() => {
+      // 배송지 영역의 텍스트를 가져옴
+      const addrEl = document.querySelector('.box__shipping-address, [class*="delivery-info"], [class*="shipping"]');
+      return addrEl?.textContent || "";
+    }).catch(() => "");
+
+    if (addressText && order.recipientName) {
+      const hasName = addressText.includes(order.recipientName);
+      console.log(`[gmarket-purchase] 배송지 수취인 확인: ${hasName ? "일치" : "불일치"} (${order.recipientName})`);
+      if (!hasName) {
+        console.log("[gmarket-purchase] 배송지 불일치 → 전체 배송지 변경 수행");
+        await changeShippingAddress(page, order);
+        return;
+      }
+    }
+
+    // 2. 안심번호 사용하기 체크
+    await checkSafeNumber(page);
+
+    // 3. 할인/쿠폰 적용 확인 (주문 결제 페이지의 쿠폰 적용 버튼)
+    await applyCheckoutDiscount(page);
+
+    console.log("[gmarket-purchase] 반복구매: 검증 완료 (배송지 변경 생략)");
+  } catch (err) {
+    console.log("[gmarket-purchase] 반복구매 검증 실패, 전체 배송지 변경으로 전환:", err);
+    await changeShippingAddress(page, order);
+  }
+}
+
+/** 안심번호 사용하기 체크 (배송지 변경 내부와 독립적으로 사용) */
+async function checkSafeNumber(page: Page) {
+  try {
+    const safeNumSelectors = [
+      'label:has-text("안심번호")',
+      'input[type="checkbox"] + label:has-text("안심번호")',
+      'text=안심번호 사용하기',
+      '[class*="safe-number"] input[type="checkbox"]',
+      '[class*="safeNumber"] input[type="checkbox"]',
+      '[id*="safeNumber"]',
+      '[id*="safe_number"]',
+    ];
+    for (const selector of safeNumSelectors) {
+      const el = page.locator(selector).first();
+      if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const isChecked = await page.evaluate((sel) => {
+          const label = document.querySelector(sel);
+          if (!label) return false;
+          const checkbox = label.querySelector('input[type="checkbox"]')
+            || label.previousElementSibling as HTMLInputElement
+            || label.closest('[class*="check"]')?.querySelector('input[type="checkbox"]');
+          if (checkbox && (checkbox as HTMLInputElement).checked) return true;
+          return label.classList.contains("checked") || label.getAttribute("aria-checked") === "true";
+        }, selector).catch(() => false);
+
+        if (!isChecked) {
+          await el.click({ force: true });
+          console.log("[gmarket-purchase] 안심번호 사용하기 체크 완료");
+        } else {
+          console.log("[gmarket-purchase] 안심번호 이미 체크됨");
+        }
+        break;
+      }
+    }
+    await page.waitForTimeout(500);
+  } catch {
+    console.log("[gmarket-purchase] 안심번호 체크 스킵 (오류)");
+  }
+}
+
+/** 주문 결제 페이지에서 추가 할인/쿠폰 적용 확인 */
+async function applyCheckoutDiscount(page: Page) {
+  try {
+    // 쿠폰 적용 버튼이 있으면 클릭 (주문 결제 페이지 내)
+    const couponApplyBtn = page.locator('button:has-text("쿠폰적용"), a:has-text("쿠폰적용"), button:has-text("할인적용")').first();
+    if (await couponApplyBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await couponApplyBtn.click();
+      await page.waitForTimeout(1500);
+
+      // 쿠폰 선택 팝업에서 최대 할인 적용
+      const couponLayer = page.locator('[class*="coupon-layer"], [class*="CouponBox"], [id*="CouponBox"]').first();
+      if (await couponLayer.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const applyBtn = couponLayer.locator('button:has-text("적용")').first();
+        if (await applyBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await applyBtn.click();
+          await page.waitForTimeout(1000);
+        }
+      }
+
+      // 오버레이 정리
+      await dismissCouponOverlays(page).catch(() => {});
+      console.log("[gmarket-purchase] 반복구매: 할인 적용 확인 완료");
+    }
+  } catch {
+    console.log("[gmarket-purchase] 반복구매: 할인 확인 스킵");
+  }
 }
 
 /** 페이지가 닫혔을 때 context에서 활성 페이지를 찾거나 새로 생성 */
@@ -260,33 +400,34 @@ async function collectCoupons(page: Page) {
         }
       }
 
-      // 팝업 닫기
-      const closeBtn = page.locator('.popup-close, .modal-close, button[aria-label="닫기"]').first();
-      if (await closeBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await closeBtn.click();
+      // 팝업 닫기 - X 버튼 클릭 시도 (VIP 쿠폰 팝업 포함)
+      const closeBtnSelectors = [
+        '.section__iframe-vipcoupon--active button[class*="close"]',
+        '.section__iframe-vipcoupon--active .close',
+        '.box__coupon-content button[class*="close"]',
+        '.popup-close',
+        '.modal-close',
+        'button[aria-label="닫기"]',
+      ];
+      for (const selector of closeBtnSelectors) {
+        const closeBtn = page.locator(selector).first();
+        if (await closeBtn.isVisible({ timeout: 500 }).catch(() => false)) {
+          await closeBtn.click();
+          await page.waitForTimeout(500);
+          break;
+        }
       }
       // ESC로 닫기 시도
       await page.keyboard.press("Escape");
       await page.waitForTimeout(500);
+
+      // 스크롤이 발생했을 수 있으므로 페이지 상단으로 복귀
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.waitForTimeout(300);
     }
     console.log("[gmarket-purchase] 쿠폰 수집 완료");
   } catch {
     console.log("[gmarket-purchase] 쿠폰 수집 스킵 (쿠폰 없음 또는 오류)");
-  }
-}
-
-// ═══════════════════════════════════
-// 수량 선택
-// ═══════════════════════════════════
-async function setQuantity(page: Page, quantity: number) {
-  try {
-    // 수량 input 필드 (class="num") 에 직접 입력
-    const qtyInput = page.locator('input.num, input[type="number"], input[name*="quantity"]').first();
-    if (await qtyInput.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await qtyInput.fill(String(quantity));
-    }
-  } catch {
-    console.log("[gmarket-purchase] 수량 설정 스킵");
   }
 }
 
@@ -333,9 +474,69 @@ async function applyCoupon(page: Page) {
         }
       }
     }
+    // 쿠폰 적용 후 남아있는 dimmed 오버레이 제거
+    await dismissCouponOverlays(page);
+
     console.log("[gmarket-purchase] 쿠폰 적용 완료");
   } catch {
     console.log("[gmarket-purchase] 쿠폰 적용 스킵");
+    // 에러 발생 시에도 오버레이 정리 시도
+    await dismissCouponOverlays(page).catch(() => {});
+  }
+}
+
+/** 쿠폰 관련 dimmed 오버레이 및 팝업 제거 */
+async function dismissCouponOverlays(page: Page) {
+  try {
+    // 1. ESC 키로 팝업 닫기 시도
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(500);
+
+    // 2. 모든 쿠폰 관련 오버레이/팝업 강제 제거
+    await page.evaluate(() => {
+      // CouponBoxDimmed 제거
+      const dimmed = document.getElementById("CouponBoxDimmed");
+      if (dimmed) {
+        dimmed.style.display = "none";
+        dimmed.remove();
+      }
+
+      // VIP 쿠폰 팝업 비활성화 (section__iframe-vipcoupon--active)
+      document.querySelectorAll('.section__iframe-vipcoupon--active').forEach((el) => {
+        el.classList.remove("section__iframe-vipcoupon--active");
+        (el as HTMLElement).style.display = "none";
+      });
+
+      // box__coupon-content 제거 (구매 버튼 가리는 요소)
+      document.querySelectorAll('.box__coupon-content').forEach((el) => {
+        (el as HTMLElement).style.display = "none";
+      });
+
+      // 쿠폰 관련 dimmed/overlay 전부 정리
+      document.querySelectorAll('.dimmed, [id*="Dimmed"], [class*="dimmed"]').forEach((el) => {
+        const htmlEl = el as HTMLElement;
+        if (htmlEl.id.includes("Coupon") || htmlEl.className.includes("coupon") || htmlEl.className.includes("Coupon")) {
+          htmlEl.style.display = "none";
+          htmlEl.remove();
+        }
+      });
+
+      // 쿠폰 레이어/팝업 닫기
+      document.querySelectorAll('[class*="coupon-layer"], [class*="CouponBox"], [id*="CouponBox"], [class*="vipcoupon"]').forEach((el) => {
+        (el as HTMLElement).style.display = "none";
+      });
+
+      // inert 속성 제거
+      document.querySelectorAll('[inert]').forEach((el) => {
+        el.removeAttribute("inert");
+      });
+
+      // 스크롤 복귀
+      window.scrollTo(0, 0);
+    });
+    await page.waitForTimeout(300);
+  } catch {
+    // 무시
   }
 }
 
@@ -343,10 +544,34 @@ async function applyCoupon(page: Page) {
 // 구매하기 버튼 클릭
 // ═══════════════════════════════════
 async function clickPurchaseButton(page: Page) {
+  // 구매 버튼 클릭 전 모든 오버레이/쿠폰 팝업 정리
+  await page.evaluate(() => {
+    // CouponBoxDimmed 및 기타 dimmed 오버레이 제거
+    document.querySelectorAll('#CouponBoxDimmed, .dimmed, [id*="Dimmed"]').forEach((el) => {
+      (el as HTMLElement).style.display = "none";
+      el.remove();
+    });
+    // VIP 쿠폰 팝업 비활성화
+    document.querySelectorAll('.section__iframe-vipcoupon--active').forEach((el) => {
+      el.classList.remove("section__iframe-vipcoupon--active");
+      (el as HTMLElement).style.display = "none";
+    });
+    document.querySelectorAll('.box__coupon-content').forEach((el) => {
+      (el as HTMLElement).style.display = "none";
+    });
+    // inert 속성 제거
+    document.querySelectorAll('[inert]').forEach((el) => {
+      el.removeAttribute("inert");
+    });
+    // 스크롤 복귀
+    window.scrollTo(0, 0);
+  });
+  await page.waitForTimeout(500);
+
   // "선택" 버튼 먼저 클릭 (수량 확정, class=bt_select)
   const selectBtn = page.locator('button.bt_select').first();
   if (await selectBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await selectBtn.click();
+    await selectBtn.click({ force: true });
     await page.waitForTimeout(1000);
   }
 
@@ -359,7 +584,9 @@ async function clickPurchaseButton(page: Page) {
   // 구매하기 버튼 클릭 (#coreInsOrderBtn 우선)
   const buyBtn = page.locator('#coreInsOrderBtn, button:has-text("구매하기"), a:has-text("구매하기")').first();
   await buyBtn.waitFor({ state: "visible", timeout: 10000 });
-  await buyBtn.click();
+
+  // force: true로 클릭하여 오버레이가 남아있더라도 통과
+  await buyBtn.click({ force: true });
 
   // 주문 결제 페이지 로딩 대기
   await page.waitForURL((url) => url.toString().includes("order") || url.toString().includes("checkout"), { timeout: 30000 }).catch(() => null);
@@ -625,6 +852,9 @@ async function changeShippingAddress(page: Page, order: PurchaseOrderInfo) {
     }
     await page.waitForTimeout(1000);
 
+    // 16. "안심번호 사용하기" 체크박스 클릭
+    await checkSafeNumber(page);
+
     console.log(`[gmarket-purchase] 배송지 변경 완료: ${order.recipientName}`);
   } catch (err) {
     console.error("[gmarket-purchase] 배송지 변경 오류:", err);
@@ -657,14 +887,74 @@ function extractSearchKeyword(address: string): string {
 }
 
 // ═══════════════════════════════════
+// "이 배송지 맞나요?" 팝업 처리
+// ═══════════════════════════════════
+async function handleAddressConfirmPopup(page: Page) {
+  try {
+    // "이 배송지 맞나요?" 팝업 내 "결제하기" 버튼 (파란색)
+    // 팝업에는 "배송지 변경하기"와 "결제하기" 두 버튼이 있음
+    const popupPayBtn = page.locator('[class*="confirm"] button:has-text("결제하기"), [class*="modal"] button:has-text("결제하기"), [class*="popup"] button:has-text("결제하기"), [class*="layer"] button:has-text("결제하기"), [class*="dialog"] button:has-text("결제하기")').first();
+    if (await popupPayBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await popupPayBtn.click();
+      console.log("[gmarket-purchase] '이 배송지 맞나요?' 팝업 → 결제하기 클릭");
+      await page.waitForTimeout(2000);
+      return;
+    }
+
+    // fallback: "배송지 맞나요" 텍스트가 있는 컨테이너 내의 결제하기 버튼
+    const hasAddressConfirm = await page.evaluate(() => {
+      const els = document.querySelectorAll('div, section, aside');
+      for (const el of els) {
+        const text = el.textContent || "";
+        if (text.includes("배송지 맞나요") || text.includes("배송지가 맞나요")) {
+          const btn = el.querySelector('button');
+          if (btn && (btn.textContent || "").includes("결제하기")) {
+            (btn as HTMLElement).click();
+            return true;
+          }
+        }
+      }
+      return false;
+    }).catch(() => false);
+
+    if (hasAddressConfirm) {
+      console.log("[gmarket-purchase] '이 배송지 맞나요?' 팝업 → JS로 결제하기 클릭");
+      await page.waitForTimeout(2000);
+    }
+  } catch {
+    // 팝업이 없으면 무시 (정상 흐름)
+  }
+}
+
+// ═══════════════════════════════════
 // 결제 처리 (결제하기 → 키패드 비밀번호 입력)
 // ═══════════════════════════════════
 async function processPayment(page: Page, paymentPin: string) {
+  // 결제하기 버튼 클릭 전 dimmed 오버레이 제거
+  await page.evaluate(() => {
+    document.querySelectorAll('.dimmed, [id*="Dimmed"], [class*="dimmed"]').forEach((el) => {
+      (el as HTMLElement).style.display = "none";
+      el.remove();
+    });
+    document.querySelectorAll('[inert]').forEach((el) => {
+      el.removeAttribute("inert");
+    });
+    // 쿠폰 관련 오버레이도 정리
+    document.querySelectorAll('[class*="coupon-layer"], [class*="CouponBox"], [id*="CouponBox"]').forEach((el) => {
+      (el as HTMLElement).style.display = "none";
+    });
+  }).catch(() => {});
+  await page.waitForTimeout(300);
+
   // "결제하기" 버튼 클릭
   const payBtn = page.locator('button:has-text("결제하기"), a:has-text("결제하기")').first();
   await payBtn.waitFor({ state: "visible", timeout: 10000 });
-  await payBtn.click();
+  await payBtn.click({ force: true });
   console.log("[gmarket-purchase] 결제하기 버튼 클릭 완료");
+
+  // "이 배송지 맞나요?" 확인 팝업 처리 (반복 구매 시 나타날 수 있음)
+  await page.waitForTimeout(2000);
+  await handleAddressConfirmPopup(page);
 
   // 스마일페이 결제 프레임 대기 (동적 이름 탐색)
   let smilepayFrame: Frame | null = null;
@@ -725,43 +1015,42 @@ async function readKeypadNumbers(frame: Frame): Promise<Record<string, number>> 
     const buttons = document.querySelectorAll("button");
     const keypadBtns = Array.from(buttons).filter(b => b.querySelector(".KeyboardButton__Wrapper"));
 
-    // 스프라이트 이미지 URL 추출 (첫 번째 버튼에서)
-    const firstWrapper = keypadBtns[0]?.querySelector(".KeyboardButton__Wrapper");
-    if (!firstWrapper) return null;
-
-    const style = window.getComputedStyle(firstWrapper);
-    const bgImage = style.backgroundImage;
-    const bgSize = style.backgroundSize;
-
-    // 각 버튼의 background-position 수집
+    // 각 버튼의 background 정보를 정확하게 수집
     const positions = keypadBtns.map((btn, idx) => {
       const wrapper = btn.querySelector(".KeyboardButton__Wrapper");
       if (!wrapper) return null;
       const s = window.getComputedStyle(wrapper);
       return {
         index: idx,
+        bgImage: s.backgroundImage,
         bgPosition: s.backgroundPosition,
-        width: parseInt(s.width),
-        height: parseInt(s.height),
+        bgSize: s.backgroundSize,
+        width: parseFloat(s.width),
+        height: parseFloat(s.height),
       };
     }).filter(Boolean);
 
-    return { bgImage, bgSize, positions };
+    return { positions };
   });
 
-  if (!keypadData?.bgImage) {
-    throw new Error("키패드 스프라이트 이미지를 찾을 수 없습니다");
+  if (!keypadData?.positions?.length) {
+    throw new Error("키패드 버튼을 찾을 수 없습니다");
   }
 
-  // base64 PNG 추출
-  const base64Match = keypadData.bgImage.match(/base64,\s*([A-Za-z0-9+/=]+)/);
+  // 첫 번째 유효 버튼에서 base64 이미지 추출
+  const firstPos = keypadData.positions[0]!;
+  const base64Match = firstPos.bgImage.match(/base64,\s*([A-Za-z0-9+/=]+)/);
   if (!base64Match) {
     throw new Error("키패드 이미지 base64 추출 실패");
   }
 
   const imageBuffer = Buffer.from(base64Match[1], "base64");
+  const metadata = await sharp(imageBuffer).metadata();
+  const imgWidth = metadata.width || 1;
+  const imgHeight = metadata.height || 1;
+  console.log(`[keypad-ocr] 스프라이트 이미지: ${imgWidth}x${imgHeight}`);
 
-  // tesseract 워커 생성 (workerPath 명시적 지정)
+  // tesseract 워커 생성
   const worker = await Tesseract.createWorker("eng", undefined, {
     workerPath: TESSERACT_WORKER_PATH,
   });
@@ -771,39 +1060,60 @@ async function readKeypadNumbers(frame: Frame): Promise<Record<string, number>> 
   });
 
   try {
-    // 스프라이트 이미지를 셀별로 분할 + OCR
-    const cellWidth = 30;
-    const cellHeight = 30;
-    const cols = 4;
-    const rows = 3;
-
     const keyMap: Record<string, number> = {};
 
-    const metadata = await sharp(imageBuffer).metadata();
-    const imgWidth = metadata.width || 120;
-    const imgHeight = metadata.height || 90;
-    const scaleX = imgWidth / (cellWidth * cols);
-    const scaleY = imgHeight / (cellHeight * rows);
-
+    // 방법 1: background-position 값을 직접 사용하여 정확한 크롭
     for (const pos of keypadData.positions) {
       if (!pos) continue;
 
-      const [bpX, bpY] = pos.bgPosition.split(" ").map((v: string) => Math.abs(parseInt(v)));
-      const cellCol = Math.round(bpX / cellWidth);
-      const cellRow = Math.round(bpY / cellHeight);
+      // background-position 파싱 (예: "-60px -30px" 또는 "0px 0px")
+      const bpParts = pos.bgPosition.match(/-?[\d.]+/g);
+      if (!bpParts || bpParts.length < 2) continue;
 
-      const left = Math.round(cellCol * cellWidth * scaleX);
-      const top = Math.round(cellRow * cellHeight * scaleY);
-      const extractWidth = Math.min(Math.round(cellWidth * scaleX), imgWidth - left);
-      const extractHeight = Math.min(Math.round(cellHeight * scaleY), imgHeight - top);
+      // background-position은 음수 = 이미지를 왼쪽/위로 이동 = 오른쪽/아래 영역 표시
+      const offsetX = Math.abs(parseFloat(bpParts[0]));
+      const offsetY = Math.abs(parseFloat(bpParts[1]));
 
-      if (extractWidth <= 0 || extractHeight <= 0) continue;
+      // backgroundSize 파싱하여 스케일 계산
+      let scaleX = 1;
+      let scaleY = 1;
+      if (pos.bgSize && pos.bgSize !== "auto") {
+        const sizeParts = pos.bgSize.match(/[\d.]+/g);
+        if (sizeParts && sizeParts.length >= 2) {
+          const bgW = parseFloat(sizeParts[0]);
+          const bgH = parseFloat(sizeParts[1]);
+          if (bgW > 0 && bgH > 0) {
+            scaleX = imgWidth / bgW;
+            scaleY = imgHeight / bgH;
+          }
+        }
+      }
+
+      // 실제 이미지에서의 크롭 영역 계산
+      const left = Math.round(offsetX * scaleX);
+      const top = Math.round(offsetY * scaleY);
+      const cropW = Math.round(pos.width * scaleX);
+      const cropH = Math.round(pos.height * scaleY);
+
+      // 범위 체크
+      const safeLeft = Math.min(left, imgWidth - 1);
+      const safeTop = Math.min(top, imgHeight - 1);
+      const safeW = Math.min(cropW, imgWidth - safeLeft);
+      const safeH = Math.min(cropH, imgHeight - safeTop);
+
+      if (safeW <= 2 || safeH <= 2) continue;
+
+      console.log(`[keypad-ocr] btn${pos.index}: bgPos="${pos.bgPosition}" → crop(${safeLeft},${safeTop},${safeW}x${safeH})`);
 
       try {
+        // 이미지 전처리: 크롭 → 확대 → 이진화
         const cellBuffer = await sharp(imageBuffer)
-          .extract({ left, top, width: extractWidth, height: extractHeight })
+          .extract({ left: safeLeft, top: safeTop, width: safeW, height: safeH })
+          .resize(200, 200, { fit: "fill" })
+          .grayscale()
           .negate()
-          .resize(120, 120)
+          .normalize()
+          .sharpen()
           .png()
           .toBuffer();
 
@@ -811,38 +1121,149 @@ async function readKeypadNumbers(frame: Frame): Promise<Record<string, number>> 
         const digit = text.trim().replace(/\D/g, "");
         if (digit.length === 1) {
           keyMap[digit] = pos.index;
-          console.log(`[keypad-ocr] cell(${cellCol},${cellRow}) → digit "${digit}" → button index ${pos.index}`);
+          console.log(`[keypad-ocr] btn${pos.index} → digit "${digit}"`);
+        } else if (digit.length > 1) {
+          // 여러 숫자가 인식된 경우 첫 번째만 사용
+          keyMap[digit[0]] = pos.index;
+          console.log(`[keypad-ocr] btn${pos.index} → digit "${digit[0]}" (원본: "${digit}")`);
         }
       } catch (err) {
-        console.log(`[keypad-ocr] cell(${cellCol},${cellRow}) OCR 실패:`, err);
+        console.log(`[keypad-ocr] btn${pos.index} 크롭 OCR 실패:`, err);
       }
     }
 
-    // 숫자 0-9 중 10개를 찾아야 함 (1개는 빈칸)
-    if (Object.keys(keyMap).length < 10) {
-      console.warn(`[keypad-ocr] ${Object.keys(keyMap).length}/10 숫자만 인식됨. 스크린샷 방식으로 재시도...`);
+    console.log(`[keypad-ocr] 1차 결과: ${Object.keys(keyMap).length}/10 (${JSON.stringify(keyMap)})`);
 
+    // 방법 2: 미인식 버튼에 대해 스크린샷 fallback (다양한 전처리 시도)
+    if (Object.keys(keyMap).length < 10) {
+      console.log("[keypad-ocr] 스크린샷 fallback 시작...");
       const buttons = frame.locator("button:has(.KeyboardButton__Wrapper)");
       const count = await buttons.count();
+
       for (let i = 0; i < count; i++) {
         if (Object.values(keyMap).includes(i)) continue;
 
         try {
           const btnScreenshot = await buttons.nth(i).screenshot({ type: "png" });
-          const processed = await sharp(btnScreenshot)
-            .resize(150, 150)
-            .grayscale()
-            .negate()
-            .png()
-            .toBuffer();
 
-          const { data: { text } } = await worker.recognize(processed);
-          const digit = text.trim().replace(/\D/g, "");
-          if (digit.length === 1 && !keyMap[digit]) {
-            keyMap[digit] = i;
-            console.log(`[keypad-ocr] 재시도 button ${i} → digit "${digit}"`);
+          // 전처리 변형 여러 개 시도
+          const variants = [
+            // 변형1: grayscale + negate + normalize
+            sharp(btnScreenshot).resize(200, 200).grayscale().negate().normalize().sharpen().png().toBuffer(),
+            // 변형2: threshold 적용
+            sharp(btnScreenshot).resize(200, 200).grayscale().threshold(128).negate().png().toBuffer(),
+            // 변형3: 높은 대비
+            sharp(btnScreenshot).resize(200, 200).grayscale().linear(2, -128).negate().png().toBuffer(),
+          ];
+
+          for (const variantPromise of variants) {
+            try {
+              const processed = await variantPromise;
+              const { data: { text } } = await worker.recognize(processed);
+              const digit = text.trim().replace(/\D/g, "");
+              if (digit.length >= 1 && !keyMap[digit[0]]) {
+                keyMap[digit[0]] = i;
+                console.log(`[keypad-ocr] fallback btn${i} → digit "${digit[0]}"`);
+                break;
+              }
+            } catch { /* 다음 변형 시도 */ }
           }
-        } catch { /* skip */ }
+        } catch {
+          console.log(`[keypad-ocr] fallback btn${i} 스크린샷 실패`);
+        }
+      }
+    }
+
+    // 방법 3: 전체 스프라이트 이미지를 그리드로 균등 분할하여 OCR
+    if (Object.keys(keyMap).length < 10) {
+      console.log("[keypad-ocr] 그리드 분할 OCR 시도...");
+      const cols = 4;
+      const rows = 3;
+      const gridCellW = Math.floor(imgWidth / cols);
+      const gridCellH = Math.floor(imgHeight / rows);
+
+      // 각 그리드 셀의 숫자를 인식
+      const gridResults: { digit: string; col: number; row: number }[] = [];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          try {
+            const cellBuf = await sharp(imageBuffer)
+              .extract({ left: c * gridCellW, top: r * gridCellH, width: gridCellW, height: gridCellH })
+              .resize(200, 200, { fit: "fill" })
+              .grayscale()
+              .negate()
+              .normalize()
+              .sharpen()
+              .png()
+              .toBuffer();
+
+            const { data: { text } } = await worker.recognize(cellBuf);
+            const digit = text.trim().replace(/\D/g, "");
+            if (digit.length >= 1) {
+              gridResults.push({ digit: digit[0], col: c, row: r });
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      // 그리드 결과를 button index에 매핑
+      // 각 버튼의 background-position으로 어떤 그리드 셀에 해당하는지 매칭
+      for (const pos of keypadData.positions) {
+        if (!pos || Object.values(keyMap).includes(pos.index)) continue;
+
+        const bpParts = pos.bgPosition.match(/-?[\d.]+/g);
+        if (!bpParts || bpParts.length < 2) continue;
+        const ox = Math.abs(parseFloat(bpParts[0]));
+        const oy = Math.abs(parseFloat(bpParts[1]));
+
+        // bgSize 스케일 계산
+        let sx = 1, sy = 1;
+        if (pos.bgSize && pos.bgSize !== "auto") {
+          const sp = pos.bgSize.match(/[\d.]+/g);
+          if (sp && sp.length >= 2) {
+            const bw = parseFloat(sp[0]), bh = parseFloat(sp[1]);
+            if (bw > 0 && bh > 0) { sx = imgWidth / bw; sy = imgHeight / bh; }
+          }
+        }
+
+        const pixX = ox * sx;
+        const pixY = oy * sy;
+        const gridCol = Math.round(pixX / gridCellW);
+        const gridRow = Math.round(pixY / gridCellH);
+
+        const match = gridResults.find(g => g.col === gridCol && g.row === gridRow);
+        if (match && !keyMap[match.digit]) {
+          keyMap[match.digit] = pos.index;
+          console.log(`[keypad-ocr] grid(${gridCol},${gridRow}) → digit "${match.digit}" → btn${pos.index}`);
+        }
+      }
+    }
+
+    console.log(`[keypad-ocr] 최종 결과: ${Object.keys(keyMap).length}/10 (${JSON.stringify(keyMap)})`);
+
+    if (Object.keys(keyMap).length < 10) {
+      // 누락된 숫자와 매핑되지 않은 버튼 정보 출력
+      const allDigits = "0123456789".split("");
+      const missing = allDigits.filter(d => !(d in keyMap));
+      const mappedIndices = new Set(Object.values(keyMap));
+      const unmappedBtns = keypadData.positions
+        .filter(p => p && !mappedIndices.has(p.index))
+        .map(p => p!.index);
+      console.log(`[keypad-ocr] 누락 숫자: [${missing.join(",")}], 미매핑 버튼: [${unmappedBtns.join(",")}]`);
+
+      // 누락 숫자가 1~2개이고 미매핑 버튼도 같은 수(+빈칸/삭제 2개)이면 추론 시도
+      // 12버튼 중 10개 숫자 + 2개 기능버튼(빈칸, 삭제)
+      // 미매핑 버튼에서 기능버튼(보통 index 8, 11 또는 맨 마지막 2개)을 제외
+      if (missing.length <= 2 && unmappedBtns.length === missing.length + 2) {
+        // 기능 버튼은 보통 마지막 행의 양 끝 (index 8, 11)
+        const funcBtns = unmappedBtns.filter(i => i === 8 || i === 11 || i >= 10);
+        const digitBtns = unmappedBtns.filter(i => !funcBtns.includes(i));
+        if (digitBtns.length === missing.length) {
+          for (let i = 0; i < missing.length; i++) {
+            keyMap[missing[i]] = digitBtns[i];
+            console.log(`[keypad-ocr] 추론: digit "${missing[i]}" → btn${digitBtns[i]}`);
+          }
+        }
       }
     }
 

@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
     const result = await purchaseGmarket(loginId, loginPw, body.paymentPin, body.orders);
 
     // 성공한 주문의 purchase_order_no + cost + payment_method를 DB에 업데이트
+    const dbErrors: string[] = [];
     if (result.success.length > 0) {
       const supabase = getSupabaseClient(token);
       for (const s of result.success) {
@@ -88,10 +89,16 @@ export async function POST(request: NextRequest) {
         if (s.paymentMethod) {
           updateData.payment_method = s.paymentMethod;
         }
-        await supabase
+        const { error, count } = await supabase
           .from("orders")
           .update(updateData)
           .eq("id", s.orderId);
+        if (error) {
+          console.error(`[auto-purchase] DB 업데이트 실패 (${s.orderId}):`, error.message);
+          dbErrors.push(`${s.orderId}: ${error.message}`);
+        } else {
+          console.log(`[auto-purchase] DB 업데이트 성공 (${s.orderId}): ${JSON.stringify(updateData)}, count=${count}`);
+        }
       }
     }
 
@@ -100,6 +107,7 @@ export async function POST(request: NextRequest) {
       failed: result.failed,
       successCount: result.success.length,
       failCount: result.failed.length,
+      ...(dbErrors.length > 0 && { dbErrors }),
     });
   } catch (err) {
     return NextResponse.json(

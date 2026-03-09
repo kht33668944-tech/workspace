@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 
@@ -32,18 +32,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const initializedRef = useRef(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      initializedRef.current = true;
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // TOKEN_REFRESHED 이벤트에서 세션이 일시적으로 null이 되는 경우 무시
+      // 실제 로그아웃(SIGNED_OUT)만 user를 null로 설정
+      if (event === "SIGNED_OUT") {
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+      } else if (session) {
+        setSession(session);
+        setUser(session.user);
+        setLoading(false);
+      }
+      // session이 null이고 SIGNED_OUT이 아닌 경우 (예: TOKEN_REFRESHED 중간 상태) → 무시
     });
 
     return () => subscription.unsubscribe();
