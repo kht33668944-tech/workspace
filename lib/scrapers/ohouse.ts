@@ -276,7 +276,10 @@ export async function collectOhouseTracking(
           const errorEls = document.querySelectorAll('[class*="error"], [class*="alert"], [class*="warning"], [role="alert"]');
           return Array.from(errorEls).map(el => el.textContent?.trim()).filter(Boolean).join(" | ");
         });
+        // 페이지 전체 텍스트 출력 (디버깅용)
+        const pageText = await page.evaluate(() => document.body?.innerText || "");
         console.log("[ohouse] 로그인 실패 - 캡차:", hasCaptcha, "에러:", errorText || "없음");
+        console.log("[ohouse] 페이지 전체 텍스트:", pageText.substring(0, 1000));
         await browser.close();
         return {
           success: [],
