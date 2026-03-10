@@ -18,6 +18,31 @@ import type { Order, OrderInsert } from "@/types/database";
 
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
 
+const FILTER_STORAGE_KEY = "orders-filter-state";
+
+interface FilterState {
+  month: string | null;
+  marketplace: string | null;
+  search: string;
+  columnFilters: Record<string, string[]>;
+}
+
+function saveFilterState(state: FilterState) {
+  try {
+    sessionStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(state));
+  } catch { /* 무시 */ }
+}
+
+function loadFilterState(): FilterState | null {
+  try {
+    const raw = sessionStorage.getItem(FILTER_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as FilterState;
+  } catch {
+    return null;
+  }
+}
+
 // Ctrl+S 브라우저 기본 동작(다른 이름으로 저장) 방지
 function usePreventBrowserSave() {
   useEffect(() => {
@@ -50,14 +75,16 @@ function getCurrentMonth(): string {
 export default function OrdersPage() {
   usePreventBrowserSave();
   const { session } = useAuth();
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(getCurrentMonth);
-  const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [activeSearch, setActiveSearch] = useState("");
+  // 필터 상태를 sessionStorage에서 복원 (페이지 이동 후 돌아와도 유지)
+  const saved = useMemo(() => loadFilterState(), []);
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(saved?.month ?? getCurrentMonth());
+  const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(saved?.marketplace ?? null);
+  const [search, setSearch] = useState(saved?.search ?? "");
+  const [activeSearch, setActiveSearch] = useState(saved?.search ?? "");
   const [showImport, setShowImport] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(saved?.columnFilters ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [sidePanelOrder, setSidePanelOrder] = useState<Order | null>(null);
   const [showTrackingCollect, setShowTrackingCollect] = useState(false);
@@ -65,6 +92,16 @@ export default function OrdersPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  // 필터 상태 변경 시 sessionStorage에 저장
+  useEffect(() => {
+    saveFilterState({
+      month: selectedMonth,
+      marketplace: selectedMarketplace,
+      search: activeSearch,
+      columnFilters,
+    });
+  }, [selectedMonth, selectedMarketplace, activeSearch, columnFilters]);
 
   const monthOptions = useMemo(() => generateMonthOptions(), []);
 

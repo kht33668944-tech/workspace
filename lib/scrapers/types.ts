@@ -48,10 +48,10 @@ export interface PurchaseResult {
 }
 
 export interface AutoPurchaseRequest {
-  platform: "gmarket" | "auction";
+  platform: "gmarket" | "auction" | "ohouse";
   loginId: string;
   loginPw: string;
-  paymentPin: string;     // 결제 비밀번호 (6자리)
+  paymentPin?: string;    // 결제 비밀번호 (6자리, 지마켓용)
   orders: PurchaseOrderInfo[];
 }
 

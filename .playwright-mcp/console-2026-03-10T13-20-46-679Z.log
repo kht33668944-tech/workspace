@@ -1,0 +1,36 @@
+[    1085ms] [WARNING] Datadog Browser SDK: SDK is loaded more than once. This is unsupported and might have unexpected behavior. @ https://asset.ohousecdn.com/_m/commerce/store/_next/static/chunks/pages/_app-1170169a1b3cf284.js:299
+[    1246ms] [WARNING] react-i18next:: You will need to pass in an i18next instance by using initReactI18next @ https://asset.ohousecdn.com/_m/commerce/store/_next/static/chunks/pages/_app-1170169a1b3cf284.js:321
+[    3243ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://store.ohou.se/goods/1089319:0
+[    3243ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://store.ohou.se/goods/1089319:0
+[  148794ms] [WARNING] Datadog Browser SDK: SDK is loaded more than once. This is unsupported and might have unexpected behavior. @ https://asset.ohousecdn.com/_m/common/web/js/193-0bb7a29d20fc8411892b.chunk.js:1
+[  148932ms] [WARNING] 이미 초기화 되었습니다. @ https://asset.ohousecdn.com/_m/common/web/js/89-4953ff83e769a77c524f.chunk.js:1
+[  148935ms] [ERROR] Datadog Browser SDK: DD_RUM is already initialized. @ https://asset.ohousecdn.com/_m/common/web/js/193-0bb7a29d20fc8411892b.chunk.js:1
+[  149823ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/orders/321361385/checkout:0
+[  149978ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/orders/321361385/checkout:0
+[  463862ms] [ERROR] Permissions policy violation: accelerometer is not allowed in this document. @ https://payment.ohou.se/3TD80Ekfp/Ej23UG/hs/dsEtO3Et0I/VpN7SwmGmXmpwhaOJ3/cw0VPRww/VmF/1aFl3bQAC:0
+[  463863ms] [WARNING] The deviceorientation events are blocked by permissions policy. See https://github.com/w3c/webappsec-permissions-policy/blob/master/features.md#sensor-features @ https://payment.ohou.se/3TD80Ekfp/Ej23UG/hs/dsEtO3Et0I/VpN7SwmGmXmpwhaOJ3/cw0VPRww/VmF/1aFl3bQAC:0
+[  463863ms] [ERROR] Permissions policy violation: accelerometer is not allowed in this document. @ https://payment.ohou.se/3TD80Ekfp/Ej23UG/hs/dsEtO3Et0I/VpN7SwmGmXmpwhaOJ3/cw0VPRww/VmF/1aFl3bQAC:0
+[  463863ms] [WARNING] The devicemotion events are blocked by permissions policy. See https://github.com/w3c/webappsec-permissions-policy/blob/master/features.md#sensor-features @ https://payment.ohou.se/3TD80Ekfp/Ej23UG/hs/dsEtO3Et0I/VpN7SwmGmXmpwhaOJ3/cw0VPRww/VmF/1aFl3bQAC:0
+[  521197ms] [ERROR] Permissions policy violation: accelerometer is not allowed in this document. @ https://payment.ohou.se/3TD80Ekfp/Ej23UG/hs/dsEtO3Et0I/VpN7SwmGmXmpwhaOJ3/cw0VPRww/VmF/1aFl3bQAC:0
+[  521197ms] [WARNING] The deviceorientation events are blocked by permissions policy. See https://github.com/w3c/webappsec-permissions-policy/blob/master/features.md#sensor-features @ https://payment.ohou.se/3TD80Ekfp/Ej23UG/hs/dsEtO3Et0I/VpN7SwmGmXmpwhaOJ3/cw0VPRww/VmF/1aFl3bQAC:0
+[  521198ms] [ERROR] Permissions policy violation: accelerometer is not allowed in this document. @ https://payment.ohou.se/3TD80Ekfp/Ej23UG/hs/dsEtO3Et0I/VpN7SwmGmXmpwhaOJ3/cw0VPRww/VmF/1aFl3bQAC:0
+[  521198ms] [WARNING] The devicemotion events are blocked by permissions policy. See https://github.com/w3c/webappsec-permissions-policy/blob/master/features.md#sensor-features @ https://payment.ohou.se/3TD80Ekfp/Ej23UG/hs/dsEtO3Et0I/VpN7SwmGmXmpwhaOJ3/cw0VPRww/VmF/1aFl3bQAC:0
+[  521211ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://payment.ohou.se/akam/13/50a71f96:0
+[  522981ms] [WARNING] Datadog Browser SDK: SDK is loaded more than once. This is unsupported and might have unexpected behavior. @ https://asset.ohousecdn.com/_m/common/web/js/193-0bb7a29d20fc8411892b.chunk.js:1
+[  523097ms] [WARNING] 이미 초기화 되었습니다. @ https://asset.ohousecdn.com/_m/common/web/js/89-4953ff83e769a77c524f.chunk.js:1
+[  523671ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/orders/321361385/order_result?success=true:0
+[  523811ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/orders/321361385/order_result?success=true:0
+[  523811ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/orders/321361385/order_result?success=true:0
+[  523846ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/orders/321361385/order_result?success=true:0
+[  553889ms] [WARNING] Datadog Browser SDK: SDK is loaded more than once. This is unsupported and might have unexpected behavior. @ https://asset.ohousecdn.com/_m/common/web/js/193-0bb7a29d20fc8411892b.chunk.js:1
+[  553986ms] [WARNING] 이미 초기화 되었습니다. @ https://asset.ohousecdn.com/_m/common/web/js/89-4953ff83e769a77c524f.chunk.js:1
+[  554915ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/user_shopping_pages/order_list?status=-1&before=-1:0
+[  555111ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/user_shopping_pages/order_list?status=-1&before=-1:0
+[  563439ms] [WARNING] Datadog Browser SDK: SDK is loaded more than once. This is unsupported and might have unexpected behavior. @ https://asset.ohousecdn.com/_m/common/web/js/193-0bb7a29d20fc8411892b.chunk.js:1
+[  563521ms] [WARNING] 이미 초기화 되었습니다. @ https://asset.ohousecdn.com/_m/common/web/js/89-4953ff83e769a77c524f.chunk.js:1
+[  564009ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/orders/321361385:0
+[  564048ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://ohou.se/orders/321361385:0
+[ 1018609ms] [WARNING] Datadog Browser SDK: SDK is loaded more than once. This is unsupported and might have unexpected behavior. @ https://asset.ohousecdn.com/_m/commerce/store/_next/static/chunks/pages/_app-1170169a1b3cf284.js:299
+[ 1018780ms] [WARNING] react-i18next:: You will need to pass in an i18next instance by using initReactI18next @ https://asset.ohousecdn.com/_m/commerce/store/_next/static/chunks/pages/_app-1170169a1b3cf284.js:321
+[ 1020387ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://store.ohou.se/goods/1089319:0
+[ 1020417ms] [ERROR] Attestation check for Attribution Reporting on https://www.facebook.com failed. @ https://store.ohou.se/goods/1089319:0

@@ -20,7 +20,12 @@
       "mcp__playwright__browser_type",
       "mcp__playwright__browser_evaluate",
       "mcp__playwright__browser_run_code",
-      "Bash(npm install sharp tesseract.js)"
+      "Bash(npm install sharp tesseract.js)",
+      "Bash(xargs grep -l \"redirect\\\\|navigate\")",
+      "Bash(xargs cat)",
+      "Bash(git add app/workspace/orders/page.tsx components/workspace/orders/order-table.tsx hooks/use-orders.ts)",
+      "mcp__playwright__browser_press_key",
+      "Bash(npx tsc --noEmit)"
     ],
     "additionalDirectories": [
       "c:\\Users\\sksso\\Desktop\\개발\\workspace\\app\\api\\archives"

@@ -20,7 +20,7 @@ interface OrderStatus {
   orderId: string;
   recipientName: string;
   productName: string;
-  status: "pending" | "processing" | "success" | "failed";
+  status: "pending" | "processing" | "success" | "failed" | "waiting_payment";
   message?: string;
   purchaseOrderNo?: string;
 }
@@ -45,7 +45,10 @@ function detectPlatform(order: Order): PurchasePlatform | null {
 }
 
 // 현재 자동구매 지원 플랫폼
-const SUPPORTED_PLATFORMS = new Set<PurchasePlatform>(["gmarket"]);
+const SUPPORTED_PLATFORMS = new Set<PurchasePlatform>(["gmarket", "ohouse"]);
+
+// 결제 비밀번호가 필요한 플랫폼
+const PIN_REQUIRED_PLATFORMS = new Set<PurchasePlatform>(["gmarket"]);
 
 // 구매 계정별 그룹
 interface OrderGroup {
@@ -168,9 +171,14 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
 
   const totalMatchedOrders = matchedGroups.reduce((sum, g) => sum + g.orders.length, 0);
 
+  // 결제 비밀번호가 필요한 그룹이 있는지 확인
+  const needsPaymentPin = matchedGroups.some(g => PIN_REQUIRED_PLATFORMS.has(g.platform));
+
   const canStart = useMemo(() => {
-    return totalMatchedOrders > 0 && paymentPin.length === 6;
-  }, [totalMatchedOrders, paymentPin]);
+    if (totalMatchedOrders === 0) return false;
+    if (needsPaymentPin && paymentPin.length !== 6) return false;
+    return true;
+  }, [totalMatchedOrders, paymentPin, needsPaymentPin]);
 
   const handleStart = async () => {
     if (!session?.access_token || !canStart) return;
@@ -223,7 +231,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
           },
           body: JSON.stringify({
             credentialId: group.credentialId,
-            paymentPin,
+            ...(PIN_REQUIRED_PLATFORMS.has(group.platform) && { paymentPin }),
             orders: purchaseOrders,
           }),
         });
@@ -370,7 +378,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                 )}
                 {unsupportedPlatformOrders.length > 0 && (
                   <p className="text-xs text-[var(--text-muted)]">
-                    {unsupportedPlatformOrders.length}건은 미지원 플랫폼이라 제외됩니다. (현재 지마켓만 지원)
+                    {unsupportedPlatformOrders.length}건은 미지원 플랫폼이라 제외됩니다. (현재 지마켓/오늘의집 지원)
                   </p>
                 )}
                 {alreadyPurchased.length > 0 && (
@@ -385,8 +393,8 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                 )}
               </div>
 
-              {/* 결제 비밀번호 */}
-              {totalMatchedOrders > 0 && (
+              {/* 결제 비밀번호 (지마켓 등 PIN 필요 플랫폼만) */}
+              {totalMatchedOrders > 0 && needsPaymentPin && (
                 <div className="space-y-2">
                   <h3 className="text-sm font-medium text-[var(--text-secondary)]">결제 비밀번호 (6자리)</h3>
                   <div className="relative max-w-48">
@@ -403,6 +411,16 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                     </button>
                   </div>
                   <p className="text-xs text-[var(--text-muted)]">스마일페이 결제 비밀번호를 입력하세요.</p>
+                </div>
+              )}
+
+              {/* 오늘의집 안내 */}
+              {totalMatchedOrders > 0 && matchedGroups.some(g => g.platform === "ohouse") && (
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-400">
+                  <p className="font-medium">오늘의집 주문 안내</p>
+                  <p className="mt-1 text-blue-400/70">
+                    카카오페이 카톡결제로 진행됩니다. 결제요청 후 휴대폰에서 직접 결제를 승인해주세요. (약 30초 대기)
+                  </p>
                 </div>
               )}
             </>
@@ -428,6 +446,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                   <div key={s.orderId} className="flex items-center gap-3 px-3 py-2 bg-[var(--bg-hover)] rounded-lg text-xs">
                     {s.status === "pending" && <div className="w-4 h-4 rounded-full border border-[var(--border-strong)]" />}
                     {s.status === "processing" && <Loader2 className="w-4 h-4 animate-spin text-orange-400" />}
+                    {s.status === "waiting_payment" && <Loader2 className="w-4 h-4 animate-spin text-yellow-400" />}
                     {s.status === "success" && <CheckCircle className="w-4 h-4 text-green-400" />}
                     {s.status === "failed" && <AlertCircle className="w-4 h-4 text-red-400" />}
                     <span className="text-[var(--text-tertiary)] w-16 shrink-0">{s.recipientName}</span>

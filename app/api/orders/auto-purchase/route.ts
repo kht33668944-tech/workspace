@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { purchaseGmarket } from "@/lib/scrapers/gmarket-purchase";
+import { purchaseOhouse } from "@/lib/scrapers/ohouse-purchase";
 import { decrypt } from "@/lib/crypto";
 import type { PurchaseOrderInfo } from "@/lib/scrapers/types";
 
@@ -22,8 +23,8 @@ interface AutoPurchaseRequest {
   credentialId?: string;
   loginId?: string;
   loginPw?: string;
-  platform?: "gmarket" | "auction";
-  paymentPin: string;
+  platform?: "gmarket" | "auction" | "ohouse";
+  paymentPin?: string;
   orders: PurchaseOrderInfo[];
 }
 
@@ -33,10 +34,6 @@ export async function POST(request: NextRequest) {
     if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
     const body = (await request.json()) as AutoPurchaseRequest;
-
-    if (!body.paymentPin || body.paymentPin.length !== 6) {
-      return NextResponse.json({ error: "결제 비밀번호 6자리가 필요합니다." }, { status: 400 });
-    }
 
     if (!body.orders || body.orders.length === 0) {
       return NextResponse.json({ error: "구매할 주문이 없습니다." }, { status: 400 });
@@ -70,19 +67,28 @@ export async function POST(request: NextRequest) {
       loginPw = body.loginPw;
     }
 
-    // 현재는 지마켓만 지원
-    if (platform !== "gmarket") {
+    // 플랫폼별 자동구매 실행
+    let result;
+    if (platform === "gmarket") {
+      if (!body.paymentPin || body.paymentPin.length !== 6) {
+        return NextResponse.json({ error: "결제 비밀번호 6자리가 필요합니다." }, { status: 400 });
+      }
+      result = await purchaseGmarket(loginId, loginPw, body.paymentPin, body.orders);
+    } else if (platform === "ohouse") {
+      result = await purchaseOhouse(loginId, loginPw, body.orders);
+    } else {
       return NextResponse.json({ error: `${platform}은(는) 아직 자동구매를 지원하지 않습니다.` }, { status: 400 });
     }
-
-    const result = await purchaseGmarket(loginId, loginPw, body.paymentPin, body.orders);
 
     // 성공한 주문의 purchase_order_no + cost + payment_method를 DB에 업데이트
     const dbErrors: string[] = [];
     if (result.success.length > 0) {
       const supabase = getSupabaseClient(token);
       for (const s of result.success) {
-        const updateData: Record<string, unknown> = { purchase_order_no: s.purchaseOrderNo };
+        const updateData: Record<string, unknown> = {
+          purchase_order_no: s.purchaseOrderNo,
+          delivery_status: "배송준비",
+        };
         if (s.cost !== undefined) {
           updateData.cost = s.cost;
         }
