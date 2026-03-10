@@ -28,7 +28,8 @@
       "Bash(npx tsc --noEmit)"
     ],
     "additionalDirectories": [
-      "c:\\Users\\sksso\\Desktop\\개발\\workspace\\app\\api\\archives"
+      "c:\\Users\\sksso\\Desktop\\개발\\workspace\\app\\api\\archives",
+      "c:\\Users\\sksso\\Desktop\\개발\\workspace"
     ]
   }
 }
