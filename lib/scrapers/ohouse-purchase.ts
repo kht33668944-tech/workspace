@@ -11,7 +11,7 @@ const SESSION_DIR = path.join(process.cwd(), ".sessions");
 const FIXED_PHONE_SUFFIX = "6564-4459"; // 배송지 전화번호 (뒷자리)
 const KAKAO_PHONE = "01033668944";       // 카카오페이 결제 전화번호 (하이픈 없이)
 const KAKAO_BIRTHDAY = "980309";        // 카카오페이 생년월일
-const PAYMENT_WAIT_MS = 35000;          // 결제 승인 대기 시간 (35초)
+const PAYMENT_WAIT_MS = 60000;          // 결제 승인 대기 시간 (60초)
 
 interface ProgressCallback {
   (orderId: string, status: "processing" | "success" | "failed" | "waiting_payment", message: string, purchaseOrderNo?: string): void;
@@ -604,7 +604,6 @@ async function selectPaymentAndRequest(page: Page) {
     await page.waitForTimeout(1000);
 
     // 1. 간편결제 선택 (카카오페이)
-    // "간편결제" 라디오 버튼 또는 탭 클릭
     const easyPayBtn = page.locator('label:has-text("간편결제"), button:has-text("간편결제"), [class*="간편결제"]').first();
     if (await easyPayBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await easyPayBtn.click();
@@ -619,37 +618,55 @@ async function selectPaymentAndRequest(page: Page) {
       console.log("[ohouse-purchase] 카카오페이 선택 완료");
     }
 
-    // 2. 결제하기 버튼 클릭
-    // 페이지 하단으로 스크롤
+    // 2. 결제하기 버튼 클릭 + 팝업 감지
     await page.keyboard.press("End");
     await page.waitForTimeout(1000);
 
     const payBtn = page.locator('button:has-text("결제하기")').first();
     await payBtn.waitFor({ state: "visible", timeout: 10000 });
+
+    // 팝업 대기를 먼저 등록한 뒤 클릭 (타이밍 이슈 방지)
+    // timeout을 2초로 짧게: ohouse는 iframe 방식이므로 팝업 미감지 시 빠르게 fallback
+    const popupPromise = page.context().waitForEvent("page", { timeout: 2000 });
     await payBtn.click();
     console.log("[ohouse-purchase] 결제하기 버튼 클릭");
-    await page.waitForTimeout(3000);
 
-    // 3. 카카오페이 팝업/iframe 내에서 카톡결제 선택
-    // 카카오페이 팝업이 새 창이나 iframe으로 열림
-    await switchToKakaoPayAndRequest(page);
+    let popup: Page | null = null;
+    try {
+      popup = await popupPromise;
+      console.log(`[ohouse-purchase] 카카오페이 팝업 창 감지: ${popup.url()}`);
+    } catch {
+      // 팝업 없이 iframe으로 처리되는 경우 (ohouse 기본)
+      console.log("[ohouse-purchase] 팝업 없음, iframe 방식으로 시도");
+    }
+
+    // 3. 카카오페이 팝업 또는 iframe에서 카톡결제 선택
+    await switchToKakaoPayAndRequest(page, popup);
   } catch (err) {
     console.error("[ohouse-purchase] 결제 처리 오류:", err);
     throw new Error(`결제 처리 실패: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
-/** 카카오페이 중첩 iframe에서 카톡결제 선택 및 결제요청
+/** 카카오페이 팝업 창 또는 중첩 iframe에서 카톡결제 선택 및 결제요청
  *
- * 오늘의집 결제 구조: 메인페이지 > 외부 iframe > 카카오페이 iframe (중첩)
- * page.frames()가 모든 중첩 iframe을 자동 탐색하므로 이를 활용
+ * - 팝업 방식: 결제하기 클릭 시 새 창(popup)이 열리는 경우 → popup.frames() 탐색
+ * - iframe 방식: 기존처럼 메인페이지 내 중첩 iframe으로 열리는 경우 → page.frames() 탐색
  */
-async function switchToKakaoPayAndRequest(page: Page) {
-  for (let attempt = 0; attempt < 15; attempt++) {
-    await page.waitForTimeout(2000);
+async function switchToKakaoPayAndRequest(page: Page, popup: Page | null) {
+  // 팝업이 있으면 팝업에서, 없으면 원래 페이지에서 탐색
+  const targetPage = popup ?? page;
 
-    // page.frames()로 모든 중첩 iframe 탐색 (카카오페이 프레임 찾기)
-    for (const frame of page.frames()) {
+  // 팝업 방식: 이미 카카오 페이지에 있으므로 첫 시도 전 대기 짧게
+  // iframe 방식: 페이지 내 iframe 렌더링 대기 필요
+  const initWait = popup ? 800 : 2000;
+  await targetPage.waitForTimeout(initWait);
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    if (attempt > 0) await targetPage.waitForTimeout(1500);
+
+    // targetPage.frames()로 모든 중첩 iframe 탐색 (카카오페이 프레임 찾기)
+    for (const frame of targetPage.frames()) {
       const url = frame.url();
       if (!url.includes("kakaopay") && !url.includes("kakao")) continue;
 
@@ -657,9 +674,9 @@ async function switchToKakaoPayAndRequest(page: Page) {
 
       // 카톡결제 탭 클릭 (기본은 QR결제 탭)
       const kakaoTalkTab = frame.locator('[role="tab"]:has-text("카톡결제")').first();
-      if (await kakaoTalkTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+      if (await kakaoTalkTab.isVisible({ timeout: 2000 }).catch(() => false)) {
         await kakaoTalkTab.click();
-        await page.waitForTimeout(1500);
+        await targetPage.waitForTimeout(1000);
         console.log("[ohouse-purchase] 카톡결제 탭 선택");
       } else {
         continue; // 아직 로딩 중
@@ -714,7 +731,7 @@ async function switchToKakaoPayAndRequest(page: Page) {
       }
 
       // 결제요청 버튼 클릭 (입력 후 활성화됨)
-      await page.waitForTimeout(1000);
+      await targetPage.waitForTimeout(700);
       const requestBtn = frame.locator('button:has-text("결제요청")').first();
       if (await requestBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
         try {

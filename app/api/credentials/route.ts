@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   const supabase = getSupabaseClient(token);
   const { data, error } = await supabase
     .from("purchase_credentials")
-    .select("id, user_id, platform, login_id, label, created_at, updated_at")
+    .select("id, user_id, platform, login_id, label, group_name, created_at, updated_at")
     .order("platform");
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const body = await request.json();
-  const { platform, login_id, login_pw, label } = body;
+  const { platform, login_id, login_pw, label, group_name } = body;
 
   if (!platform || !login_id || !login_pw) {
     return NextResponse.json({ error: "플랫폼, 아이디, 비밀번호는 필수입니다." }, { status: 400 });
@@ -57,8 +57,9 @@ export async function POST(request: NextRequest) {
       login_id,
       login_pw_encrypted: encryptedPw,
       label: label || null,
+      group_name: group_name || null,
     })
-    .select("id, user_id, platform, login_id, label, created_at, updated_at")
+    .select("id, user_id, platform, login_id, label, group_name, created_at, updated_at")
     .single();
 
   if (error) {

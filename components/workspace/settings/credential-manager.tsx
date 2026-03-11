@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Trash2, Eye, EyeOff, Save, KeyRound, AlertCircle, CheckCircle, Loader2, Pencil } from "lucide-react";
+import { Plus, Trash2, Eye, EyeOff, Save, KeyRound, AlertCircle, CheckCircle, Loader2, Pencil, ChevronDown, ChevronRight } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import type { PurchaseCredential, PurchasePlatform } from "@/types/database";
 import { PLATFORM_LABELS } from "@/types/database";
@@ -25,12 +25,14 @@ export default function CredentialManager() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   // 폼 상태
   const [formPlatform, setFormPlatform] = useState<PurchasePlatform>("gmarket");
   const [formLoginId, setFormLoginId] = useState("");
   const [formLoginPw, setFormLoginPw] = useState("");
   const [formLabel, setFormLabel] = useState("");
+  const [formGroup, setFormGroup] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -61,6 +63,7 @@ export default function CredentialManager() {
     setFormLoginId("");
     setFormLoginPw("");
     setFormLabel("");
+    setFormGroup("");
     setShowPw(false);
     setEditingId(null);
     setShowForm(false);
@@ -90,7 +93,8 @@ export default function CredentialManager() {
           platform: formPlatform,
           login_id: formLoginId,
           login_pw: formLoginPw,
-          label: formLabel,
+          label: formLabel || formLoginId,
+          group_name: formGroup || null,
         }),
       });
 
@@ -118,6 +122,7 @@ export default function CredentialManager() {
     setFormLoginId(cred.login_id);
     setFormLoginPw("");
     setFormLabel(cred.label || "");
+    setFormGroup(cred.group_name || "");
     setShowForm(true);
   };
 
@@ -144,6 +149,43 @@ export default function CredentialManager() {
       setDeletingId(null);
     }
   };
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // platform → group_name → credentials 로 그룹화
+  type GroupedCredentials = {
+    platform: PurchasePlatform;
+    groupName: string | null;
+    items: PurchaseCredential[];
+  }[];
+
+  const grouped: GroupedCredentials = [];
+  for (const platform of PLATFORMS) {
+    const platCreds = credentials.filter(c => c.platform === platform);
+    if (platCreds.length === 0) continue;
+
+    // 그룹 있는 것과 없는 것 분리
+    const groupNames = [...new Set(platCreds.map(c => c.group_name))].sort((a, b) => {
+      if (!a) return 1;
+      if (!b) return -1;
+      return a.localeCompare(b);
+    });
+
+    for (const g of groupNames) {
+      grouped.push({
+        platform,
+        groupName: g,
+        items: platCreds.filter(c => c.group_name === g),
+      });
+    }
+  }
 
   return (
     <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl">
@@ -209,25 +251,16 @@ export default function CredentialManager() {
               </div>
             </div>
 
-            {/* 별칭 */}
-            <div>
-              <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">별칭 (선택)</label>
-              <input
-                type="text"
-                value={formLabel}
-                onChange={(e) => setFormLabel(e.target.value)}
-                placeholder={`예: ${PLATFORM_LABELS[formPlatform]} 메인계정`}
-                className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-blue-500/50"
-              />
-            </div>
-
             {/* 아이디 */}
             <div>
               <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">아이디</label>
               <input
                 type="text"
                 value={formLoginId}
-                onChange={(e) => setFormLoginId(e.target.value)}
+                onChange={(e) => {
+                  setFormLoginId(e.target.value);
+                  if (!formLabel) setFormLabel(e.target.value);
+                }}
                 placeholder="구매처 로그인 아이디"
                 className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-blue-500/50"
               />
@@ -255,6 +288,30 @@ export default function CredentialManager() {
                 </button>
               </div>
               <p className="text-xs text-[var(--text-disabled)] mt-1">비밀번호는 AES-256으로 암호화되어 안전하게 저장됩니다.</p>
+            </div>
+
+            {/* 그룹 + 별칭 */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">그룹 (선택)</label>
+                <input
+                  type="text"
+                  value={formGroup}
+                  onChange={(e) => setFormGroup(e.target.value)}
+                  placeholder="예: skssoul07"
+                  className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-blue-500/50"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">별칭 (선택)</label>
+                <input
+                  type="text"
+                  value={formLabel}
+                  onChange={(e) => setFormLabel(e.target.value)}
+                  placeholder={`예: ${PLATFORM_LABELS[formPlatform]} 메인계정`}
+                  className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-blue-500/50"
+                />
+              </div>
             </div>
 
             {/* 버튼 */}
@@ -289,54 +346,72 @@ export default function CredentialManager() {
             <p className="text-xs text-[var(--text-disabled)] mt-1">계정을 등록하면 배송 조회 시 자동으로 로그인합니다.</p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {credentials.map((cred) => (
-              <div
-                key={cred.id}
-                className="flex items-center gap-3 bg-[var(--bg-hover)] border border-[var(--border)] rounded-xl px-4 py-3 group hover:border-[var(--border-strong)] transition-colors"
-              >
-                {/* 플랫폼 뱃지 */}
-                <span className={`px-2.5 py-1 rounded-md text-xs font-medium border ${PLATFORM_COLORS[cred.platform]}`}>
-                  {PLATFORM_LABELS[cred.platform]}
-                </span>
+          <div className="space-y-3">
+            {grouped.map(({ platform, groupName, items }) => {
+              const groupKey = `${platform}-${groupName ?? "__none__"}`;
+              const isCollapsed = collapsedGroups.has(groupKey);
 
-                {/* 정보 */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-[var(--text-primary)] font-medium">{cred.login_id}</span>
-                    {cred.label && (
-                      <span className="text-xs text-[var(--text-muted)]">({cred.label})</span>
+              return (
+                <div key={groupKey} className="border border-[var(--border)] rounded-xl overflow-hidden">
+                  {/* 그룹 헤더 */}
+                  <button
+                    onClick={() => toggleGroup(groupKey)}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors"
+                  >
+                    {isCollapsed
+                      ? <ChevronRight className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                      : <ChevronDown className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                    }
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium border ${PLATFORM_COLORS[platform]}`}>
+                      {PLATFORM_LABELS[platform]}
+                    </span>
+                    {groupName && (
+                      <span className="text-xs font-medium text-[var(--text-secondary)]">{groupName}</span>
                     )}
-                  </div>
-                  <p className="text-xs text-[var(--text-disabled)]">
-                    등록: {new Date(cred.created_at).toLocaleDateString("ko-KR")}
-                  </p>
-                </div>
+                    <span className="text-xs text-[var(--text-disabled)] ml-auto">{items.length}개</span>
+                  </button>
 
-                {/* 액션 */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => handleEdit(cred)}
-                    className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
-                    title="수정"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(cred.id)}
-                    disabled={deletingId === cred.id}
-                    className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                    title="삭제"
-                  >
-                    {deletingId === cred.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4" />
-                    )}
-                  </button>
+                  {/* 계정 목록 */}
+                  {!isCollapsed && (
+                    <div className="divide-y divide-[var(--border)]">
+                      {items.map((cred) => (
+                        <div
+                          key={cred.id}
+                          className="flex items-center gap-3 px-4 py-2.5 group hover:bg-[var(--bg-hover)] transition-colors"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm text-[var(--text-primary)]">{cred.login_id}</span>
+                          </div>
+
+                          {/* 액션 */}
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => handleEdit(cred)}
+                              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                              title="수정"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(cred.id)}
+                              disabled={deletingId === cred.id}
+                              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                              title="삭제"
+                            >
+                              {deletingId === cred.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

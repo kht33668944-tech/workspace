@@ -26,20 +26,21 @@ export async function PUT(
 
   const { id } = await params;
   const body = await request.json();
-  const { login_id, login_pw, label } = body;
+  const { login_id, login_pw, label, group_name } = body;
 
   const supabase = getSupabaseClient(token);
 
-  const updateData: Record<string, string> = { updated_at: new Date().toISOString() };
+  const updateData: Record<string, string | null> = { updated_at: new Date().toISOString() };
   if (login_id) updateData.login_id = login_id;
   if (login_pw) updateData.login_pw_encrypted = encrypt(login_pw);
-  if (label !== undefined) updateData.label = label || "";
+  if (label !== undefined) updateData.label = label || null;
+  if (group_name !== undefined) updateData.group_name = group_name || null;
 
   const { data, error } = await supabase
     .from("purchase_credentials")
     .update(updateData)
     .eq("id", id)
-    .select("id, user_id, platform, login_id, label, created_at, updated_at")
+    .select("id, user_id, platform, login_id, label, group_name, created_at, updated_at")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

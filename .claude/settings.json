@@ -25,7 +25,9 @@
       "Bash(xargs cat)",
       "Bash(git add app/workspace/orders/page.tsx components/workspace/orders/order-table.tsx hooks/use-orders.ts)",
       "mcp__playwright__browser_press_key",
-      "Bash(npx tsc --noEmit)"
+      "Bash(npx tsc --noEmit)",
+      "Bash(xargs grep -l \"use server\")",
+      "Bash(grep -l \"use server\" \"c:\\\\Users\\\\sksso\\\\Desktop\\\\개발\\\\workspace\\\\app\"/**/*.tsx \"c:\\\\Users\\\\sksso\\\\Desktop\\\\개발\\\\workspace\\\\components\"/**/*.tsx)"
     ],
     "additionalDirectories": [
       "c:\\Users\\sksso\\Desktop\\개발\\workspace\\app\\api\\archives",

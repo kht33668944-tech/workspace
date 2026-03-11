@@ -50,6 +50,7 @@ export interface PurchaseCredential {
   platform: PurchasePlatform;
   login_id: string;
   label: string | null;
+  group_name: string | null;
   created_at: string;
   updated_at: string;
 }
