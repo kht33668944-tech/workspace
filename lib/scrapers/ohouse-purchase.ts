@@ -225,8 +225,41 @@ async function login(context: BrowserContext, loginId: string, loginPw: string) 
     console.log("[ohouse-purchase] 로그인 중...");
     await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    const emailInput = page.locator('input[placeholder*="이메일"], input[name="email"], input[type="email"]').first();
-    await emailInput.waitFor({ state: "visible", timeout: 30000 });
+    // 페이지 로드 후 현재 URL과 입력 필드 디버깅
+    console.log("[ohouse-purchase] 로그인 페이지 URL:", page.url());
+
+    // 이메일 입력: 여러 selector 시도
+    const emailSelectors = [
+      'input[placeholder*="이메일"]',
+      'input[name="email"]',
+      'input[type="email"]',
+      'input[placeholder*="아이디"]',
+      'input[name="username"]',
+      'input[autocomplete="email"]',
+      'form input[type="text"]:first-of-type',
+    ];
+
+    let emailInput = null;
+    for (const sel of emailSelectors) {
+      const loc = page.locator(sel).first();
+      if (await loc.isVisible({ timeout: 2000 }).catch(() => false)) {
+        emailInput = loc;
+        console.log("[ohouse-purchase] 이메일 입력 필드 발견:", sel);
+        break;
+      }
+    }
+
+    if (!emailInput) {
+      // 디버깅: 페이지에 있는 input 목록 출력
+      const inputs = await page.evaluate(() =>
+        Array.from(document.querySelectorAll("input")).map((el) => ({
+          type: el.type, name: el.name, placeholder: el.placeholder, id: el.id,
+        }))
+      );
+      console.log("[ohouse-purchase] 페이지 input 목록:", JSON.stringify(inputs));
+      throw new Error(`로그인 페이지에서 이메일 입력 필드를 찾을 수 없습니다. URL: ${page.url()}`);
+    }
+
     await emailInput.fill(loginId);
     await page.locator('input[type="password"]').fill(loginPw);
 
