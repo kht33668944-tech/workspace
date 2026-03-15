@@ -82,7 +82,7 @@ const MemoRow = memo(function Row({
 
   return (
     <tr
-      className={`border-t border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)] ${isMobile ? "cursor-pointer active:bg-[var(--bg-hover)]" : ""}`}
+      className={`border-t border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)] ${isMobile ? "cursor-pointer active:bg-[var(--bg-hover)]" : ""} ${order.is_duplicate ? "bg-yellow-500/10" : ""}`}
       onClick={isMobile ? handleRowClick : undefined}
     >
       <td className={`px-2 ${isMobile ? "py-2" : "py-1.5"} sticky left-0 bg-[var(--cell-sticky-bg)] z-10 border-r border-[var(--border-subtle)]`}>

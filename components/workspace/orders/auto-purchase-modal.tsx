@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
-import { X, ShoppingCart, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, AlertTriangle } from "lucide-react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { X, ShoppingCart, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, AlertTriangle, Square } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import type { Order, PurchaseCredential, PurchasePlatform } from "@/types/database";
@@ -20,7 +20,7 @@ interface OrderStatus {
   orderId: string;
   recipientName: string;
   productName: string;
-  status: "pending" | "processing" | "success" | "failed" | "waiting_payment";
+  status: "pending" | "processing" | "success" | "failed" | "waiting_payment" | "cancelled";
   message?: string;
   purchaseOrderNo?: string;
 }
@@ -74,6 +74,12 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
   const [orderStatuses, setOrderStatuses] = useState<OrderStatus[]>([]);
   const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
   const [error, setError] = useState("");
+  const [isStopping, setIsStopping] = useState(false);
+  const [wasCancelled, setWasCancelled] = useState(false);
+
+  // AbortController ref (그룹별 fetch 중단용)
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const shouldStopRef = useRef(false);
 
   // 자격증명 조회
   const fetchCredentials = useCallback(async () => {
@@ -180,11 +186,132 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
     return true;
   }, [totalMatchedOrders, paymentPin, needsPaymentPin]);
 
+  // SSE 스트림을 읽어서 주문 상태를 실시간 업데이트
+  async function readSSEStream(
+    response: Response,
+    groupOrders: Order[],
+    signal: AbortSignal
+  ): Promise<{ isDone: boolean; isCancelled: boolean }> {
+    const reader = response.body?.getReader();
+    if (!reader) return { isDone: true, isCancelled: false };
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let isCancelled = false;
+
+    try {
+      while (true) {
+        if (signal.aborted) break;
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE 이벤트 파싱 (data: {...}\n\n)
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const dataLine = line.trim();
+          if (!dataLine.startsWith("data: ")) continue;
+
+          try {
+            const event = JSON.parse(dataLine.slice(6));
+
+            if (event.type === "progress" && event.orderId) {
+              setOrderStatuses((prev) =>
+                prev.map((s) =>
+                  s.orderId === event.orderId
+                    ? {
+                        ...s,
+                        status: event.status as OrderStatus["status"],
+                        message: event.message || s.message,
+                        purchaseOrderNo: event.purchaseOrderNo || s.purchaseOrderNo,
+                      }
+                    : s
+                )
+              );
+            } else if (event.type === "db_updated" && event.orderId) {
+              // DB 업데이트 완료 알림 (UI에서는 이미 progress로 반영됨)
+              if (event.status === "error") {
+                console.warn(`DB 업데이트 실패: ${event.orderId} - ${event.message}`);
+              }
+            } else if (event.type === "done" || event.type === "cancelled") {
+              isCancelled = event.type === "cancelled";
+              // 최종 결과로 상태 확정
+              if (event.success) {
+                const successMap = new Map(
+                  event.success.map((s: { orderId: string; purchaseOrderNo: string }) => [s.orderId, s.purchaseOrderNo])
+                );
+                setOrderStatuses((prev) =>
+                  prev.map((s) => {
+                    const pno = successMap.get(s.orderId);
+                    if (pno && s.status !== "success") {
+                      return { ...s, status: "success" as const, message: `주문번호: ${pno}`, purchaseOrderNo: pno as string };
+                    }
+                    return s;
+                  })
+                );
+              }
+              if (event.failed) {
+                const failMap = new Map(
+                  event.failed.map((f: { orderId: string; reason: string }) => [f.orderId, f.reason])
+                );
+                setOrderStatuses((prev) =>
+                  prev.map((s) => {
+                    const reason = failMap.get(s.orderId);
+                    if (reason && s.status !== "success" && s.status !== "failed") {
+                      return { ...s, status: "failed" as const, message: reason as string };
+                    }
+                    return s;
+                  })
+                );
+              }
+            } else if (event.type === "error") {
+              setOrderStatuses((prev) =>
+                prev.map((s) =>
+                  groupOrders.some((o) => o.id === s.orderId) && s.status !== "success"
+                    ? { ...s, status: "failed" as const, message: event.message || "서버 오류" }
+                    : s
+                )
+              );
+            }
+          } catch {
+            // JSON 파싱 실패 무시
+          }
+        }
+      }
+    } catch (err) {
+      // AbortError는 정상 중단
+      if (err instanceof DOMException && err.name === "AbortError") {
+        isCancelled = true;
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        setOrderStatuses((prev) =>
+          prev.map((s) =>
+            groupOrders.some((o) => o.id === s.orderId) && s.status !== "success"
+              ? { ...s, status: "failed" as const, message: msg }
+              : s
+          )
+        );
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    return { isDone: true, isCancelled };
+  }
+
   const handleStart = async () => {
     if (!session?.access_token || !canStart) return;
 
     setStep("processing");
     setError("");
+    setIsStopping(false);
+    setWasCancelled(false);
+    shouldStopRef.current = false;
+
+    const batchId = crypto.randomUUID();
 
     // 전체 주문건 초기 상태 (그룹 순서대로)
     const allOrders = matchedGroups.flatMap((g) => g.orders);
@@ -196,8 +323,26 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
     }));
     setOrderStatuses(initialStatuses);
 
+    let cancelled = false;
+
     // 그룹별 순차 처리
     for (let gi = 0; gi < matchedGroups.length; gi++) {
+      // 다음 그룹 시작 전 중단 확인
+      if (shouldStopRef.current) {
+        cancelled = true;
+        // 남은 그룹의 주문들을 cancelled 처리
+        for (let rgi = gi; rgi < matchedGroups.length; rgi++) {
+          setOrderStatuses((prev) =>
+            prev.map((s) =>
+              matchedGroups[rgi].orders.some((o) => o.id === s.orderId) && s.status === "pending"
+                ? { ...s, status: "cancelled" as const, message: "사용자가 작업을 중단했습니다." }
+                : s
+            )
+          );
+        }
+        break;
+      }
+
       const group = matchedGroups[gi];
       setCurrentGroupIndex(gi);
 
@@ -211,16 +356,12 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
         recipientPhone: o.recipient_phone || "",
         deliveryMemo: o.delivery_memo || "",
         quantity: o.quantity || 1,
+        productName: o.product_name || "",
       }));
 
-      // 그룹 내 첫 주문을 processing으로 표시
-      setOrderStatuses((prev) =>
-        prev.map((s) =>
-          s.orderId === group.orders[0].id
-            ? { ...s, status: "processing" as const, message: "구매 진행 중..." }
-            : s
-        )
-      );
+      // AbortController 생성
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
       try {
         const res = await fetch("/api/orders/auto-purchase", {
@@ -231,14 +372,17 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
           },
           body: JSON.stringify({
             credentialId: group.credentialId,
+            batchId,
             ...(PIN_REQUIRED_PLATFORMS.has(group.platform) && { paymentPin }),
             orders: purchaseOrders,
           }),
+          signal: controller.signal,
         });
 
-        const data = await res.json();
-
-        if (!res.ok) {
+        // SSE 스트림이 아닌 경우 (에러 응답)
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await res.json();
           setOrderStatuses((prev) =>
             prev.map((s) =>
               group.orders.some((o) => o.id === s.orderId)
@@ -246,26 +390,28 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                 : s
             )
           );
-        } else {
-          const successMap = new Map(
-            (data.success || []).map((s: { orderId: string; purchaseOrderNo: string }) => [s.orderId, s.purchaseOrderNo])
-          );
-          const failMap = new Map(
-            (data.failed || []).map((f: { orderId: string; reason: string }) => [f.orderId, f.reason])
-          );
+          continue;
+        }
 
-          setOrderStatuses((prev) =>
-            prev.map((s) => {
-              if (!group.orders.some((o) => o.id === s.orderId)) return s;
-              const pno = successMap.get(s.orderId);
-              const reason = failMap.get(s.orderId);
-              if (pno) return { ...s, status: "success" as const, message: `주문번호: ${pno}`, purchaseOrderNo: pno as string };
-              if (reason) return { ...s, status: "failed" as const, message: reason as string };
-              return { ...s, status: "failed" as const, message: "응답 없음" };
-            })
-          );
+        // SSE 스트림 읽기
+        const { isCancelled } = await readSSEStream(res, group.orders, controller.signal);
+        if (isCancelled) {
+          cancelled = true;
+          break;
         }
       } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          cancelled = true;
+          // 중단된 그룹의 남은 주문을 cancelled 처리
+          setOrderStatuses((prev) =>
+            prev.map((s) =>
+              group.orders.some((o) => o.id === s.orderId) && s.status !== "success" && s.status !== "failed"
+                ? { ...s, status: "cancelled" as const, message: "사용자가 작업을 중단했습니다." }
+                : s
+            )
+          );
+          break;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         setOrderStatuses((prev) =>
           prev.map((s) =>
@@ -274,14 +420,28 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
               : s
           )
         );
+      } finally {
+        abortControllerRef.current = null;
       }
     }
 
+    setWasCancelled(cancelled);
+    setIsStopping(false);
     setStep("result");
+  };
+
+  const handleStop = () => {
+    setIsStopping(true);
+    shouldStopRef.current = true;
+    // 현재 진행 중인 fetch 중단
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
   };
 
   const successCount = orderStatuses.filter((s) => s.status === "success").length;
   const failCount = orderStatuses.filter((s) => s.status === "failed").length;
+  const cancelledCount = orderStatuses.filter((s) => s.status === "cancelled").length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--bg-overlay)] backdrop-blur-sm">
@@ -430,7 +590,9 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
             <div className="space-y-4">
               <div className="flex items-center gap-3 text-sm text-[var(--text-secondary)]">
                 <Loader2 className="w-5 h-5 animate-spin text-orange-400" />
-                구매 자동화 진행 중... (브라우저를 닫지 마세요)
+                {isStopping
+                  ? "현재 주문 완료 후 중단합니다..."
+                  : "구매 자동화 진행 중... (브라우저를 닫지 마세요)"}
               </div>
               {matchedGroups[currentGroupIndex] && (
                 <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] bg-[var(--bg-hover)] rounded-lg px-3 py-2">
@@ -449,6 +611,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                     {s.status === "waiting_payment" && <Loader2 className="w-4 h-4 animate-spin text-yellow-400" />}
                     {s.status === "success" && <CheckCircle className="w-4 h-4 text-green-400" />}
                     {s.status === "failed" && <AlertCircle className="w-4 h-4 text-red-400" />}
+                    {s.status === "cancelled" && <Square className="w-4 h-4 text-[var(--text-muted)]" />}
                     <span className="text-[var(--text-tertiary)] w-16 shrink-0">{s.recipientName}</span>
                     <span className="text-[var(--text-secondary)] truncate flex-1">{s.productName}</span>
                     {s.message && <span className="text-[var(--text-muted)] text-[10px] shrink-0">{s.message}</span>}
@@ -460,7 +623,12 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
 
           {step === "result" && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              {wasCancelled && (
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 text-xs text-yellow-400">
+                  작업이 중단되었습니다. 이미 완료된 주문은 DB에 반영되었습니다.
+                </div>
+              )}
+              <div className={`grid gap-3 ${cancelledCount > 0 ? "grid-cols-3" : "grid-cols-2"}`}>
                 <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-center">
                   <p className="text-2xl font-bold text-green-400">{successCount}</p>
                   <p className="text-xs text-green-400/70">성공</p>
@@ -469,6 +637,12 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                   <p className="text-2xl font-bold text-red-400">{failCount}</p>
                   <p className="text-xs text-red-400/70">실패</p>
                 </div>
+                {cancelledCount > 0 && (
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-yellow-400">{cancelledCount}</p>
+                    <p className="text-xs text-yellow-400/70">중단</p>
+                  </div>
+                )}
               </div>
 
               {error && (
@@ -482,12 +656,16 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                   <div key={s.orderId} className="flex items-center gap-3 px-3 py-2 bg-[var(--bg-hover)] rounded-lg text-xs">
                     {s.status === "success" ? (
                       <CheckCircle className="w-4 h-4 text-green-400 shrink-0" />
+                    ) : s.status === "cancelled" ? (
+                      <Square className="w-4 h-4 text-yellow-400 shrink-0" />
                     ) : (
                       <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                     )}
                     <span className="text-[var(--text-tertiary)] w-16 shrink-0">{s.recipientName}</span>
                     <span className="text-[var(--text-secondary)] truncate flex-1">{s.productName}</span>
-                    <span className={`text-[10px] shrink-0 ${s.status === "success" ? "text-green-400" : "text-red-400"}`}>
+                    <span className={`text-[10px] shrink-0 ${
+                      s.status === "success" ? "text-green-400" : s.status === "cancelled" ? "text-yellow-400" : "text-red-400"
+                    }`}>
                       {s.message}
                     </span>
                   </div>
@@ -516,7 +694,19 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
             </>
           )}
           {step === "processing" && (
-            <p className="text-xs text-[var(--text-muted)]">진행 중에는 브라우저를 닫지 마세요.</p>
+            <div className="flex items-center gap-3 w-full">
+              <p className="text-xs text-[var(--text-muted)] flex-1">
+                {isStopping ? "중단 중..." : "진행 중에는 브라우저를 닫지 마세요."}
+              </p>
+              <button
+                onClick={handleStop}
+                disabled={isStopping}
+                className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-600/50 disabled:cursor-not-allowed text-[var(--text-primary)] text-sm font-medium rounded-lg transition-colors"
+              >
+                <Square className="w-3.5 h-3.5" />
+                {isStopping ? "중단 중..." : "작업 중단"}
+              </button>
+            </div>
           )}
           {step === "result" && (
             <>

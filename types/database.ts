@@ -25,6 +25,7 @@ export interface Order {
   courier: string | null;
   tracking_no: string | null;
   delivery_status: string;
+  is_duplicate: boolean;
   consultation_logs: ConsultationLog[];
   order_month: string | null; // generated: YYYY-MM
   memo: string | null;
@@ -38,7 +39,7 @@ export interface ConsultationLog {
   content: string;
 }
 
-export type OrderInsert = Omit<Order, "id" | "margin" | "order_month" | "created_at" | "updated_at">;
+export type OrderInsert = Omit<Order, "id" | "margin" | "order_month" | "is_duplicate" | "created_at" | "updated_at"> & { is_duplicate?: boolean };
 
 export type OrderUpdate = Partial<Omit<Order, "id" | "user_id" | "margin" | "order_month" | "created_at" | "updated_at">>;
 
@@ -64,6 +65,23 @@ export interface ExcelArchive {
   order_count: number;
   created_at: string;
   expires_at: string;
+}
+
+export interface PurchaseLog {
+  id: string;
+  user_id: string;
+  batch_id: string;
+  order_id: string | null;
+  platform: string;
+  login_id: string;
+  status: "success" | "failed" | "cancelled";
+  purchase_order_no: string | null;
+  cost: number | null;
+  payment_method: string | null;
+  error_message: string | null;
+  product_name: string | null;
+  recipient_name: string | null;
+  created_at: string;
 }
 
 export const PLATFORM_LABELS: Record<PurchasePlatform, string> = {

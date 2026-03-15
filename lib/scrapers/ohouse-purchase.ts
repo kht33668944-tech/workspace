@@ -81,7 +81,8 @@ export async function purchaseOhouse(
   loginPw: string,
   orders: PurchaseOrderInfo[],
   onProgress?: ProgressCallback,
-  supabase?: SupabaseClient
+  supabase?: SupabaseClient,
+  abortSignal?: AbortSignal
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
@@ -165,6 +166,19 @@ export async function purchaseOhouse(
   try {
     // 3. 각 주문건 순차 처리
     for (const order of orders) {
+      // 중단 요청 확인
+      if (abortSignal?.aborted) {
+        console.log("[ohouse-purchase] 사용자 중단 요청 → 남은 주문 건너뜀");
+        for (const remaining of orders) {
+          if (!result.success.some(s => s.orderId === remaining.orderId) &&
+              !result.failed.some(f => f.orderId === remaining.orderId)) {
+            result.failed.push({ orderId: remaining.orderId, reason: "사용자가 작업을 중단했습니다." });
+            onProgress?.(remaining.orderId, "failed", "사용자가 작업을 중단했습니다.");
+          }
+        }
+        break;
+      }
+
       const totalQty = Math.max(order.quantity, 1);
       onProgress?.(order.orderId, "processing", "구매 진행 중...");
 

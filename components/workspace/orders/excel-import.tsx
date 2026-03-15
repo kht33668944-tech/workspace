@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useRef, useCallback, useMemo } from "react";
-import { Upload, X, FileSpreadsheet, Check, AlertTriangle } from "lucide-react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { Upload, X, FileSpreadsheet, Check, AlertTriangle, Copy } from "lucide-react";
 import { parseExcelFile, parseExcelSheet } from "@/lib/excel-parser";
 import type { OrderInsert } from "@/types/database";
 
 interface ExcelImportProps {
   onImport: (orders: OrderInsert[]) => Promise<{ error: string | null }>;
   onClose: () => void;
+  checkDuplicates?: (rows: OrderInsert[]) => Promise<Set<number>>;
 }
 
 // 파일명에서 날짜 추출 (발주양식_20260307225752207.xlsx → 2026-03-07)
@@ -23,7 +24,7 @@ function extractDateFromFilename(filename: string): string | null {
   return null;
 }
 
-export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
+export default function ExcelImport({ onImport, onClose, checkDuplicates }: ExcelImportProps) {
   const [dragOver, setDragOver] = useState(false);
   const [parsedOrders, setParsedOrders] = useState<OrderInsert[] | null>(null);
   const [fileName, setFileName] = useState("");
@@ -33,7 +34,28 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
   const [error, setError] = useState<string | null>(null);
   const [rawFile, setRawFile] = useState<File | null>(null);
   const [manualDate, setManualDate] = useState<string>("");
+  const [duplicateIndices, setDuplicateIndices] = useState<Set<number>>(new Set());
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // parsedOrders 변경 시 중복 체크 실행
+  useEffect(() => {
+    if (!parsedOrders || parsedOrders.length === 0 || !checkDuplicates) {
+      setDuplicateIndices(new Set());
+      return;
+    }
+    let cancelled = false;
+    setCheckingDuplicates(true);
+    checkDuplicates(parsedOrders).then((dupes) => {
+      if (!cancelled) {
+        setDuplicateIndices(dupes);
+        setCheckingDuplicates(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [parsedOrders, checkDuplicates]);
+
+  const duplicateCount = duplicateIndices.size;
 
   // 날짜가 없는 주문이 있는지 확인
   const dateInfo = useMemo(() => {
@@ -163,17 +185,32 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
     [handleFile]
   );
 
-  const handleConfirm = async () => {
+  const doImport = async (excludeDuplicates: boolean) => {
     if (!parsedOrders || parsedOrders.length === 0) return;
     setImporting(true);
 
     // 날짜가 없는 주문에 수동 날짜 적용
-    let ordersToImport = parsedOrders;
-    if (dateInfo.missingCount > 0 && manualDate) {
-      const dateValue = `${manualDate}T00:00:00Z`;
-      ordersToImport = parsedOrders.map(o =>
-        o.order_date ? o : { ...o, order_date: dateValue }
-      );
+    let ordersToImport = parsedOrders.map((o, i) => {
+      let order = o;
+      if (!o.order_date && manualDate) {
+        order = { ...order, order_date: `${manualDate}T00:00:00Z` };
+      }
+      // 중복 표시 (전체 가져오기 시)
+      if (!excludeDuplicates && duplicateIndices.has(i)) {
+        order = { ...order, is_duplicate: true };
+      }
+      return order;
+    });
+
+    // 중복 제외
+    if (excludeDuplicates && duplicateCount > 0) {
+      ordersToImport = ordersToImport.filter((_, i) => !duplicateIndices.has(i));
+    }
+
+    if (ordersToImport.length === 0) {
+      setError("가져올 주문이 없습니다 (모두 중복).");
+      setImporting(false);
+      return;
     }
 
     const { error } = await onImport(ordersToImport);
@@ -310,6 +347,24 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                 </div>
               )}
 
+              {/* 중복 경고 */}
+              {duplicateCount > 0 && !checkingDuplicates && (
+                <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Copy className="w-4 h-4 text-yellow-400 shrink-0" />
+                    <span className="text-yellow-400 text-xs font-medium">
+                      기존 발주서와 중복되는 주문이 {duplicateCount}건 있습니다
+                    </span>
+                  </div>
+                  <p className="text-[var(--text-muted)] text-xs mt-1 ml-6">
+                    중복 행은 노란색으로 표시됩니다. 중복 포함 시 발주서에서도 표시됩니다.
+                  </p>
+                </div>
+              )}
+              {checkingDuplicates && (
+                <div className="mb-4 text-xs text-[var(--text-muted)]">중복 확인 중...</div>
+              )}
+
               <div className="max-h-64 overflow-auto rounded-lg border border-[var(--border)]">
                 <table className="w-full text-xs text-[var(--text-secondary)]">
                   <thead className="bg-[var(--bg-hover)] sticky top-0">
@@ -331,7 +386,7 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
                   </thead>
                   <tbody>
                     {parsedOrders.slice(0, 20).map((order, i) => (
-                      <tr key={i} className="border-t border-[var(--border-subtle)]">
+                      <tr key={i} className={`border-t border-[var(--border-subtle)] ${duplicateIndices.has(i) ? "bg-yellow-500/15" : ""}`}>
                         <td className="px-3 py-1.5">{i + 1}</td>
                         <td className="px-3 py-1.5">{order.bundle_no ?? "-"}</td>
                         <td className="px-3 py-1.5">
@@ -369,19 +424,39 @@ export default function ExcelImport({ onImport, onClose }: ExcelImportProps) {
         {parsedOrders && parsedOrders.length > 0 && (
           <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border)]">
             <button
-              onClick={() => { setParsedOrders(null); setFileName(""); setRawFile(null); setSheetNames([]); setManualDate(""); }}
+              onClick={() => { setParsedOrders(null); setFileName(""); setRawFile(null); setSheetNames([]); setManualDate(""); setDuplicateIndices(new Set()); }}
               className="px-4 py-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
             >
               다시 선택
             </button>
-            <button
-              onClick={handleConfirm}
-              disabled={importing || (dateInfo.missingCount > 0 && !manualDate)}
-              className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-[var(--text-primary)] text-sm font-medium rounded-lg transition-colors"
-            >
-              <Check className="w-4 h-4" />
-              {importing ? "가져오는 중..." : `${parsedOrders.length}건 가져오기`}
-            </button>
+            {duplicateCount > 0 && !checkingDuplicates ? (
+              <>
+                <button
+                  onClick={() => doImport(true)}
+                  disabled={importing || (dateInfo.missingCount > 0 && !manualDate)}
+                  className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-[var(--text-primary)] text-sm font-medium rounded-lg transition-colors"
+                >
+                  <Check className="w-4 h-4" />
+                  {importing ? "가져오는 중..." : `중복 제외 ${parsedOrders.length - duplicateCount}건 가져오기`}
+                </button>
+                <button
+                  onClick={() => doImport(false)}
+                  disabled={importing || (dateInfo.missingCount > 0 && !manualDate)}
+                  className="flex items-center gap-2 px-4 py-2 bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30 disabled:opacity-50 text-sm font-medium rounded-lg transition-colors"
+                >
+                  {importing ? "가져오는 중..." : `전체 ${parsedOrders.length}건 가져오기`}
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => doImport(false)}
+                disabled={importing || checkingDuplicates || (dateInfo.missingCount > 0 && !manualDate)}
+                className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-[var(--text-primary)] text-sm font-medium rounded-lg transition-colors"
+              >
+                <Check className="w-4 h-4" />
+                {importing ? "가져오는 중..." : `${parsedOrders.length}건 가져오기`}
+              </button>
+            )}
           </div>
         )}
       </div>

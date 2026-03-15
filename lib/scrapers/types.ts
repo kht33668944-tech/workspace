@@ -40,6 +40,7 @@ export interface PurchaseOrderInfo {
   recipientPhone: string; // 수취인 연락처
   deliveryMemo: string;   // 배송메모
   quantity: number;       // 수량
+  productName?: string;   // 상품명 (구매 로그 기록용)
 }
 
 export interface PurchaseResult {

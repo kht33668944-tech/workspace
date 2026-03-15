@@ -25,7 +25,8 @@ export async function purchaseGmarket(
   loginPw: string,
   paymentPin: string,
   orders: PurchaseOrderInfo[],
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  abortSignal?: AbortSignal
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
@@ -52,6 +53,19 @@ export async function purchaseGmarket(
     // 2. 각 주문건 순차 처리 (수량 > 1이면 1개씩 여러 번 구매)
     let activePage = page;
     for (const order of orders) {
+      // 중단 요청 확인
+      if (abortSignal?.aborted) {
+        console.log("[gmarket-purchase] 사용자 중단 요청 → 남은 주문 건너뜀");
+        for (const remaining of orders) {
+          if (!result.success.some(s => s.orderId === remaining.orderId) &&
+              !result.failed.some(f => f.orderId === remaining.orderId)) {
+            result.failed.push({ orderId: remaining.orderId, reason: "사용자가 작업을 중단했습니다." });
+            onProgress?.(remaining.orderId, "failed", "사용자가 작업을 중단했습니다.");
+          }
+        }
+        break;
+      }
+
       const totalQty = Math.max(order.quantity, 1);
       onProgress?.(order.orderId, "processing", totalQty > 1 ? `구매 진행 중... (0/${totalQty})` : "구매 진행 중...");
 

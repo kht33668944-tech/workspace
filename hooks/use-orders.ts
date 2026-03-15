@@ -25,6 +25,23 @@ interface UndoGroup {
 
 const MAX_UNDO = 20;
 
+// 중복 판별 키 생성
+function makeDuplicateKey(
+  bundleNo: string | null, recipientName: string | null, productName: string | null,
+  orderDate: string | null, marketplace: string | null
+): string | null {
+  if (bundleNo) {
+    // 묶음번호 + 수취인명 + 상품명
+    return `B:${bundleNo}|${recipientName || ""}|${productName || ""}`;
+  }
+  if (orderDate && marketplace) {
+    // 날짜(일자) + 판매처 + 수취인명 + 상품명
+    const dateOnly = orderDate.slice(0, 10);
+    return `D:${dateOnly}|${marketplace}|${recipientName || ""}|${productName || ""}`;
+  }
+  return null;
+}
+
 export function useOrders(options: UseOrdersOptions = {}) {
   const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -126,6 +143,55 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const filteredOrders = pinnedIdsRef.current
     ? orders.filter((o) => pinnedIdsRef.current!.has(o.id))
     : orders;
+
+  // 중복 체크: 엑셀 데이터와 기존 DB 주문 비교
+  const checkDuplicates = async (rows: OrderInsert[]): Promise<Set<number>> => {
+    if (!user || rows.length === 0) return new Set();
+
+    // 엑셀 데이터에서 관련 월 추출
+    const monthSet = new Set<string>();
+    for (const r of rows) {
+      if (r.order_date) monthSet.add(r.order_date.slice(0, 7));
+    }
+    if (monthSet.size === 0) return new Set();
+
+    // 해당 월의 기존 주문 조회
+    const existingOrders: Order[] = [];
+    for (const month of monthSet) {
+      let from = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { data } = await supabase
+          .from("orders")
+          .select("bundle_no, recipient_name, product_name, order_date, marketplace")
+          .eq("user_id", user.id)
+          .eq("order_month", month)
+          .range(from, from + 999);
+        if (!data || data.length === 0) break;
+        existingOrders.push(...(data as Order[]));
+        hasMore = data.length === 1000;
+        from += 1000;
+      }
+    }
+
+    // 기존 주문의 키 Set 생성
+    const existingKeys = new Set<string>();
+    for (const o of existingOrders) {
+      const key = makeDuplicateKey(o.bundle_no, o.recipient_name, o.product_name, o.order_date, o.marketplace);
+      if (key) existingKeys.add(key);
+    }
+
+    // 엑셀 행별 중복 여부 판정
+    const duplicateIndices = new Set<number>();
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const key = makeDuplicateKey(r.bundle_no ?? null, r.recipient_name ?? null, r.product_name ?? null, r.order_date ?? null, r.marketplace ?? null);
+      if (key && existingKeys.has(key)) {
+        duplicateIndices.add(i);
+      }
+    }
+    return duplicateIndices;
+  };
 
   const insertOrders = async (rows: OrderInsert[]) => {
     if (!user) return { error: "Not authenticated" };
@@ -251,6 +317,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
     loading,
     months,
     refetch: fetchOrders,
+    checkDuplicates,
     insertOrders,
     updateOrder,
     deleteOrders,
