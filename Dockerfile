@@ -70,7 +70,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Playwright 브라우저 + node_modules (playwright 런타임 필요)
 COPY --from=deps /app/node_modules/playwright ./node_modules/playwright
 COPY --from=deps /app/node_modules/playwright-core ./node_modules/playwright-core
-COPY --from=deps /root/.cache/ms-playwright /home/nextjs/.cache/ms-playwright
+COPY --from=deps /root/.cache/ms-playwright /app/.cache/ms-playwright
 
 # Tesseract 관련
 COPY --from=builder /app/eng.traineddata ./eng.traineddata
@@ -80,7 +80,7 @@ COPY --from=deps /app/node_modules/tesseract.js-core ./node_modules/tesseract.js
 # Sharp
 COPY --from=deps /app/node_modules/sharp ./node_modules/sharp
 
-RUN chown -R nextjs:nodejs /home/nextjs/.cache
+RUN chown -R nextjs:nodejs /app/.cache
 
 USER nextjs
 
@@ -88,5 +88,6 @@ EXPOSE 3000
 
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
 
 CMD ["node", "server.js"]
