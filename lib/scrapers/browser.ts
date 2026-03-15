@@ -50,7 +50,7 @@ export async function createStealthContext(browser: Browser): Promise<BrowserCon
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
 
     // Chrome runtime 위장
-    const win = window as Record<string, unknown>;
+    const win = window as unknown as Record<string, unknown>;
     win.chrome = {
       runtime: {},
       loadTimes: () => ({}),
@@ -61,7 +61,7 @@ export async function createStealthContext(browser: Browser): Promise<BrowserCon
     // permissions 위장
     const originalQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
     Object.defineProperty(window.navigator.permissions, "query", {
-      value: (parameters: { name: string }) =>
+      value: (parameters: PermissionDescriptor) =>
         parameters.name === "notifications"
           ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
           : originalQuery(parameters),

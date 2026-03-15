@@ -141,7 +141,7 @@ export async function collectOhouseTracking(
 
     try {
       console.log("[ohouse] 로그인 중...");
-      await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: 60000 });
+      await page.goto(LOGIN_URL, { waitUntil: "load", timeout: 60000 });
 
       console.log("[ohouse] 로그인 페이지 URL:", page.url());
 
@@ -191,8 +191,12 @@ export async function collectOhouseTracking(
         };
       }
 
-      await emailInput.fill(loginId);
-      await page.locator('input[type="password"]').fill(loginPw);
+      await emailInput.click();
+      await emailInput.pressSequentially(loginId, { delay: 50 });
+      await page.waitForTimeout(300);
+      const pwInput = page.locator('input[type="password"]').first();
+      await pwInput.click();
+      await pwInput.pressSequentially(loginPw, { delay: 50 });
 
       await Promise.all([
         page.waitForURL((url) => !url.toString().includes("sign_in"), { timeout: 30000 }).catch(() => null),

@@ -1,10 +1,9 @@
-import { type Page, type BrowserContext, type Cookie } from "playwright";
+import { chromium, type Page, type BrowserContext, type Cookie } from "playwright";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
-import { launchBrowser, createStealthContext } from "./browser";
 import { loadSession, saveSession } from "./session-manager";
 
 const LOGIN_URL = "https://ohou.se/users/sign_in";
@@ -86,7 +85,14 @@ export async function purchaseOhouse(
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
-  const browser = await launchBrowser();
+  const browser = await chromium.launch({
+    channel: "chrome",
+    headless: false,
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--no-sandbox",
+    ],
+  });
 
   let context: BrowserContext;
   let needsLogin = true;
@@ -97,7 +103,10 @@ export async function purchaseOhouse(
     : await loadCookies(loginId);
   if (savedCookies) {
     console.log("[ohouse-purchase] 저장된 세션으로 복원 시도...");
-    context = await createStealthContext(browser);
+    context = await browser.newContext();
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => false });
+    });
     await context.addCookies(savedCookies);
 
     // 세션 유효성 확인
@@ -125,7 +134,10 @@ export async function purchaseOhouse(
 
   // 2. 로그인
   if (needsLogin) {
-    context = await createStealthContext(browser);
+    context = await browser.newContext();
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => false });
+    });
 
     try {
       await login(context, loginId, loginPw);
@@ -223,50 +235,10 @@ async function login(context: BrowserContext, loginId: string, loginPw: string) 
   const page = await context.newPage();
   try {
     console.log("[ohouse-purchase] 로그인 중...");
-    await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: 60000 });
+    await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    console.log("[ohouse-purchase] 로그인 페이지 URL:", page.url());
-
-    // SPA 렌더링 대기
-    await page.waitForTimeout(3000);
-
-    // 이메일 입력: 여러 selector 시도
-    const emailSelectors = [
-      'input[placeholder*="이메일"]',
-      'input[name="email"]',
-      'input[type="email"]',
-      'input[placeholder*="아이디"]',
-      'input[name="username"]',
-      'input[autocomplete="email"]',
-      'form input[type="text"]:first-of-type',
-      'input:not([type="hidden"])',
-    ];
-
-    let emailInput = null;
-    for (const sel of emailSelectors) {
-      const loc = page.locator(sel).first();
-      if (await loc.isVisible({ timeout: 2000 }).catch(() => false)) {
-        emailInput = loc;
-        console.log("[ohouse-purchase] 이메일 입력 필드 발견:", sel);
-        break;
-      }
-    }
-
-    if (!emailInput) {
-      // 디버깅: 페이지 HTML 일부 + input 목록
-      const debugInfo = await page.evaluate(() => ({
-        title: document.title,
-        bodyText: document.body?.innerText?.substring(0, 500) || "",
-        inputs: Array.from(document.querySelectorAll("input")).map((el) => ({
-          type: el.type, name: el.name, placeholder: el.placeholder, id: el.id,
-          visible: el.offsetParent !== null,
-        })),
-        iframes: Array.from(document.querySelectorAll("iframe")).map((el) => el.src),
-      }));
-      console.log("[ohouse-purchase] 디버그 정보:", JSON.stringify(debugInfo, null, 2));
-      throw new Error(`로그인 필드 없음. title="${debugInfo.title}", inputs=${debugInfo.inputs.length}, URL=${page.url()}`);
-    }
-
+    const emailInput = page.locator('input[placeholder*="이메일"], input[name="email"], input[type="email"]').first();
+    await emailInput.waitFor({ state: "visible", timeout: 30000 });
     await emailInput.fill(loginId);
     await page.locator('input[type="password"]').fill(loginPw);
 

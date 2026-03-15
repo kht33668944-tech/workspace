@@ -1,8 +1,7 @@
-import { type Page, type Frame, type BrowserContext } from "playwright";
+import { chromium, type Page, type Frame, type BrowserContext } from "playwright";
 import sharp from "sharp";
 import type TesseractType from "tesseract.js";
 import path from "path";
-import { launchBrowser, createStealthContext } from "./browser";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
 
 // Next.js(Turbopack)에서 tesseract.js 워커 경로가 C:\ROOT\로 변환되는 문제 해결
@@ -30,8 +29,18 @@ export async function purchaseGmarket(
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
-  const browser = await launchBrowser();
-  const context = await createStealthContext(browser);
+  const browser = await chromium.launch({
+    channel: "chrome",
+    headless: false,
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--no-sandbox",
+    ],
+  });
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => false });
+  });
   const page = await context.newPage();
 
   try {
