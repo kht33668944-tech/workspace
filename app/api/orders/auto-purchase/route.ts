@@ -124,6 +124,10 @@ export async function POST(request: NextRequest) {
 
         // service_role 클라이언트 사용 (JWT 만료와 무관하게 동작)
         const supabase = getServiceSupabaseClient();
+        // JWT에서 user_id 추출 (purchase_logs insert 시 필요)
+        const userSupabase = getSupabaseClient(token);
+        const { data: { user: authUser } } = await userSupabase.auth.getUser();
+        const userId = authUser?.id;
         const batchId = body.batchId || crypto.randomUUID();
         const allSuccess: SSEEvent["success"] = [];
         const allFailed: SSEEvent["failed"] = [];
@@ -171,6 +175,7 @@ export async function POST(request: NextRequest) {
           // 구매 로그 기록
           const orderInfo = body.orders.find(o => o.orderId === orderId);
           await supabase.from("purchase_logs").insert({
+            user_id: userId,
             batch_id: batchId,
             order_id: orderId,
             platform,
@@ -216,6 +221,7 @@ export async function POST(request: NextRequest) {
           for (const f of allFailed!) {
             const orderInfo = body.orders.find(o => o.orderId === f!.orderId);
             await supabase.from("purchase_logs").insert({
+              user_id: userId,
               batch_id: batchId,
               order_id: f!.orderId,
               platform,
