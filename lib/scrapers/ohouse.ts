@@ -141,9 +141,12 @@ export async function collectOhouseTracking(
 
     try {
       console.log("[ohouse] 로그인 중...");
-      await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: 60000 });
 
       console.log("[ohouse] 로그인 페이지 URL:", page.url());
+
+      // SPA 렌더링 대기
+      await page.waitForTimeout(3000);
 
       const emailSelectors = [
         'input[placeholder*="이메일"]',
@@ -153,6 +156,7 @@ export async function collectOhouseTracking(
         'input[name="username"]',
         'input[autocomplete="email"]',
         'form input[type="text"]:first-of-type',
+        'input:not([type="hidden"])',
       ];
 
       let emailInput = null;
@@ -166,18 +170,22 @@ export async function collectOhouseTracking(
       }
 
       if (!emailInput) {
-        const inputs = await page.evaluate(() =>
-          Array.from(document.querySelectorAll("input")).map((el) => ({
+        const debugInfo = await page.evaluate(() => ({
+          title: document.title,
+          bodyText: document.body?.innerText?.substring(0, 500) || "",
+          inputs: Array.from(document.querySelectorAll("input")).map((el) => ({
             type: el.type, name: el.name, placeholder: el.placeholder, id: el.id,
-          }))
-        );
-        console.log("[ohouse] 페이지 input 목록:", JSON.stringify(inputs));
+            visible: el.offsetParent !== null,
+          })),
+          iframes: Array.from(document.querySelectorAll("iframe")).map((el) => el.src),
+        }));
+        console.log("[ohouse] 디버그 정보:", JSON.stringify(debugInfo, null, 2));
         await browser.close();
         return {
           success: [],
           failed: orderNos.map((no) => ({
             orderNo: no,
-            reason: `로그인 페이지에서 이메일 입력 필드를 찾을 수 없습니다. URL: ${page.url()}`,
+            reason: `로그인 필드 없음. title="${debugInfo.title}", inputs=${debugInfo.inputs.length}, URL=${page.url()}`,
           })),
           notFound: [],
         };

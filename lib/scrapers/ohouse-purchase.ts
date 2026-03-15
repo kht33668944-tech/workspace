@@ -223,10 +223,12 @@ async function login(context: BrowserContext, loginId: string, loginPw: string) 
   const page = await context.newPage();
   try {
     console.log("[ohouse-purchase] 로그인 중...");
-    await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: 60000 });
 
-    // 페이지 로드 후 현재 URL과 입력 필드 디버깅
     console.log("[ohouse-purchase] 로그인 페이지 URL:", page.url());
+
+    // SPA 렌더링 대기
+    await page.waitForTimeout(3000);
 
     // 이메일 입력: 여러 selector 시도
     const emailSelectors = [
@@ -237,6 +239,7 @@ async function login(context: BrowserContext, loginId: string, loginPw: string) 
       'input[name="username"]',
       'input[autocomplete="email"]',
       'form input[type="text"]:first-of-type',
+      'input:not([type="hidden"])',
     ];
 
     let emailInput = null;
@@ -250,14 +253,18 @@ async function login(context: BrowserContext, loginId: string, loginPw: string) 
     }
 
     if (!emailInput) {
-      // 디버깅: 페이지에 있는 input 목록 출력
-      const inputs = await page.evaluate(() =>
-        Array.from(document.querySelectorAll("input")).map((el) => ({
+      // 디버깅: 페이지 HTML 일부 + input 목록
+      const debugInfo = await page.evaluate(() => ({
+        title: document.title,
+        bodyText: document.body?.innerText?.substring(0, 500) || "",
+        inputs: Array.from(document.querySelectorAll("input")).map((el) => ({
           type: el.type, name: el.name, placeholder: el.placeholder, id: el.id,
-        }))
-      );
-      console.log("[ohouse-purchase] 페이지 input 목록:", JSON.stringify(inputs));
-      throw new Error(`로그인 페이지에서 이메일 입력 필드를 찾을 수 없습니다. URL: ${page.url()}`);
+          visible: el.offsetParent !== null,
+        })),
+        iframes: Array.from(document.querySelectorAll("iframe")).map((el) => el.src),
+      }));
+      console.log("[ohouse-purchase] 디버그 정보:", JSON.stringify(debugInfo, null, 2));
+      throw new Error(`로그인 필드 없음. title="${debugInfo.title}", inputs=${debugInfo.inputs.length}, URL=${page.url()}`);
     }
 
     await emailInput.fill(loginId);
