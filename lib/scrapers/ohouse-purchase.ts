@@ -1,8 +1,11 @@
-import { chromium, type Page, type BrowserContext, type Cookie } from "playwright";
+import { type Page, type BrowserContext, type Cookie } from "playwright";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
+import { launchBrowser, createStealthContext } from "./browser";
+import { loadSession, saveSession } from "./session-manager";
 
 const LOGIN_URL = "https://ohou.se/users/sign_in";
 const SESSION_DIR = path.join(process.cwd(), ".sessions");
@@ -78,30 +81,23 @@ export async function purchaseOhouse(
   loginId: string,
   loginPw: string,
   orders: PurchaseOrderInfo[],
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  supabase?: SupabaseClient
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
-  const browser = await chromium.launch({
-    channel: "chrome",
-    headless: false,
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      "--no-sandbox",
-    ],
-  });
+  const browser = await launchBrowser();
 
   let context: BrowserContext;
   let needsLogin = true;
 
-  // 1. 세션 복원 시도
-  const savedCookies = await loadCookies(loginId);
+  // 1. 세션 복원 시도 (DB 우선, fallback: 파일)
+  const savedCookies = supabase
+    ? await loadSession(supabase, "ohouse", loginId)
+    : await loadCookies(loginId);
   if (savedCookies) {
     console.log("[ohouse-purchase] 저장된 세션으로 복원 시도...");
-    context = await browser.newContext();
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => false });
-    });
+    context = await createStealthContext(browser);
     await context.addCookies(savedCookies);
 
     // 세션 유효성 확인
@@ -129,15 +125,16 @@ export async function purchaseOhouse(
 
   // 2. 로그인
   if (needsLogin) {
-    context = await browser.newContext();
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => false });
-    });
+    context = await createStealthContext(browser);
 
     try {
       await login(context, loginId, loginPw);
       const cookies = await context.cookies();
-      await saveCookies(loginId, cookies);
+      if (supabase) {
+        await saveSession(supabase, "ohouse", loginId, cookies);
+      } else {
+        await saveCookies(loginId, cookies);
+      }
     } catch (err) {
       await browser.close();
       const reason = err instanceof Error ? err.message : String(err);

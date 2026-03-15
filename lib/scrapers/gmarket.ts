@@ -1,4 +1,5 @@
-import { chromium } from "playwright";
+import { launchBrowser, createStealthContext } from "./browser";
+import { normalizeCourier } from "./constants";
 import type {
   GmarketOrderResponse,
   TrackingInfo,
@@ -7,35 +8,6 @@ import type {
 
 const LOGIN_URL = "https://signinssl.gmarket.co.kr/login/login";
 const TRACKING_URL = "https://tracking.gmarket.co.kr/track";
-
-// 택배사명 정규화 (지마켓 → 우리 DB 형식)
-const COURIER_MAP: Record<string, string> = {
-  "CJ대한통운": "CJ대한통운",
-  "CJ택배": "CJ대한통운",
-  "대한통운": "CJ대한통운",
-  "한진택배": "한진택배",
-  "한진": "한진택배",
-  "롯데택배": "롯데택배",
-  "롯데": "롯데택배",
-  "우체국택배": "우체국택배",
-  "우체국": "우체국택배",
-  "우편": "우체국택배",
-  "로젠택배": "로젠택배",
-  "로젠": "로젠택배",
-  "경동택배": "경동택배",
-  "대신택배": "대신택배",
-  "일양로지스": "일양로지스",
-  "합동택배": "합동택배",
-  "천일택배": "천일택배",
-  "건영택배": "건영택배",
-  "호남택배": "호남택배",
-  "한의사랑택배": "한의사랑택배",
-  "SLX": "SLX",
-};
-
-function normalizeCourier(name: string): string {
-  return COURIER_MAP[name] || name;
-}
 
 function formatDate(d: Date): string {
   return d.toISOString();
@@ -54,19 +26,8 @@ export async function collectGmarketTracking(
 ): Promise<ScrapeResult> {
   const result: ScrapeResult = { success: [], failed: [], notFound: [] };
 
-  // 시스템 Chrome 사용 (Cloudflare 우회에 가장 효과적)
-  const browser = await chromium.launch({
-    channel: "chrome",
-    headless: false,
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      "--no-sandbox",
-    ],
-  });
-  const context = await browser.newContext();
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => false });
-  });
+  const browser = await launchBrowser();
+  const context = await createStealthContext(browser);
   const page = await context.newPage();
 
   try {

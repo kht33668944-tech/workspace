@@ -1,11 +1,12 @@
-import { chromium, type Page, type Frame, type BrowserContext } from "playwright";
+import { type Page, type Frame, type BrowserContext } from "playwright";
 import sharp from "sharp";
-import Tesseract from "tesseract.js";
+import type TesseractType from "tesseract.js";
 import path from "path";
+import { launchBrowser, createStealthContext } from "./browser";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
 
 // Next.js(Turbopack)에서 tesseract.js 워커 경로가 C:\ROOT\로 변환되는 문제 해결
-const TESSERACT_WORKER_PATH = path.resolve(
+const TESSERACT_WORKER_PATH = process.env.TESSERACT_WORKER_PATH || path.resolve(
   process.cwd(),
   "node_modules/tesseract.js/src/worker-script/node/index.js"
 );
@@ -29,18 +30,8 @@ export async function purchaseGmarket(
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
-  const browser = await chromium.launch({
-    channel: "chrome",
-    headless: false,
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      "--no-sandbox",
-    ],
-  });
-  const context = await browser.newContext();
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => false });
-  });
+  const browser = await launchBrowser();
+  const context = await createStealthContext(browser);
   const page = await context.newPage();
 
   try {
@@ -1050,13 +1041,14 @@ async function readKeypadNumbers(frame: Frame): Promise<Record<string, number>> 
   const imgHeight = metadata.height || 1;
   console.log(`[keypad-ocr] 스프라이트 이미지: ${imgWidth}x${imgHeight}`);
 
-  // tesseract 워커 생성
+  // tesseract 워커 생성 (동적 import)
+  const Tesseract = (await import("tesseract.js")).default;
   const worker = await Tesseract.createWorker("eng", undefined, {
     workerPath: TESSERACT_WORKER_PATH,
   });
   await worker.setParameters({
     tessedit_char_whitelist: "0123456789",
-    tessedit_pageseg_mode: "10" as unknown as Tesseract.PSM,
+    tessedit_pageseg_mode: "10" as unknown as TesseractType.PSM,
   });
 
   try {

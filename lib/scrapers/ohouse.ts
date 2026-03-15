@@ -1,42 +1,17 @@
-import { chromium, type BrowserContext, type Cookie } from "playwright";
+import { type BrowserContext, type Cookie } from "playwright";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ScrapeResult } from "./types";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
+import { launchBrowser, createStealthContext } from "./browser";
+import { normalizeCourier } from "./constants";
+import { loadSession, saveSession } from "./session-manager";
 
 const LOGIN_URL = "https://ohou.se/users/sign_in";
 const ORDER_LIST_API = "/order/v1/front/orders/list";
 const DELIVERY_BASE_URL = "https://store.ohou.se/deliveries";
 const SESSION_DIR = path.join(process.cwd(), ".sessions");
-
-// 택배사명 정규화
-const COURIER_MAP: Record<string, string> = {
-  "CJ대한통운": "CJ대한통운",
-  "CJ택배": "CJ대한통운",
-  "대한통운": "CJ대한통운",
-  "한진택배": "한진택배",
-  "한진": "한진택배",
-  "롯데택배": "롯데택배",
-  "롯데": "롯데택배",
-  "우체국택배": "우체국택배",
-  "우체국": "우체국택배",
-  "우편": "우체국택배",
-  "로젠택배": "로젠택배",
-  "로젠": "로젠택배",
-  "경동택배": "경동택배",
-  "대신택배": "대신택배",
-  "일양로지스": "일양로지스",
-  "합동택배": "합동택배",
-  "천일택배": "천일택배",
-  "건영택배": "건영택배",
-  "호남택배": "호남택배",
-  "한의사랑택배": "한의사랑택배",
-  "SLX": "SLX",
-};
-
-function normalizeCourier(name: string): string {
-  return COURIER_MAP[name] || name;
-}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -130,31 +105,24 @@ async function isSessionValid(context: BrowserContext): Promise<boolean> {
 export async function collectOhouseTracking(
   loginId: string,
   loginPw: string,
-  orderNos: string[]
+  orderNos: string[],
+  supabase?: SupabaseClient
 ): Promise<ScrapeResult> {
   const result: ScrapeResult = { success: [], failed: [], notFound: [] };
   const targetSet = new Set(orderNos);
 
-  const browser = await chromium.launch({
-    channel: "chrome",
-    headless: false,
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      "--no-sandbox",
-    ],
-  });
+  const browser = await launchBrowser();
 
   let context: BrowserContext;
   let needsLogin = true;
 
-  // 1. 계정별 쿠키 복원 시도
-  const savedCookies = await loadCookies(loginId);
+  // 1. 계정별 쿠키 복원 시도 (DB 우선, fallback: 파일)
+  const savedCookies = supabase
+    ? await loadSession(supabase, "ohouse", loginId)
+    : await loadCookies(loginId);
   if (savedCookies) {
     console.log("[ohouse] 저장된 세션으로 복원 시도...");
-    context = await browser.newContext();
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => false });
-    });
+    context = await createStealthContext(browser);
     await context.addCookies(savedCookies);
 
     if (await isSessionValid(context)) {
@@ -168,10 +136,7 @@ export async function collectOhouseTracking(
 
   // 2. 세션 복원 실패 시 로그인
   if (needsLogin) {
-    context = await browser.newContext();
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => false });
-    });
+    context = await createStealthContext(browser);
     const page = await context.newPage();
 
     try {
@@ -204,9 +169,13 @@ export async function collectOhouseTracking(
       }
       console.log("[ohouse] 로그인 성공");
 
-      // 계정별 쿠키 저장
+      // 계정별 쿠키 저장 (DB 우선, fallback: 파일)
       const cookies = await context.cookies();
-      await saveCookies(loginId, cookies);
+      if (supabase) {
+        await saveSession(supabase, "ohouse", loginId, cookies);
+      } else {
+        await saveCookies(loginId, cookies);
+      }
     } finally {
       await page.close();
     }

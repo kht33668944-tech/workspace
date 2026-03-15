@@ -1,37 +1,9 @@
-import { chromium } from "playwright";
+import { launchBrowser, createStealthContext } from "./browser";
+import { normalizeCourier } from "./constants";
 import type { ScrapeResult } from "./types";
 
 const LOGIN_URL = "https://signin.auction.co.kr/Authenticate/MobileLogin.aspx?url=http%3a%2f%2fwww.auction.co.kr&return_value=0&loginType=0";
 const TRACKING_URL = "https://tracking.auction.co.kr";
-
-// 택배사명 정규화
-const COURIER_MAP: Record<string, string> = {
-  "CJ대한통운": "CJ대한통운",
-  "CJ택배": "CJ대한통운",
-  "대한통운": "CJ대한통운",
-  "한진택배": "한진택배",
-  "한진": "한진택배",
-  "롯데택배": "롯데택배",
-  "롯데": "롯데택배",
-  "우체국택배": "우체국택배",
-  "우체국": "우체국택배",
-  "우편": "우체국택배",
-  "로젠택배": "로젠택배",
-  "로젠": "로젠택배",
-  "경동택배": "경동택배",
-  "대신택배": "대신택배",
-  "일양로지스": "일양로지스",
-  "합동택배": "합동택배",
-  "천일택배": "천일택배",
-  "건영택배": "건영택배",
-  "호남택배": "호남택배",
-  "한의사랑택배": "한의사랑택배",
-  "SLX": "SLX",
-};
-
-function normalizeCourier(name: string): string {
-  return COURIER_MAP[name] || name;
-}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -99,18 +71,8 @@ export async function collectAuctionTracking(
 ): Promise<ScrapeResult> {
   const result: ScrapeResult = { success: [], failed: [], notFound: [] };
 
-  const browser = await chromium.launch({
-    channel: "chrome",
-    headless: false,
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      "--no-sandbox",
-    ],
-  });
-  const context = await browser.newContext();
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => false });
-  });
+  const browser = await launchBrowser();
+  const context = await createStealthContext(browser);
   const page = await context.newPage();
 
   try {

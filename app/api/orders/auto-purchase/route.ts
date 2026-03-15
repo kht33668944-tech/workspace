@@ -1,23 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { purchaseGmarket } from "@/lib/scrapers/gmarket-purchase";
 import { purchaseOhouse } from "@/lib/scrapers/ohouse-purchase";
 import { decrypt } from "@/lib/crypto";
+import { browserPool } from "@/lib/scrapers/browser-pool";
+import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import type { PurchaseOrderInfo } from "@/lib/scrapers/types";
 
-function getSupabaseClient(accessToken: string) {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { global: { headers: { Authorization: `Bearer ${accessToken}` } } }
-  );
-}
-
-function getAccessToken(request: NextRequest): string | null {
-  const auth = request.headers.get("authorization");
-  if (auth?.startsWith("Bearer ")) return auth.slice(7);
-  return null;
-}
+export const maxDuration = 300;
 
 interface AutoPurchaseRequest {
   credentialId?: string;
@@ -67,17 +56,25 @@ export async function POST(request: NextRequest) {
       loginPw = body.loginPw;
     }
 
-    // 플랫폼별 자동구매 실행
-    let result;
-    if (platform === "gmarket") {
-      if (!body.paymentPin || body.paymentPin.length !== 6) {
-        return NextResponse.json({ error: "결제 비밀번호 6자리가 필요합니다." }, { status: 400 });
-      }
-      result = await purchaseGmarket(loginId, loginPw, body.paymentPin, body.orders);
-    } else if (platform === "ohouse") {
-      result = await purchaseOhouse(loginId, loginPw, body.orders);
-    } else {
+    // 플랫폼별 자동구매 실행 (동시성 제어)
+    if (platform === "gmarket" && (!body.paymentPin || body.paymentPin.length !== 6)) {
+      return NextResponse.json({ error: "결제 비밀번호 6자리가 필요합니다." }, { status: 400 });
+    }
+    if (platform !== "gmarket" && platform !== "ohouse") {
       return NextResponse.json({ error: `${platform}은(는) 아직 자동구매를 지원하지 않습니다.` }, { status: 400 });
+    }
+
+    await browserPool.acquire();
+    let result;
+    try {
+      if (platform === "gmarket") {
+        result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, body.orders);
+      } else {
+        const ohouseSupabase = getSupabaseClient(token);
+        result = await purchaseOhouse(loginId, loginPw, body.orders, undefined, ohouseSupabase);
+      }
+    } finally {
+      browserPool.release();
     }
 
     // 성공한 주문의 purchase_order_no + cost + payment_method를 DB에 업데이트

@@ -1,24 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { collectGmarketTracking } from "@/lib/scrapers/gmarket";
 import { collectAuctionTracking } from "@/lib/scrapers/auction";
 import { collectOhouseTracking } from "@/lib/scrapers/ohouse";
 import { decrypt } from "@/lib/crypto";
+import { browserPool } from "@/lib/scrapers/browser-pool";
+import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import type { ScrapeResult } from "@/lib/scrapers/types";
 
-function getSupabaseClient(accessToken: string) {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { global: { headers: { Authorization: `Bearer ${accessToken}` } } }
-  );
-}
-
-function getAccessToken(request: NextRequest): string | null {
-  const auth = request.headers.get("authorization");
-  if (auth?.startsWith("Bearer ")) return auth.slice(7);
-  return null;
-}
+export const maxDuration = 300;
 
 interface CollectRequest {
   // 자동 모드: 저장된 자격증명 사용
@@ -72,18 +61,26 @@ export async function POST(request: NextRequest) {
       loginPw = body.loginPw;
     }
 
-    let result: ScrapeResult;
-    if (platform === "gmarket") {
-      result = await collectGmarketTracking(loginId, loginPw, body.orderNos);
-    } else if (platform === "auction") {
-      result = await collectAuctionTracking(loginId, loginPw, body.orderNos);
-    } else if (platform === "ohouse") {
-      result = await collectOhouseTracking(loginId, loginPw, body.orderNos);
-    } else {
-      return NextResponse.json({ error: `${platform}은(는) 아직 지원되지 않습니다.` }, { status: 400 });
-    }
+    // 동시성 제어
+    await browserPool.acquire();
+    try {
+      let result: ScrapeResult;
+      if (platform === "gmarket") {
+        result = await collectGmarketTracking(loginId, loginPw, body.orderNos);
+      } else if (platform === "auction") {
+        result = await collectAuctionTracking(loginId, loginPw, body.orderNos);
+      } else if (platform === "ohouse") {
+        const token = getAccessToken(request);
+        const ohouseSupabase = token ? getSupabaseClient(token) : undefined;
+        result = await collectOhouseTracking(loginId, loginPw, body.orderNos, ohouseSupabase);
+      } else {
+        return NextResponse.json({ error: `${platform}은(는) 아직 지원되지 않습니다.` }, { status: 400 });
+      }
 
-    return NextResponse.json(result);
+      return NextResponse.json(result);
+    } finally {
+      browserPool.release();
+    }
   } catch (err) {
     return NextResponse.json(
       { error: `서버 오류: ${err instanceof Error ? err.message : String(err)}` },

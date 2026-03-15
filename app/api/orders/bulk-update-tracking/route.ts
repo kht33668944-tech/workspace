@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import type { BulkUpdateTrackingRequest } from "@/lib/scrapers/types";
 
 export async function POST(request: NextRequest) {
   try {
-    // 클라이언트 인증 토큰으로 Supabase 클라이언트 생성 (RLS 통과)
-    const authHeader = request.headers.get("authorization");
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      authHeader ? { global: { headers: { Authorization: authHeader } } } : undefined
-    );
+    const token = getAccessToken(request);
+    if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+    const supabase = getSupabaseClient(token);
 
     const body = (await request.json()) as BulkUpdateTrackingRequest;
 

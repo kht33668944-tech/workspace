@@ -1,0 +1,6 @@
+node_modules
+.next
+.git
+.sessions
+.env.local
+.env*.local
