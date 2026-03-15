@@ -297,10 +297,10 @@ export default function OrdersPage() {
   return (
     <div className="space-y-3">
       {/* 월별 탭 */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+      <div className="flex items-center gap-1 md:gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
         <button
           onClick={() => setSelectedMonth(null)}
-          className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors min-h-[36px] flex items-center ${
             !selectedMonth ? "bg-blue-600/20 text-blue-400" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
           }`}
         >
@@ -312,7 +312,7 @@ export default function OrdersPage() {
             <button
               key={m}
               onClick={() => setSelectedMonth(m === selectedMonth ? null : m)}
-              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors min-h-[36px] flex items-center ${
                 selectedMonth === m
                   ? "bg-blue-600/20 text-blue-400"
                   : hasData
@@ -347,39 +347,43 @@ export default function OrdersPage() {
       </div>
 
       {/* 액션 바 */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-48 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={handleSearchKeyDown}
-            placeholder="검색어 입력 후 Enter..."
-            className="w-full pl-9 pr-8 py-2 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-blue-500/50"
-          />
-          {search && (
-            <button onClick={handleSearchClear} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-              <span className="text-xs">✕</span>
-            </button>
-          )}
+      <div className="space-y-2">
+        {/* 줄 1: 검색 + 필터 */}
+        <div className="flex items-center gap-2 md:gap-3">
+          <div className="relative flex-1 min-w-0 md:min-w-48 md:max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="검색어 입력 후 Enter..."
+              className="w-full pl-9 pr-8 py-2 min-h-[44px] md:min-h-0 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-blue-500/50"
+            />
+            {search && (
+              <button onClick={handleSearchClear} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                <span className="text-xs">✕</span>
+              </button>
+            )}
+          </div>
+
+          <select
+            value={selectedMarketplace || "전체"}
+            onChange={(e) => setSelectedMarketplace(e.target.value === "전체" ? null : e.target.value)}
+            className="px-2 md:px-3 py-2 min-h-[44px] md:min-h-0 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] outline-none"
+          >
+            {MARKETPLACE_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
         </div>
 
-        <select
-          value={selectedMarketplace || "전체"}
-          onChange={(e) => setSelectedMarketplace(e.target.value === "전체" ? null : e.target.value)}
-          className="px-3 py-2 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] outline-none"
-        >
-          {MARKETPLACE_OPTIONS.map((opt) => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-
-        <div className="flex items-center gap-2 ml-auto">
+        {/* 줄 2: 액션 버튼들 */}
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
           {selectedIds.size > 0 && (
             <button
               onClick={handleBulkDelete}
               disabled={deleting}
-              className="flex items-center gap-1.5 px-3 py-2 bg-red-600/20 text-red-400 hover:bg-red-600/30 disabled:opacity-50 text-sm rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-red-600/20 text-red-400 hover:bg-red-600/30 disabled:opacity-50 text-sm rounded-lg transition-colors whitespace-nowrap"
             >
               <Trash2 className="w-4 h-4" />
               {deleting ? "삭제 중..." : `${selectedIds.size}건 삭제`}
@@ -388,18 +392,19 @@ export default function OrdersPage() {
           <button
             onClick={() => setShowAutoPurchase(true)}
             disabled={selectedIds.size === 0}
-            className="flex items-center gap-1.5 px-3 py-2 bg-orange-500 text-white border border-orange-600 hover:bg-orange-600 dark:bg-orange-600 dark:text-white dark:border-orange-700 dark:hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-orange-500 text-white border border-orange-600 hover:bg-orange-600 dark:bg-orange-600 dark:text-white dark:border-orange-700 dark:hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
           >
             <ShoppingCart className="w-4 h-4" />
-            구매 자동화{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
+            <span className="hidden sm:inline">구매 자동화{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}</span>
+            <span className="sm:hidden">구매{selectedIds.size > 0 ? ` ${selectedIds.size}` : ""}</span>
           </button>
           <div className="relative" ref={exportMenuRef}>
             <button
               onClick={() => setShowExportMenu(!showExportMenu)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-sm rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-[var(--bg-hover)] border border-[var(--border-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-sm rounded-lg transition-colors whitespace-nowrap"
             >
               <Download className="w-4 h-4" />
-              내보내기{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
+              <span className="hidden sm:inline">내보내기{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}</span>
               <ChevronDown className="w-3.5 h-3.5" />
             </button>
             {showExportMenu && (
@@ -423,41 +428,42 @@ export default function OrdersPage() {
           </div>
           <button
             onClick={() => setShowTrackingCollect(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200 dark:bg-purple-600/20 dark:text-purple-400 dark:border-transparent dark:hover:bg-purple-600/30 text-sm rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200 dark:bg-purple-600/20 dark:text-purple-400 dark:border-transparent dark:hover:bg-purple-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
           >
             <Truck className="w-4 h-4" />
-            배송조회 수집
+            <span className="hidden sm:inline">배송조회 수집</span>
+            <span className="sm:hidden">배송</span>
           </button>
           <button
             onClick={() => setShowImport(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-green-100 text-green-700 border border-green-200 hover:bg-green-200 dark:bg-green-600/20 dark:text-green-400 dark:border-transparent dark:hover:bg-green-600/30 text-sm rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-green-100 text-green-700 border border-green-200 hover:bg-green-200 dark:bg-green-600/20 dark:text-green-400 dark:border-transparent dark:hover:bg-green-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
           >
             <FileSpreadsheet className="w-4 h-4" />
-            엑셀 가져오기
+            <span className="hidden md:inline">엑셀 가져오기</span>
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
           >
             <Plus className="w-4 h-4" />
-            수동 추가
+            <span className="hidden md:inline">수동 추가</span>
           </button>
         </div>
       </div>
 
       {/* 통계 */}
-      <div className="flex items-center gap-6 text-xs text-[var(--text-muted)]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 md:gap-x-6 text-xs text-[var(--text-muted)]">
         <span>총 <strong className="text-[var(--text-secondary)]">{stats.count}</strong>건</span>
         <span>매출 <strong className="text-[var(--text-secondary)]">{stats.totalRevenue.toLocaleString()}</strong>원</span>
         {Object.keys(stats.marketplaceRevenue).length > 0 && (
           <>
-            <span className="text-[var(--text-disabled)]">|</span>
+            <span className="hidden md:inline text-[var(--text-disabled)]">|</span>
             {Object.entries(stats.marketplaceRevenue)
               .sort((a, b) => b[1] - a[1])
               .map(([name, revenue]) => (
-                <span key={name}>{name} <strong className="text-[var(--text-secondary)]">{revenue.toLocaleString()}</strong>원</span>
+                <span key={name} className="hidden md:inline">{name} <strong className="text-[var(--text-secondary)]">{revenue.toLocaleString()}</strong>원</span>
               ))}
-            <span className="text-[var(--text-disabled)]">|</span>
+            <span className="hidden md:inline text-[var(--text-disabled)]">|</span>
           </>
         )}
         <span>

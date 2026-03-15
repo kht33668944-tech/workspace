@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { Bell, Moon, Sun, User, LogOut } from "lucide-react";
+import { Bell, Moon, Sun, User, LogOut, Menu } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 
@@ -12,7 +12,11 @@ const pageTitles: Record<string, string> = {
   "/workspace/products": "상품 소싱",
 };
 
-export default function Header() {
+interface HeaderProps {
+  onMenuToggle?: () => void;
+}
+
+export default function Header({ onMenuToggle }: HeaderProps) {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
   const { user, signOut } = useAuth();
@@ -32,20 +36,31 @@ export default function Header() {
   }, []);
 
   return (
-    <header className="h-16 flex items-center justify-between px-6 border-b border-[var(--border)] bg-transparent">
-      <h1 className="text-xl font-semibold text-[var(--text-primary)]">{title}</h1>
-
+    <header className="h-14 md:h-16 flex items-center justify-between px-3 md:px-6 border-b border-[var(--border)] bg-transparent">
       <div className="flex items-center gap-2">
+        {/* 모바일 햄버거 메뉴 */}
+        {onMenuToggle && (
+          <button
+            onClick={onMenuToggle}
+            className="md:hidden flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
+        <h1 className="text-lg md:text-xl font-semibold text-[var(--text-primary)]">{title}</h1>
+      </div>
+
+      <div className="flex items-center gap-1 md:gap-2">
         {/* Notification bell (UI only) */}
-        <button className="relative p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+        <button className="relative flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
           <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+          <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-red-500 rounded-full" />
         </button>
 
         {/* Dark mode toggle */}
         <button
           onClick={toggleTheme}
-          className="p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+          className="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
         >
           {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
         </button>
@@ -54,7 +69,7 @@ export default function Header() {
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setUserMenuOpen(!userMenuOpen)}
-            className="flex items-center gap-2 p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+            className="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             <User className="w-5 h-5" />
           </button>

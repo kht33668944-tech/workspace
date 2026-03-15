@@ -4,8 +4,9 @@ import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "
 import type { Order } from "@/types/database";
 import MemoRow from "./table-row";
 import { ResizableHeader } from "./table-header";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
-  COLUMNS, COL_COUNT, EDITABLE_KEYS, NUMERIC_KEYS,
+  COLUMNS, COL_COUNT, EDITABLE_KEYS, NUMERIC_KEYS, MOBILE_COLUMNS,
   norm, processValue,
   type OrderTableProps, type CellPos, type SelRange, type SortDir,
 } from "./table-utils";
@@ -29,6 +30,10 @@ function OrderTable({
   const [sort, setSort] = useState<{ key: string; dir: SortDir } | null>(null);
   const [fillDrag, setFillDrag] = useState<{ colIdx: number; startRow: number; endRow: number; value: unknown } | null>(null);
   const [page, setPage] = useState(0);
+
+  const isMobile = useIsMobile();
+  const visibleColumns = isMobile ? MOBILE_COLUMNS : COLUMNS;
+  const visibleColCount = visibleColumns.length;
 
   const tableRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<CellPos | null>(null);
@@ -418,20 +423,23 @@ function OrderTable({
       <div
         ref={tableRef}
         className="rounded-xl border border-[var(--border)] overflow-auto focus:outline-none"
-        style={{ maxHeight: "calc(100vh - 300px)", minHeight: "420px" }}
-        tabIndex={0}
-        onKeyDown={handleTableKeyDown}
+        style={{
+          maxHeight: isMobile ? "calc(100vh - 220px)" : "calc(100vh - 300px)",
+          minHeight: isMobile ? "280px" : "420px",
+        }}
+        tabIndex={isMobile ? -1 : 0}
+        onKeyDown={isMobile ? undefined : handleTableKeyDown}
       >
-        <table className="w-max min-w-full text-sm border-collapse">
+        <table className={`text-sm border-collapse ${isMobile ? "w-full table-fixed" : "w-max min-w-full"}`}>
           <thead className="bg-[var(--table-header-bg)] sticky top-0 z-20">
             <tr>
-              <th className="px-2 py-2.5 w-10 sticky left-0 bg-[var(--table-header-bg)] z-30 border-r border-[var(--border-subtle)]">
-                <input type="checkbox" checked={allSelected} onChange={onSelectAll} className="accent-blue-500" />
+              <th className={`px-2 py-2.5 sticky left-0 bg-[var(--table-header-bg)] z-30 border-r border-[var(--border-subtle)] ${isMobile ? "w-11" : "w-10"}`}>
+                <input type="checkbox" checked={allSelected} onChange={onSelectAll} className={`accent-blue-500 ${isMobile ? "w-5 h-5" : ""}`} />
               </th>
-              {COLUMNS.map(col => (
+              {visibleColumns.map(col => (
                 <ResizableHeader
-                  key={col.key} col={col} width={colWidths[col.key]}
-                  onResize={w => setColWidths(p => ({ ...p, [col.key]: w }))}
+                  key={col.key} col={col} width={isMobile ? 0 : colWidths[col.key]}
+                  onResize={isMobile ? () => {} : (w => setColWidths(p => ({ ...p, [col.key]: w })))}
                   hasFilter={!!columnFilters[col.key]?.length}
                   filterOpen={filterOpen === col.key}
                   onFilterToggle={() => setFilterOpen(filterOpen === col.key ? null : col.key)}
@@ -441,6 +449,7 @@ function OrderTable({
                   columnFilters={columnFilters}
                   sort={sort?.key === col.key ? sort.dir : null}
                   onSort={dir => handleSort(col.key, dir)}
+                  isMobile={isMobile}
                 />
               ))}
             </tr>
@@ -459,16 +468,18 @@ function OrderTable({
               return (
                 <MemoRow
                   key={order.id} order={order} rowIdx={rowIdx} colWidths={colWidths}
-                  isChecked={selectedIds.has(order.id)} activeCol={ac} editingCol={ec}
-                  initialChar={editingRow === rowIdx ? initialChar : null}
-                  selMinC={selMinC} selMaxC={selMaxC}
-                  showFillHandle={!!showFill} fillHandleCol={fillCol} fillHighlightCol={fillHL}
-                  onCellMouseDown={handleCellMouseDown} onCellMouseEnter={handleCellMouseEnter}
-                  onCellDoubleClick={handleCellDoubleClick}
+                  isChecked={selectedIds.has(order.id)} activeCol={isMobile ? -1 : ac} editingCol={isMobile ? -1 : ec}
+                  initialChar={editingRow === rowIdx && !isMobile ? initialChar : null}
+                  selMinC={isMobile ? -1 : selMinC} selMaxC={isMobile ? -1 : selMaxC}
+                  showFillHandle={!isMobile && !!showFill} fillHandleCol={isMobile ? -1 : fillCol} fillHighlightCol={isMobile ? -1 : fillHL}
+                  onCellMouseDown={isMobile ? (() => {}) : handleCellMouseDown} onCellMouseEnter={isMobile ? (() => {}) : handleCellMouseEnter}
+                  onCellDoubleClick={isMobile ? (() => {}) : handleCellDoubleClick}
                   onCommit={handleCommit} onBlurSave={saveValue}
                   onEditValueChange={handleEditValueChange}
                   onSelectToggle={onSelectToggle} onFillStart={handleFillStart}
                   onRowClick={onRowClick}
+                  isMobile={isMobile}
+                  visibleColumns={visibleColumns}
                 />
               );
             })}
@@ -483,10 +494,10 @@ function OrderTable({
             {pageStart + 1}-{Math.min(pageStart + PAGE_SIZE, sortedOrders.length)} / {sortedOrders.length}건
           </span>
           <div className="flex items-center gap-1">
-            <button onClick={() => setPage(0)} disabled={safePage === 0} className="px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">««</button>
-            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} className="px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">«</button>
+            <button onClick={() => setPage(0)} disabled={safePage === 0} className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">««</button>
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">«</button>
             {Array.from({ length: totalPages }, (_, i) => i)
-              .filter(i => i === 0 || i === totalPages - 1 || Math.abs(i - safePage) <= 2)
+              .filter(i => i === 0 || i === totalPages - 1 || Math.abs(i - safePage) <= (isMobile ? 1 : 2))
               .reduce<(number | "...")[]>((acc, i, idx, arr) => {
                 if (idx > 0 && i - arr[idx - 1] > 1) acc.push("...");
                 acc.push(i);
@@ -499,7 +510,7 @@ function OrderTable({
                   <button
                     key={item}
                     onClick={() => setPage(item)}
-                    className={`min-w-[28px] px-1.5 py-1 text-xs rounded transition-colors ${
+                    className={`min-w-[44px] min-h-[44px] md:min-w-[28px] md:min-h-0 px-1.5 py-1 text-xs rounded transition-colors ${
                       item === safePage ? "bg-blue-600/20 text-blue-400 font-medium" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                     }`}
                   >
@@ -507,8 +518,8 @@ function OrderTable({
                   </button>
                 )
               )}
-            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={safePage >= totalPages - 1} className="px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">»</button>
-            <button onClick={() => setPage(totalPages - 1)} disabled={safePage >= totalPages - 1} className="px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">»»</button>
+            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={safePage >= totalPages - 1} className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">»</button>
+            <button onClick={() => setPage(totalPages - 1)} disabled={safePage >= totalPages - 1} className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">»»</button>
           </div>
         </div>
       )}

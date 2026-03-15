@@ -8,12 +8,13 @@ import type { Col, SortDir } from "./table-utils";
 // ════════════════════════════════════
 // ResizableHeader
 // ════════════════════════════════════
-export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allOrders, columnFilters, sort, onSort }: {
+export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allOrders, columnFilters, sort, onSort, isMobile }: {
   col: Col; width: number; onResize: (w: number) => void;
   hasFilter: boolean; filterOpen: boolean; onFilterToggle: () => void;
   selectedValues: string[]; onFilterChange: (v: string[]) => void; allOrders: Order[];
   columnFilters: Record<string, string[]>;
   sort: SortDir; onSort: (d: SortDir) => void;
+  isMobile?: boolean;
 }) {
   const sx = useRef(0), sw = useRef(0);
   const onMouseDown = (e: React.MouseEvent) => {
@@ -27,19 +28,21 @@ export const ResizableHeader = memo(function ResizableHeader({ col, width, onRes
     document.addEventListener("mouseup", onUp);
   };
   return (
-    <th className={`relative px-2 py-2.5 text-xs font-medium text-[var(--text-tertiary)] whitespace-nowrap select-none group border-r border-[var(--border-subtle)] ${col.align === "right" ? "text-right" : "text-left"}`} style={{ width, minWidth: width }}>
+    <th className={`relative px-2 py-2.5 text-xs font-medium text-[var(--text-tertiary)] whitespace-nowrap select-none group border-r border-[var(--border-subtle)] ${col.align === "right" ? "text-right" : "text-left"}`} style={isMobile ? undefined : { width, minWidth: width }}>
       <div className="flex items-center gap-1">
         <span className="truncate">{col.label}</span>
         {sort === "asc" && <ArrowUp className="w-3 h-3 text-blue-400 shrink-0" />}
         {sort === "desc" && <ArrowDown className="w-3 h-3 text-blue-400 shrink-0" />}
-        <button onClick={onFilterToggle} className={`p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity ${hasFilter ? "opacity-100 text-blue-400" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
+        <button onClick={onFilterToggle} className={`p-0.5 rounded ${isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"} transition-opacity ${hasFilter ? "opacity-100 text-blue-400" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
           <Filter className="w-3 h-3" />
         </button>
       </div>
       {filterOpen && <ColumnFilterDropdown columnKey={col.key} allOrders={allOrders} columnFilters={columnFilters} selectedValues={selectedValues} onChange={onFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} />}
-      <div onMouseDown={onMouseDown} className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group/resize z-10 flex items-center justify-center">
-        <div className="w-[2px] h-full opacity-0 group-hover/resize:opacity-100 bg-blue-500/60 transition-opacity" />
-      </div>
+      {!isMobile && (
+        <div onMouseDown={onMouseDown} className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group/resize z-10 flex items-center justify-center">
+          <div className="w-[2px] h-full opacity-0 group-hover/resize:opacity-100 bg-blue-500/60 transition-opacity" />
+        </div>
+      )}
     </th>
   );
 });

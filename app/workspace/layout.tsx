@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { useIsMobile } from "@/hooks/use-mobile";
 import Sidebar from "@/components/workspace/sidebar";
 import Header from "@/components/workspace/header";
 
 export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // 한 번이라도 인증된 적이 있으면 일시적 null에 반응하지 않음
   const wasAuthenticatedRef = useRef(false);
@@ -26,6 +28,11 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
     }
   }, [user, loading, router]);
 
+  // 모바일에서 사이드바 기본 닫힘
+  useEffect(() => {
+    if (isMobile) setSidebarCollapsed(true);
+  }, [isMobile]);
+
   if (loading) {
     return (
       <main className="w-screen h-screen flex items-center justify-center bg-[var(--bg-main)]">
@@ -41,10 +48,10 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <div
         className="transition-all duration-300 ease-in-out"
-        style={{ marginLeft: sidebarCollapsed ? 64 : 240 }}
+        style={{ marginLeft: isMobile ? 0 : (sidebarCollapsed ? 64 : 240) }}
       >
-        <Header />
-        <main className="p-6">
+        <Header onMenuToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+        <main className="p-3 md:p-6">
           {children}
         </main>
       </div>

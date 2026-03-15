@@ -54,7 +54,7 @@ export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePa
       {/* Panel */}
       <div
         ref={panelRef}
-        className="fixed top-0 right-0 z-50 h-full w-[420px] max-w-[90vw] bg-[var(--bg-card)] border-l border-[var(--border)] shadow-2xl flex flex-col animate-slide-in"
+        className="fixed top-0 right-0 z-50 h-full w-full md:w-[420px] md:max-w-[90vw] bg-[var(--bg-card)] border-l border-[var(--border)] shadow-2xl flex flex-col animate-slide-in"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] shrink-0">
