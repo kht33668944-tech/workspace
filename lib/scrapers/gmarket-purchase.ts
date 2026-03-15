@@ -148,6 +148,8 @@ export async function purchaseGmarket(
 async function login(page: Page, context: BrowserContext, loginId: string, loginPw: string) {
   await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: 60000 });
 
+  console.log("[gmarket-purchase] 로그인 페이지 URL:", page.url());
+
   const loginInput = page.getByPlaceholder("아이디");
   await loginInput.waitFor({ state: "visible", timeout: 30000 });
   await loginInput.fill(loginId);
@@ -163,7 +165,26 @@ async function login(page: Page, context: BrowserContext, loginId: string, login
   const hasUserInfo = cookies.some((c) => c.name === "user_info" || c.name === "user%5Finfo");
 
   if (!hasUserInfo && page.url().includes("login")) {
-    throw new Error("로그인 실패: 아이디/비밀번호 확인");
+    // 디버깅: 로그인 실패 원인 파악
+    const debugInfo = await page.evaluate(() => ({
+      title: document.title,
+      url: location.href,
+      bodyText: document.body?.innerText?.substring(0, 800) || "",
+      hasIframe: document.querySelectorAll("iframe").length,
+      hasCaptcha: !!(
+        document.querySelector('[id*="captcha"]') ||
+        document.querySelector('[class*="captcha"]') ||
+        document.querySelector('[id*="recaptcha"]') ||
+        document.querySelector('[src*="captcha"]')
+      ),
+      errorMsg: document.querySelector(".error, .alert, [class*=error], [class*=alert]")?.textContent || "",
+    }));
+    console.log("[gmarket-purchase] 로그인 실패 디버그:", JSON.stringify(debugInfo, null, 2));
+
+    const reason = debugInfo.hasCaptcha
+      ? "캡차 인증이 필요합니다 (headless 모드에서 차단)"
+      : `로그인 실패: ${debugInfo.errorMsg || "아이디/비밀번호 확인"}`;
+    throw new Error(reason);
   }
 }
 
