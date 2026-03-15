@@ -4,7 +4,7 @@ import { purchaseGmarket } from "@/lib/scrapers/gmarket-purchase";
 import { purchaseOhouse } from "@/lib/scrapers/ohouse-purchase";
 import { decrypt } from "@/lib/crypto";
 import { browserPool } from "@/lib/scrapers/browser-pool";
-import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import type { PurchaseOrderInfo } from "@/lib/scrapers/types";
 
 export const maxDuration = 300;
@@ -122,7 +122,8 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        const supabase = getSupabaseClient(token);
+        // service_role 클라이언트 사용 (JWT 만료와 무관하게 동작)
+        const supabase = getServiceSupabaseClient();
         const batchId = body.batchId || crypto.randomUUID();
         const allSuccess: SSEEvent["success"] = [];
         const allFailed: SSEEvent["failed"] = [];
@@ -192,8 +193,7 @@ export async function POST(request: NextRequest) {
             if (platform === "gmarket") {
               result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, body.orders, onProgress, signal);
             } else {
-              const ohouseSupabase = getSupabaseClient(token);
-              result = await purchaseOhouse(loginId, loginPw, body.orders, onProgress, ohouseSupabase, signal);
+              result = await purchaseOhouse(loginId, loginPw, body.orders, onProgress, supabase, signal);
             }
           } finally {
             browserPool.release();

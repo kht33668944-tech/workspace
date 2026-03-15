@@ -4,7 +4,7 @@ import { collectAuctionTracking } from "@/lib/scrapers/auction";
 import { collectOhouseTracking } from "@/lib/scrapers/ohouse";
 import { decrypt } from "@/lib/crypto";
 import { browserPool } from "@/lib/scrapers/browser-pool";
-import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import type { ScrapeResult } from "@/lib/scrapers/types";
 
 export const maxDuration = 300;
@@ -70,8 +70,7 @@ export async function POST(request: NextRequest) {
       } else if (platform === "auction") {
         result = await collectAuctionTracking(loginId, loginPw, body.orderNos);
       } else if (platform === "ohouse") {
-        const token = getAccessToken(request);
-        const ohouseSupabase = token ? getSupabaseClient(token) : undefined;
+        const ohouseSupabase = getServiceSupabaseClient();
         result = await collectOhouseTracking(loginId, loginPw, body.orderNos, ohouseSupabase);
       } else {
         return NextResponse.json({ error: `${platform}은(는) 아직 지원되지 않습니다.` }, { status: 400 });

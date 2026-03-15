@@ -14,3 +14,12 @@ export function getSupabaseClient(accessToken: string) {
     { global: { headers: { Authorization: `Bearer ${accessToken}` } } }
   );
 }
+
+// JWT 만료와 무관한 서버 전용 클라이언트 (RLS 우회)
+export function getServiceSupabaseClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  );
+}
