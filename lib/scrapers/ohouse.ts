@@ -106,7 +106,8 @@ export async function collectOhouseTracking(
   loginId: string,
   loginPw: string,
   orderNos: string[],
-  supabase?: SupabaseClient
+  supabase?: SupabaseClient,
+  abortSignal?: AbortSignal
 ): Promise<ScrapeResult> {
   const result: ScrapeResult = { success: [], failed: [], notFound: [] };
   const targetSet = new Set(orderNos);
@@ -250,6 +251,10 @@ export async function collectOhouseTracking(
     const MAX_PAGES = 50;
 
     while (pageCount < MAX_PAGES) {
+      if (abortSignal?.aborted) {
+        console.log("[ohouse] 사용자 중단 요청 → 주문 목록 검색 중단");
+        break;
+      }
       const apiUrl = `${ORDER_LIST_API}?cursor=${cursor}&pageSize=20&period=&optionStatus=&searchWord=`;
       const apiResponse = await listPage.evaluate(async (url: string) => {
         const res = await fetch(url, { credentials: "include" });
@@ -301,6 +306,14 @@ export async function collectOhouseTracking(
       const entries = Array.from(matchedOrders.entries());
 
       for (let i = 0; i < entries.length; i++) {
+        if (abortSignal?.aborted) {
+          console.log("[ohouse] 사용자 중단 요청 → 배송조회 중단");
+          // 남은 건을 failed로 처리
+          for (let j = i; j < entries.length; j++) {
+            result.failed.push({ orderNo: entries[j][0], reason: "사용자가 수집을 중단했습니다." });
+          }
+          break;
+        }
         const [orderNo, info] = entries[i];
         try {
           if (i > 0) await delay(2000);

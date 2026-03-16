@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
-import { X, Truck, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, KeyRound, Settings, Download, FileSpreadsheet } from "lucide-react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { X, Truck, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, KeyRound, Settings, Download, FileSpreadsheet, Square } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import type { Order, PurchaseCredential } from "@/types/database";
@@ -46,6 +46,12 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
   const [error, setError] = useState("");
   const [applying, setApplying] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null); // "order" | "playauto" | null
+
+  // 중단 기능
+  const [isStopping, setIsStopping] = useState(false);
+  const [wasCancelled, setWasCancelled] = useState(false);
+  const shouldStopRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // 등록된 자격증명 조회
   const fetchCredentials = useCallback(async () => {
@@ -108,6 +114,13 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
 
   const totalAutoTargets = autoCollectGroups.reduce((sum, g) => sum + g.targets.length, 0);
 
+  // 중단 핸들러
+  const handleStop = () => {
+    setIsStopping(true);
+    shouldStopRef.current = true;
+    abortControllerRef.current?.abort();
+  };
+
   // 수동 모드: 선택된 플랫폼의 전체 타겟
   const manualTargets = useMemo(() => {
     const platformName = platform === "gmarket" ? "지마켓" : platform === "auction" ? "옥션" : "오늘의집";
@@ -130,14 +143,34 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     setError("");
     setStep("collecting");
     setResults([]);
+    setIsStopping(false);
+    setWasCancelled(false);
+    shouldStopRef.current = false;
 
     const allResults: ScrapeResult[] = [];
 
     for (let i = 0; i < autoCollectGroups.length; i++) {
+      // 그룹 간 중단 체크
+      if (shouldStopRef.current) {
+        // 남은 그룹의 주문을 cancelled로 처리
+        for (let j = i; j < autoCollectGroups.length; j++) {
+          const remaining = autoCollectGroups[j].targets.map((o) => o.purchase_order_no!);
+          allResults.push({
+            success: [],
+            failed: remaining.map((no) => ({ orderNo: no, reason: "사용자가 수집을 중단했습니다." })),
+            notFound: [],
+          });
+        }
+        break;
+      }
+
       const { credential, platform: p, targets } = autoCollectGroups[i];
       const label = credential.label || PLATFORM_LABELS[p];
       setProgress(`[${i + 1}/${autoCollectGroups.length}] ${label} 수집 중...`);
       setProgressDetail(`${targets.length}건 처리 중`);
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
       try {
         const orderNos = targets.map((o) => o.purchase_order_no!);
@@ -148,6 +181,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
             Authorization: `Bearer ${session?.access_token}`,
           },
           body: JSON.stringify({ credentialId: credential.id, orderNos }),
+          signal: controller.signal,
         });
 
         const data = await res.json();
@@ -162,11 +196,20 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
         }
       } catch (err) {
         const orderNos = targets.map((o) => o.purchase_order_no!);
-        allResults.push({
-          success: [],
-          failed: orderNos.map((no) => ({ orderNo: no, reason: `오류: ${err instanceof Error ? err.message : String(err)}` })),
-          notFound: [],
-        });
+        if (err instanceof DOMException && err.name === "AbortError") {
+          setWasCancelled(true);
+          allResults.push({
+            success: [],
+            failed: orderNos.map((no) => ({ orderNo: no, reason: "사용자가 수집을 중단했습니다." })),
+            notFound: [],
+          });
+        } else {
+          allResults.push({
+            success: [],
+            failed: orderNos.map((no) => ({ orderNo: no, reason: `오류: ${err instanceof Error ? err.message : String(err)}` })),
+            notFound: [],
+          });
+        }
       }
     }
 
@@ -187,8 +230,14 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
 
     setError("");
     setStep("collecting");
+    setIsStopping(false);
+    setWasCancelled(false);
+    shouldStopRef.current = false;
     setProgress(`${PLATFORM_LABELS[platform]} 수집 중...`);
     setProgressDetail(`${manualTargets.length}건 처리 중`);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const orderNos = manualTargets.map((o) => o.purchase_order_no!);
@@ -196,6 +245,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ platform, loginId, loginPw, orderNos }),
+        signal: controller.signal,
       });
 
       const data = await res.json();
@@ -208,8 +258,18 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       setResults([data as ScrapeResult]);
       setStep("result");
     } catch (err) {
-      setError(`오류: ${err instanceof Error ? err.message : String(err)}`);
-      setStep("config");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setWasCancelled(true);
+        setResults([{
+          success: [],
+          failed: manualTargets.map((o) => ({ orderNo: o.purchase_order_no!, reason: "사용자가 수집을 중단했습니다." })),
+          notFound: [],
+        }]);
+        setStep("result");
+      } else {
+        setError(`오류: ${err instanceof Error ? err.message : String(err)}`);
+        setStep("config");
+      }
     }
   };
 
@@ -543,11 +603,30 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                 <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
                 <p className="text-sm text-[var(--text-tertiary)]">{progress}</p>
                 <p className="text-xs text-[var(--text-muted)]">{progressDetail || "잠시만 기다려주세요..."}</p>
+                <button
+                  onClick={handleStop}
+                  disabled={isStopping}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30 disabled:opacity-50 transition-colors"
+                >
+                  <Square className="w-3.5 h-3.5" />
+                  {isStopping ? "중단 중..." : "수집 중단"}
+                </button>
+                {isStopping && (
+                  <p className="text-xs text-yellow-400/80">현재 진행 중인 건이 완료되면 중단됩니다.</p>
+                )}
               </div>
             )}
 
             {step === "result" && mergedResult && (
               <>
+                {/* 중단 안내 */}
+                {wasCancelled && (
+                  <div className="flex items-center gap-2 text-yellow-400 text-xs bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    수집이 중단되었습니다. 중단 전에 수집된 데이터는 정상 반영됩니다.
+                  </div>
+                )}
+
                 {/* 결과 요약 */}
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-green-500/10 rounded-lg p-3 text-center">

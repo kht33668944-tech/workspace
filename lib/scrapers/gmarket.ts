@@ -22,7 +22,8 @@ function formatDate(d: Date): string {
 export async function collectGmarketTracking(
   loginId: string,
   loginPw: string,
-  orderNos: string[]
+  orderNos: string[],
+  abortSignal?: AbortSignal
 ): Promise<ScrapeResult> {
   const result: ScrapeResult = { success: [], failed: [], notFound: [] };
 
@@ -105,6 +106,10 @@ export async function collectGmarketTracking(
 
       // 나머지 페이지를 캡처한 헤더로 직접 요청
       for (let pageNo = 2; pageNo <= Math.min(totalPages, 100) && found.size < targetSet.size; pageNo++) {
+        if (abortSignal?.aborted) {
+          console.log("[gmarket] 사용자 중단 요청 → 페이지네이션 중단");
+          break;
+        }
         const params = new URLSearchParams();
         originalParams.forEach((v, k) => params.set(k, v));
         params.set("pageNo", String(pageNo));
@@ -137,6 +142,10 @@ export async function collectGmarketTracking(
     console.log(`[gmarket] 총 ${allBundles.length}개 번들에서 주문 검색...`);
 
     for (const bundle of allBundles) {
+      if (abortSignal?.aborted) {
+        console.log("[gmarket] 사용자 중단 요청 → 주문 매칭 중단");
+        break;
+      }
       for (const order of bundle.orderList) {
         const orderNoStr = String(order.orderNo);
         if (!targetSet.has(orderNoStr)) continue;

@@ -67,7 +67,8 @@ async function extractTrackingFromPage(
 export async function collectAuctionTracking(
   loginId: string,
   loginPw: string,
-  orderNos: string[]
+  orderNos: string[],
+  abortSignal?: AbortSignal
 ): Promise<ScrapeResult> {
   const result: ScrapeResult = { success: [], failed: [], notFound: [] };
 
@@ -109,6 +110,10 @@ export async function collectAuctionTracking(
     const retryQueue: string[] = [];
 
     for (let i = 0; i < orderNos.length; i++) {
+      if (abortSignal?.aborted) {
+        console.log("[auction] 사용자 중단 요청 → 남은 주문 건너뜀");
+        break;
+      }
       const orderNo = orderNos[i];
       try {
         // 첫 건이 아니면 딜레이
@@ -148,11 +153,19 @@ export async function collectAuctionTracking(
     }
 
     // 3. 실패 건 재시도 (더 긴 딜레이)
-    if (retryQueue.length > 0) {
+    if (retryQueue.length > 0 && !abortSignal?.aborted) {
       console.log(`[auction] ${retryQueue.length}건 재시도 시작...`);
       await delay(3000);
 
       for (let i = 0; i < retryQueue.length; i++) {
+        if (abortSignal?.aborted) {
+          console.log("[auction] 사용자 중단 요청 → 재시도 중단");
+          // 남은 재시도 건을 notFound로
+          for (let j = i; j < retryQueue.length; j++) {
+            result.notFound.push(retryQueue[j]);
+          }
+          break;
+        }
         const orderNo = retryQueue[i];
         try {
           if (i > 0) await delay(3000);

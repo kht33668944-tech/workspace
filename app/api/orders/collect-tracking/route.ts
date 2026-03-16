@@ -61,17 +61,24 @@ export async function POST(request: NextRequest) {
       loginPw = body.loginPw;
     }
 
+    // 클라이언트 연결 끊김 감지 → 스크래퍼 중단
+    const abortController = new AbortController();
+    const { signal } = abortController;
+    request.signal.addEventListener("abort", () => {
+      abortController.abort();
+    });
+
     // 동시성 제어
     await browserPool.acquire();
     try {
       let result: ScrapeResult;
       if (platform === "gmarket") {
-        result = await collectGmarketTracking(loginId, loginPw, body.orderNos);
+        result = await collectGmarketTracking(loginId, loginPw, body.orderNos, signal);
       } else if (platform === "auction") {
-        result = await collectAuctionTracking(loginId, loginPw, body.orderNos);
+        result = await collectAuctionTracking(loginId, loginPw, body.orderNos, signal);
       } else if (platform === "ohouse") {
         const ohouseSupabase = getServiceSupabaseClient();
-        result = await collectOhouseTracking(loginId, loginPw, body.orderNos, ohouseSupabase);
+        result = await collectOhouseTracking(loginId, loginPw, body.orderNos, ohouseSupabase, signal);
       } else {
         return NextResponse.json({ error: `${platform}은(는) 아직 지원되지 않습니다.` }, { status: 400 });
       }
