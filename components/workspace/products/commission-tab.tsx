@@ -6,13 +6,14 @@ import { useCommissions, PLATFORM_FEE_FIELDS } from "@/hooks/use-commissions";
 import type { CommissionPlatform, CommissionRate } from "@/types/database";
 import { COMMISSION_PLATFORM_LABELS } from "@/types/database";
 
-const PLATFORMS: CommissionPlatform[] = ["smartstore", "esm", "coupang", "esm_5pct"];
+const PLATFORMS: CommissionPlatform[] = ["smartstore", "esm", "coupang", "esm_5pct", "myeolchi"];
 
 const PLATFORM_COLORS: Record<CommissionPlatform, { bg10: string; bg5: string; bg15: string; text: string }> = {
   smartstore: { bg10: "bg-green-500/10", bg5: "bg-green-500/5", bg15: "bg-green-500/15", text: "text-green-400" },
   esm: { bg10: "bg-yellow-500/10", bg5: "bg-yellow-500/5", bg15: "bg-yellow-500/15", text: "text-yellow-400" },
   coupang: { bg10: "bg-red-500/10", bg5: "bg-red-500/5", bg15: "bg-red-500/15", text: "text-red-400" },
   esm_5pct: { bg10: "bg-blue-500/10", bg5: "bg-blue-500/5", bg15: "bg-blue-500/15", text: "text-blue-400" },
+  myeolchi: { bg10: "bg-orange-500/10", bg5: "bg-orange-500/5", bg15: "bg-orange-500/15", text: "text-orange-400" },
 };
 
 export default function CommissionTab() {

@@ -3,14 +3,14 @@ import type { Product, CommissionPlatform } from "@/types/database";
 import { calcSettlementPrice, calcNetMargin, calcPlatformPrice } from "@/lib/product-calculations";
 
 export const EDITABLE_KEYS = new Set([
-  "product_name", "lowest_price", "lowest_price_platform",
+  "product_name", "lowest_price",
   "margin_rate", "category", "purchase_url", "memo",
 ]);
 export const NUMERIC_KEYS = new Set(["lowest_price", "margin_rate"]);
 // 자동 계산 컬럼 (편집 불가)
 export const COMPUTED_KEYS = new Set([
   "name_length", "net_margin", "settlement_price",
-  "price_smartstore", "price_esm", "price_coupang",
+  "price_smartstore", "price_esm", "price_coupang", "price_myeolchi",
 ]);
 
 export interface Col { key: string; label: string; minWidth: number; align?: "right"; }
@@ -18,7 +18,6 @@ export const COLUMNS: Col[] = [
   { key: "product_name", label: "상품명", minWidth: 250 },
   { key: "name_length", label: "글자수", minWidth: 55, align: "right" },
   { key: "lowest_price", label: "최저가(원)", minWidth: 90, align: "right" },
-  { key: "lowest_price_platform", label: "최저가 플랫폼", minWidth: 110 },
   { key: "margin_rate", label: "순마진율(%)", minWidth: 85, align: "right" },
   { key: "net_margin", label: "순마진(원)", minWidth: 85, align: "right" },
   { key: "settlement_price", label: "정산가(원)", minWidth: 90, align: "right" },
@@ -26,6 +25,7 @@ export const COLUMNS: Col[] = [
   { key: "price_smartstore", label: "스마트스토어", minWidth: 95, align: "right" },
   { key: "price_esm", label: "ESM 11번가", minWidth: 90, align: "right" },
   { key: "price_coupang", label: "쿠팡", minWidth: 80, align: "right" },
+  { key: "price_myeolchi", label: "멸치쇼핑", minWidth: 80, align: "right" },
   { key: "purchase_url", label: "상품 구매 URL", minWidth: 150 },
   { key: "memo", label: "메모", minWidth: 100 },
 ];
@@ -78,6 +78,7 @@ function getComputedAll(
     price_smartstore: catRates?.smartstore ? calcPlatformPrice(sp, catRates.smartstore) : 0,
     price_esm: catRates?.esm ? calcPlatformPrice(sp, catRates.esm) : 0,
     price_coupang: catRates?.coupang ? calcPlatformPrice(sp, catRates.coupang) : 0,
+    price_myeolchi: catRates?.myeolchi ? calcPlatformPrice(sp, catRates.myeolchi) : 0,
   };
 
   computedCache.set(product, { rateMap, values });

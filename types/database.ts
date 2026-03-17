@@ -94,13 +94,14 @@ export const PLATFORM_LABELS: Record<PurchasePlatform, string> = {
 };
 
 // ─── 수수료 ───
-export type CommissionPlatform = "smartstore" | "esm" | "coupang" | "esm_5pct";
+export type CommissionPlatform = "smartstore" | "esm" | "coupang" | "esm_5pct" | "myeolchi";
 
 export const COMMISSION_PLATFORM_LABELS: Record<CommissionPlatform, string> = {
   smartstore: "스마트스토어",
   esm: "오픈마켓(ESM)",
   coupang: "쿠팡",
   esm_5pct: "지마켓/옥션(5%)",
+  myeolchi: "멸치쇼핑",
 };
 
 export interface CommissionRate {
@@ -121,7 +122,6 @@ export interface Product {
   user_id: string;
   product_name: string;
   lowest_price: number;
-  lowest_price_platform: string;
   margin_rate: number; // 퍼센트 (8.00 = 8%)
   category: string;
   purchase_url: string;

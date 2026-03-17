@@ -29,6 +29,9 @@ export const PLATFORM_FEE_FIELDS: Record<CommissionPlatform, { key: string; labe
     { key: "coupon_burden", label: "쿠폰부담" },
     { key: "vat", label: "부가세" },
   ],
+  myeolchi: [
+    { key: "commission", label: "수수료" },
+  ],
 };
 
 // 기본 수수료 데이터 (최초 시딩용)
@@ -53,6 +56,10 @@ const DEFAULT_RATES: Record<CommissionPlatform, { details: Record<string, number
   esm_5pct: {
     details: { payment: 5.00, search: 2.00, coupon: 0.75, coupon_burden: 15, vat: 1.1 },
     total: 8.53,
+  },
+  myeolchi: {
+    details: { commission: 6.00 },
+    total: 6.00,
   },
 };
 
@@ -135,7 +142,7 @@ export function useCommissions() {
 
   const seedDefaults = async () => {
     if (!user) return;
-    const platforms: CommissionPlatform[] = ["smartstore", "esm", "coupang", "esm_5pct"];
+    const platforms: CommissionPlatform[] = ["smartstore", "esm", "coupang", "esm_5pct", "myeolchi"];
     const rows: Omit<CommissionRate, "id" | "created_at" | "updated_at">[] = [];
 
     DEFAULT_CATEGORIES.forEach((cat, catIdx) => {
@@ -204,7 +211,7 @@ export function useCommissions() {
   const addCategory = useCallback(
     async (name: string) => {
       if (!user || categories.includes(name)) return;
-      const platforms: CommissionPlatform[] = ["smartstore", "esm", "coupang", "esm_5pct"];
+      const platforms: CommissionPlatform[] = ["smartstore", "esm", "coupang", "esm_5pct", "myeolchi"];
       const newOrder = categories.length;
       const rows = platforms.map((platform) => ({
         user_id: user.id,

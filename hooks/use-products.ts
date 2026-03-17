@@ -55,7 +55,7 @@ export function useProducts(options: UseProductsOptions = {}) {
       if (options.search) {
         const s = options.search.replace(/[%_\\]/g, "\\$&");
         query = query.or(
-          `product_name.ilike.%${s}%,category.ilike.%${s}%,lowest_price_platform.ilike.%${s}%,purchase_url.ilike.%${s}%,memo.ilike.%${s}%`
+          `product_name.ilike.%${s}%,category.ilike.%${s}%,purchase_url.ilike.%${s}%,memo.ilike.%${s}%`
         );
       }
 
@@ -126,7 +126,6 @@ export function useProducts(options: UseProductsOptions = {}) {
       user_id: user.id,
       product_name: "",
       lowest_price: 0,
-      lowest_price_platform: "",
       margin_rate: 0,
       category: "",
       purchase_url: "",
