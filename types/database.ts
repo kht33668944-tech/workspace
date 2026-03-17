@@ -92,3 +92,44 @@ export const PLATFORM_LABELS: Record<PurchasePlatform, string> = {
   smartstore: "스마트스토어",
   "11st": "11번가",
 };
+
+// ─── 수수료 ───
+export type CommissionPlatform = "smartstore" | "esm" | "coupang" | "esm_5pct";
+
+export const COMMISSION_PLATFORM_LABELS: Record<CommissionPlatform, string> = {
+  smartstore: "스마트스토어",
+  esm: "오픈마켓(ESM)",
+  coupang: "쿠팡",
+  esm_5pct: "지마켓/옥션(5%)",
+};
+
+export interface CommissionRate {
+  id: string;
+  user_id: string;
+  category: string;
+  platform: CommissionPlatform;
+  rate_details: Record<string, number>;
+  total_rate: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── 상품 ───
+export interface Product {
+  id: string;
+  user_id: string;
+  product_name: string;
+  lowest_price: number;
+  lowest_price_platform: string;
+  margin_rate: number; // 퍼센트 (8.00 = 8%)
+  category: string;
+  purchase_url: string;
+  memo: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at">;
+export type ProductUpdate = Partial<Omit<Product, "id" | "user_id" | "created_at" | "updated_at">>;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar, Truck, ChevronDown, ShoppingCart, History } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import { useOrders } from "@/hooks/use-orders";
@@ -42,19 +43,6 @@ function loadFilterState(): FilterState | null {
   } catch {
     return null;
   }
-}
-
-// Ctrl+S 브라우저 기본 동작(다른 이름으로 저장) 방지
-function usePreventBrowserSave() {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-        e.preventDefault();
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, []);
 }
 
 // 현재 연도 기준 12개월 생성
