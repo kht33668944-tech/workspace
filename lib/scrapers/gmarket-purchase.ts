@@ -71,6 +71,7 @@ export async function purchaseGmarket(
 
       let lastOrderNo = "";
       let totalCost = 0;
+      let costExtractedCount = 0;
       let lastPaymentMethod: string | undefined;
       let successCount = 0;
 
@@ -103,7 +104,7 @@ export async function purchaseGmarket(
           const { purchaseOrderNo, cost, paymentMethod } = await processSingleOrder(activePage, context, singleOrder, paymentPin, isRepeat);
 
           lastOrderNo = purchaseOrderNo;
-          if (cost) totalCost += cost;
+          if (cost) { totalCost += cost; costExtractedCount++; }
           if (paymentMethod) lastPaymentMethod = paymentMethod;
           successCount++;
 
@@ -113,7 +114,13 @@ export async function purchaseGmarket(
         }
 
         // 모든 수량 구매 완료 → 마지막 주문번호 + 원가 합산으로 결과 기록
-        const finalCost = totalCost > 0 ? totalCost : undefined;
+        // 일부 반복에서 원가 추출 실패 시 단가 평균 × 총 수량으로 보정
+        let finalCost: number | undefined;
+        if (totalCost > 0) {
+          finalCost = (costExtractedCount > 0 && costExtractedCount < totalQty)
+            ? Math.round(totalCost / costExtractedCount) * totalQty
+            : totalCost;
+        }
         result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod });
         onProgress?.(order.orderId, "success", `주문번호: ${lastOrderNo}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${lastPaymentMethod ? ` [${lastPaymentMethod}]` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`, lastOrderNo);
         console.log(`[gmarket-purchase] 주문 성공: ${order.orderId} → ${lastOrderNo} (총 원가: ${finalCost ?? "미확인"}, ${totalQty}개, 카드: ${lastPaymentMethod ?? "미확인"})`);

@@ -184,6 +184,7 @@ export async function purchaseOhouse(
 
       let lastOrderNo = "";
       let totalCost = 0;
+      let costExtractedCount = 0;
       let successCount = 0;
 
       try {
@@ -199,7 +200,7 @@ export async function purchaseOhouse(
           );
 
           lastOrderNo = purchaseOrderNo;
-          if (cost) totalCost += cost;
+          if (cost) { totalCost += cost; costExtractedCount++; }
           successCount++;
 
           if (totalQty > 1) {
@@ -207,7 +208,13 @@ export async function purchaseOhouse(
           }
         }
 
-        const finalCost = totalCost > 0 ? totalCost : undefined;
+        // 일부 반복에서 원가 추출 실패 시 단가 평균 × 총 수량으로 보정
+        let finalCost: number | undefined;
+        if (totalCost > 0) {
+          finalCost = (costExtractedCount > 0 && costExtractedCount < totalQty)
+            ? Math.round(totalCost / costExtractedCount) * totalQty
+            : totalCost;
+        }
         result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost });
         onProgress?.(order.orderId, "success",
           `주문번호: ${lastOrderNo}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`,

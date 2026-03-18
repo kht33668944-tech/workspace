@@ -6,8 +6,11 @@ import { decrypt } from "@/lib/crypto";
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import type { ScrapeResult } from "@/lib/scrapers/types";
+import { randomUUID } from "crypto";
 
 export const maxDuration = 300;
+
+type SupabaseClient = ReturnType<typeof getSupabaseClient>;
 
 interface CollectRequest {
   // 자동 모드: 저장된 자격증명 사용
@@ -31,13 +34,14 @@ export async function POST(request: NextRequest) {
     let platform: string;
     let loginId: string;
     let loginPw: string;
+    let supabase: SupabaseClient | null = null;
 
     if (body.credentialId) {
       // 자동 모드: DB에서 자격증명 조회
       const token = getAccessToken(request);
       if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
-      const supabase = getSupabaseClient(token);
+      supabase = getSupabaseClient(token);
       const { data: cred, error } = await supabase
         .from("purchase_credentials")
         .select("platform, login_id, login_pw_encrypted")
@@ -59,6 +63,9 @@ export async function POST(request: NextRequest) {
       platform = body.platform;
       loginId = body.loginId;
       loginPw = body.loginPw;
+      // 수동 모드에서도 토큰이 있으면 로그 저장
+      const token = getAccessToken(request);
+      if (token) supabase = getSupabaseClient(token);
     }
 
     // 클라이언트 연결 끊김 감지 → 스크래퍼 중단
@@ -83,6 +90,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: `${platform}은(는) 아직 지원되지 않습니다.` }, { status: 400 });
       }
 
+      // 운송장 로그 저장 (백그라운드, 실패 시 콘솔 경고)
+      if (supabase) {
+        saveTrackingLogs(supabase, result, platform, loginId, body.orderNos).catch((e) => {
+          console.warn("[collect-tracking] 운송장 로그 저장 실패:", e);
+        });
+      }
+
       return NextResponse.json(result);
     } finally {
       browserPool.release();
@@ -92,5 +106,47 @@ export async function POST(request: NextRequest) {
       { error: `서버 오류: ${err instanceof Error ? err.message : String(err)}` },
       { status: 500 }
     );
+  }
+}
+
+async function saveTrackingLogs(
+  supabase: SupabaseClient,
+  result: ScrapeResult,
+  platform: string,
+  loginId: string,
+  orderNos: string[],
+) {
+  const batchId = randomUUID();
+
+  // purchase_order_no로 order_id, recipient_name, product_name 조회
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("id, purchase_order_no, recipient_name, product_name")
+    .in("purchase_order_no", orderNos);
+
+  const orderMap = new Map<string, { id: string; recipient_name: string | null; product_name: string | null }>();
+  for (const o of (orders || [])) {
+    if (o.purchase_order_no) orderMap.set(o.purchase_order_no, o);
+  }
+
+  const base = { batch_id: batchId, platform, login_id: loginId };
+
+  const logs = [
+    ...result.success.map((s) => {
+      const order = orderMap.get(s.orderNo);
+      return { ...base, status: "success", purchase_order_no: s.orderNo, courier: s.courier, tracking_no: s.trackingNo, error_message: null, recipient_name: order?.recipient_name ?? null, product_name: order?.product_name ?? s.itemName ?? null, order_id: order?.id ?? null };
+    }),
+    ...result.failed.map((f) => {
+      const order = orderMap.get(f.orderNo);
+      return { ...base, status: "failed", purchase_order_no: f.orderNo, courier: null, tracking_no: null, error_message: f.reason, recipient_name: order?.recipient_name ?? null, product_name: order?.product_name ?? null, order_id: order?.id ?? null };
+    }),
+    ...result.notFound.map((orderNo) => {
+      const order = orderMap.get(orderNo);
+      return { ...base, status: "not_found", purchase_order_no: orderNo, courier: null, tracking_no: null, error_message: null, recipient_name: order?.recipient_name ?? null, product_name: order?.product_name ?? null, order_id: order?.id ?? null };
+    }),
+  ];
+
+  if (logs.length > 0) {
+    await supabase.from("tracking_logs").insert(logs);
   }
 }

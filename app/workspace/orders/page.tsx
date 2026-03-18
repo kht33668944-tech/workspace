@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar, Truck, ChevronDown, ShoppingCart, History } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
+import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
 import { useOrders } from "@/hooks/use-orders";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -86,7 +87,7 @@ export default function OrdersPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
   const exportMenuRef = useRef<HTMLDivElement>(null);
-  const [activeTab, setActiveTab] = useState<"orders" | "logs">("orders");
+  const [activeTab, setActiveTab] = useState<"orders" | "logs" | "tracking-logs">("orders");
 
   // 필터 상태 변경 시 sessionStorage에 저장
   useEffect(() => {
@@ -335,7 +336,7 @@ export default function OrdersPage() {
 
   return (
     <div className="space-y-3">
-      {/* 상위 탭: 발주서 / 구매 로그 */}
+      {/* 상위 탭: 발주서 / 구매 로그 / 운송장 로그 */}
       <div className="flex items-center gap-1 border-b border-[var(--border)]">
         <button
           onClick={() => setActiveTab("orders")}
@@ -359,10 +360,24 @@ export default function OrdersPage() {
           <History className="w-4 h-4" />
           구매 로그
         </button>
+        <button
+          onClick={() => setActiveTab("tracking-logs")}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "tracking-logs"
+              ? "border-blue-500 text-blue-400"
+              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          }`}
+        >
+          <Truck className="w-4 h-4" />
+          운송장 로그
+        </button>
       </div>
 
       {/* 구매 로그 탭 */}
       {activeTab === "logs" && <PurchaseLogTab />}
+
+      {/* 운송장 로그 탭 */}
+      {activeTab === "tracking-logs" && <TrackingLogTab />}
 
       {/* 발주서 탭 */}
       {activeTab === "orders" && (<>

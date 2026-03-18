@@ -84,6 +84,23 @@ export interface PurchaseLog {
   created_at: string;
 }
 
+export interface TrackingLog {
+  id: string;
+  user_id: string;
+  batch_id: string;
+  order_id: string | null;
+  platform: string;
+  login_id: string;
+  status: "success" | "failed" | "not_found";
+  purchase_order_no: string | null;
+  courier: string | null;
+  tracking_no: string | null;
+  error_message: string | null;
+  product_name: string | null;
+  recipient_name: string | null;
+  created_at: string;
+}
+
 export const PLATFORM_LABELS: Record<PurchasePlatform, string> = {
   gmarket: "지마켓",
   auction: "옥션",
