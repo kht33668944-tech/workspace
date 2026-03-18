@@ -9,6 +9,8 @@ interface UseOrdersOptions {
   month?: string | null;
   marketplace?: string | null;
   search?: string;
+  dateFrom?: string | null;
+  dateTo?: string | null;
   columnFilters?: Record<string, string[]>;
 }
 
@@ -140,9 +142,19 @@ export function useOrders(options: UseOrdersOptions = {}) {
     }
   }
 
-  const filteredOrders = pinnedIdsRef.current
+  const pinnedOrders = pinnedIdsRef.current
     ? orders.filter((o) => pinnedIdsRef.current!.has(o.id))
     : orders;
+
+  const filteredOrders = (options.dateFrom || options.dateTo)
+    ? pinnedOrders.filter((o) => {
+        if (!o.order_date) return false;
+        const d = o.order_date.slice(0, 10);
+        if (options.dateFrom && d < options.dateFrom) return false;
+        if (options.dateTo && d > options.dateTo) return false;
+        return true;
+      })
+    : pinnedOrders;
 
   // 중복 체크: 엑셀 데이터와 기존 DB 주문 비교
   const checkDuplicates = async (rows: OrderInsert[]): Promise<Set<number>> => {

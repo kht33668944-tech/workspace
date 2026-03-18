@@ -26,6 +26,8 @@ interface FilterState {
   month: string | null;
   marketplace: string | null;
   search: string;
+  dateFrom: string | null;
+  dateTo: string | null;
   columnFilters: Record<string, string[]>;
 }
 
@@ -34,6 +36,7 @@ function saveFilterState(state: FilterState) {
     sessionStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(state));
   } catch { /* 무시 */ }
 }
+
 
 function loadFilterState(): FilterState | null {
   try {
@@ -68,6 +71,8 @@ export default function OrdersPage() {
   const saved = useMemo(() => loadFilterState(), []);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(saved?.month ?? getCurrentMonth());
   const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(saved?.marketplace ?? null);
+  const [selectedDateFrom, setSelectedDateFrom] = useState<string | null>(saved?.dateFrom ?? null);
+  const [selectedDateTo, setSelectedDateTo] = useState<string | null>(saved?.dateTo ?? null);
   const [search, setSearch] = useState(saved?.search ?? "");
   const [activeSearch, setActiveSearch] = useState(saved?.search ?? "");
   const [showImport, setShowImport] = useState(false);
@@ -89,9 +94,11 @@ export default function OrdersPage() {
       month: selectedMonth,
       marketplace: selectedMarketplace,
       search: activeSearch,
+      dateFrom: selectedDateFrom,
+      dateTo: selectedDateTo,
       columnFilters,
     });
-  }, [selectedMonth, selectedMarketplace, activeSearch, columnFilters]);
+  }, [selectedMonth, selectedMarketplace, activeSearch, selectedDateFrom, selectedDateTo, columnFilters]);
 
   const monthOptions = useMemo(() => generateMonthOptions(), []);
 
@@ -132,10 +139,52 @@ export default function OrdersPage() {
     setActiveSearch("");
   };
 
+  const handleMonthChange = (month: string | null) => {
+    setSelectedMonth(month);
+    // 날짜 필터가 새 월에 속하지 않으면 초기화
+    if (month) {
+      if (selectedDateFrom && !selectedDateFrom.startsWith(month)) {
+        setSelectedDateFrom(null);
+        setSelectedDateTo(null);
+      }
+    }
+  };
+
+  const handleDateFromChange = (date: string) => {
+    if (!date) {
+      setSelectedDateFrom(null);
+      setSelectedDateTo(null);
+      return;
+    }
+    const month = date.slice(0, 7);
+    if (month !== selectedMonth) setSelectedMonth(month);
+    setSelectedDateFrom(date);
+    // dateTo가 dateFrom보다 앞이면 초기화
+    if (selectedDateTo && selectedDateTo < date) setSelectedDateTo(null);
+  };
+
+  const handleDateToChange = (date: string) => {
+    if (!date) { setSelectedDateTo(null); return; }
+    // dateTo가 다른 월이면 month를 null로 (전체)
+    if (selectedDateFrom) {
+      const fromMonth = selectedDateFrom.slice(0, 7);
+      const toMonth = date.slice(0, 7);
+      if (fromMonth !== toMonth) setSelectedMonth(null);
+    }
+    setSelectedDateTo(date);
+  };
+
+  const clearDateFilter = () => {
+    setSelectedDateFrom(null);
+    setSelectedDateTo(null);
+  };
+
   const { orders, allOrders, loading, months, checkDuplicates, insertOrders, updateOrder, deleteOrders, undo, startBatchUndo, endBatchUndo, refetch } = useOrders({
     month: selectedMonth,
     marketplace: selectedMarketplace,
     search: activeSearch,
+    dateFrom: selectedDateFrom,
+    dateTo: selectedDateTo,
     columnFilters,
   });
 
@@ -320,7 +369,7 @@ export default function OrdersPage() {
       {/* 월별 탭 */}
       <div className="flex items-center gap-1 md:gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
         <button
-          onClick={() => setSelectedMonth(null)}
+          onClick={() => handleMonthChange(null)}
           className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors min-h-[36px] flex items-center ${
             !selectedMonth ? "bg-blue-600/20 text-blue-400" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
           }`}
@@ -332,7 +381,7 @@ export default function OrdersPage() {
           return (
             <button
               key={m}
-              onClick={() => setSelectedMonth(m === selectedMonth ? null : m)}
+              onClick={() => handleMonthChange(m === selectedMonth ? null : m)}
               className={`px-2.5 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors min-h-[36px] flex items-center ${
                 selectedMonth === m
                   ? "bg-blue-600/20 text-blue-400"
@@ -357,7 +406,7 @@ export default function OrdersPage() {
               <input
                 type="month"
                 onChange={(e) => {
-                  if (e.target.value) setSelectedMonth(e.target.value);
+                  if (e.target.value) handleMonthChange(e.target.value);
                   setShowMonthPicker(false);
                 }}
                 className="bg-[var(--bg-hover)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--text-primary)] outline-none"
@@ -396,6 +445,28 @@ export default function OrdersPage() {
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
+
+          {/* 날짜 범위 필터 */}
+          <div className={`flex items-center gap-1 px-2 py-1.5 min-h-[44px] md:min-h-0 border rounded-lg transition-colors ${selectedDateFrom || selectedDateTo ? "bg-blue-600/10 border-blue-500/40" : "bg-[var(--bg-hover)] border-[var(--border)]"}`}>
+            <Calendar className={`w-3.5 h-3.5 shrink-0 ${selectedDateFrom || selectedDateTo ? "text-blue-400" : "text-[var(--text-muted)]"}`} />
+            <input
+              type="date"
+              value={selectedDateFrom || ""}
+              onChange={(e) => handleDateFromChange(e.target.value)}
+              className="bg-transparent text-xs text-[var(--text-primary)] outline-none w-[105px] cursor-pointer [color-scheme:dark]"
+            />
+            <span className="text-[var(--text-muted)] text-xs shrink-0">~</span>
+            <input
+              type="date"
+              value={selectedDateTo || ""}
+              min={selectedDateFrom || undefined}
+              onChange={(e) => handleDateToChange(e.target.value)}
+              className="bg-transparent text-xs text-[var(--text-primary)] outline-none w-[105px] cursor-pointer [color-scheme:dark]"
+            />
+            {(selectedDateFrom || selectedDateTo) && (
+              <button onClick={clearDateFilter} className="text-blue-400/60 hover:text-blue-300 text-xs leading-none ml-0.5 shrink-0">✕</button>
+            )}
+          </div>
         </div>
 
         {/* 줄 2: 액션 버튼들 */}
@@ -494,9 +565,9 @@ export default function OrdersPage() {
           </strong>
           원
         </span>
-        {Object.values(columnFilters).some((v) => v.length > 0) && (
+        {(Object.values(columnFilters).some((v) => v.length > 0) || selectedDateFrom || selectedDateTo) && (
           <button
-            onClick={() => setColumnFilters({})}
+            onClick={() => { setColumnFilters({}); clearDateFilter(); }}
             className="text-blue-400 hover:text-blue-300"
           >
             필터 초기화
