@@ -18,6 +18,8 @@ import OrderModal from "@/components/workspace/orders/order-modal";
 import OrderSidePanel from "@/components/workspace/orders/order-side-panel";
 import TrackingCollectModal from "@/components/workspace/orders/tracking-collect-modal";
 import AutoPurchaseModal from "@/components/workspace/orders/auto-purchase-modal";
+import BulkEditBar from "@/components/workspace/orders/bulk-edit-bar";
+import { useToast } from "@/context/ToastContext";
 import type { Order, OrderInsert } from "@/types/database";
 
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
@@ -69,6 +71,7 @@ function getCurrentMonth(): string {
 export default function OrdersPage() {
   usePreventBrowserSave();
   const { session } = useAuth();
+  const { showToast } = useToast();
   const searchParams = useSearchParams();
   // 필터 상태를 sessionStorage에서 복원 (페이지 이동 후 돌아와도 유지)
   const saved = useMemo(() => loadFilterState(), []);
@@ -257,6 +260,17 @@ export default function OrdersPage() {
     }
     setSelectedIds(new Set());
   };
+
+  const handleClearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const handleBulkStatusChange = useCallback((status: string) => {
+    const ids = [...selectedIds];
+    startBatchUndo();
+    for (const id of ids) updateOrder(id, { delivery_status: status }, false);
+    endBatchUndo();
+    showToast(`${ids.length}개 주문 상태 변경: ${status}`, "success");
+    handleClearSelection();
+  }, [selectedIds, startBatchUndo, endBatchUndo, updateOrder, showToast, handleClearSelection]);
 
   const handleColumnFilterChange = useCallback((key: string, values: string[]) => {
     setColumnFilters((prev) => {
@@ -636,6 +650,13 @@ export default function OrdersPage() {
             setShowAutoPurchase(false);
             refetch();
           }}
+        />
+      )}
+      {selectedIds.size > 0 && (
+        <BulkEditBar
+          count={selectedIds.size}
+          onChangeStatus={handleBulkStatusChange}
+          onClearSelection={handleClearSelection}
         />
       )}
       {showTrackingCollect && (

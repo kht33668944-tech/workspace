@@ -33,8 +33,11 @@ export const ResizableHeader = memo(function ResizableHeader({ col, width, onRes
         <span className="truncate">{col.label}</span>
         {sort === "asc" && <ArrowUp className="w-3 h-3 text-blue-400 shrink-0" />}
         {sort === "desc" && <ArrowDown className="w-3 h-3 text-blue-400 shrink-0" />}
-        <button onClick={onFilterToggle} className={`p-0.5 rounded ${isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"} transition-opacity ${hasFilter ? "opacity-100 text-blue-400" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
+        <button onClick={onFilterToggle} className={`p-0.5 rounded flex items-center gap-0.5 ${isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"} transition-opacity ${hasFilter ? "opacity-100 text-blue-400" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
           <Filter className="w-3 h-3" />
+          {hasFilter && selectedValues.length > 0 && selectedValues[0] !== "__NONE__" && (
+            <span className="text-[9px] font-bold leading-none">{selectedValues.length}</span>
+          )}
         </button>
       </div>
       {filterOpen && <ColumnFilterDropdown columnKey={col.key} allOrders={allOrders} columnFilters={columnFilters} selectedValues={selectedValues} onChange={onFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} />}
