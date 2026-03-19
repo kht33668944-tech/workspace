@@ -16,6 +16,7 @@ export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePa
   const [logInput, setLogInput] = useState("");
   const logsEndRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const touchStartX = useRef<number | null>(null);
 
   const logs: ConsultationLog[] = Array.isArray(order.consultation_logs) ? order.consultation_logs : [];
 
@@ -47,6 +48,17 @@ export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePa
 
   const statusColor = DELIVERY_STATUS_COLORS[order.delivery_status] || "bg-gray-500/20 text-gray-400";
 
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    touchStartX.current = null;
+    if (dx > 80) onClose();
+  };
+
   return (
     <>
       {/* Backdrop */}
@@ -56,6 +68,8 @@ export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePa
       <div
         ref={panelRef}
         className="fixed top-0 right-0 z-50 h-full w-full md:w-[420px] md:max-w-[90vw] bg-[var(--bg-card)] border-l border-[var(--border)] shadow-2xl flex flex-col animate-slide-in"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] shrink-0">
@@ -68,7 +82,7 @@ export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePa
             </div>
             <h2 className="text-sm font-medium text-[var(--text-primary)] truncate" title={order.product_name || ""}>{order.product_name || "상품명 없음"}</h2>
           </div>
-          <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] shrink-0 ml-2">
+          <button onClick={onClose} className="p-2.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] shrink-0 ml-2">
             <X className="w-5 h-5" />
           </button>
         </div>

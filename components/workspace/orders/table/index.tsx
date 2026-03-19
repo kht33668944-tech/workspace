@@ -36,6 +36,17 @@ function OrderTable({
   const visibleColCount = visibleColumns.length;
 
   const tableRef = useRef<HTMLDivElement>(null);
+  const [scrolledRight, setScrolledRight] = useState(false);
+
+  useEffect(() => {
+    const el = tableRef.current;
+    if (!el || isMobile) return;
+    const check = () => setScrolledRight(el.scrollLeft + el.clientWidth >= el.scrollWidth - 4);
+    check();
+    el.addEventListener("scroll", check, { passive: true });
+    return () => el.removeEventListener("scroll", check);
+  }, [isMobile]);
+
   const dragStartRef = useRef<CellPos | null>(null);
   const isDraggingRef = useRef(false);
   const pendingEditRef = useRef<{ row: number; col: number; value: string } | null>(null);
@@ -420,6 +431,10 @@ function OrderTable({
 
   return (
     <div className="space-y-2">
+      <div className="relative">
+      {!isMobile && !scrolledRight && (
+        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 z-10 rounded-r-xl bg-gradient-to-l from-[var(--bg-main)] to-transparent" />
+      )}
       <div
         ref={tableRef}
         className="rounded-xl border border-[var(--border)] overflow-auto focus:outline-none"
@@ -485,6 +500,7 @@ function OrderTable({
             })}
           </tbody>
         </table>
+      </div>
       </div>
 
       {/* 건수 표시 + 페이지네이션 */}

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, ShoppingCart, Package, Settings, ChevronsLeft, ChevronsRight, Archive, X } from "lucide-react";
@@ -21,6 +22,7 @@ interface SidebarProps {
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const isMobile = useIsMobile();
+  const touchStartX = useRef<number | null>(null);
 
   const isActive = (href: string) => {
     if (href === "/workspace") return pathname === "/workspace";
@@ -29,6 +31,17 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
   const handleMenuClick = () => {
     if (isMobile) onToggle();
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const dx = touchStartX.current - e.changedTouches[0].clientX;
+    touchStartX.current = null;
+    if (dx > 60) onToggle(); // 왼쪽으로 60px 이상 스와이프 → 닫기
   };
 
   return (
@@ -52,6 +65,8 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
           }
         `}
         style={{ willChange: isMobile ? "transform" : "width" }}
+        onTouchStart={isMobile && !collapsed ? handleTouchStart : undefined}
+        onTouchEnd={isMobile && !collapsed ? handleTouchEnd : undefined}
       >
         {/* Title */}
         <div className={`flex items-center h-16 px-4 border-b border-[var(--border)] ${isMobile ? "justify-between" : collapsed ? "justify-center" : "gap-3"}`}>
