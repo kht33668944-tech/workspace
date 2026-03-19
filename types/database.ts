@@ -141,12 +141,15 @@ export interface Product {
   lowest_price: number;
   margin_rate: number; // 퍼센트 (8.00 = 8%)
   category: string;
+  source_category: string; // 크롤링된 원본 카테고리 (예: '음료/생수')
   purchase_url: string;
   memo: string;
   sort_order: number;
   thumbnail_url: string | null;
   image_urls: string[];
   source_platform: string | null; // 'gmarket' | 'auction' 등
+  detail_html: string | null; // 플레이오토 대량등록용 상세페이지 HTML
+  detail_image_url: string | null; // AI 생성 상세페이지 이미지 URL
   created_at: string;
   updated_at: string;
 }

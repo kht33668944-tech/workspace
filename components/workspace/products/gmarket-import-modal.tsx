@@ -10,15 +10,17 @@ interface Props {
   onClose: () => void;
   onImport: (rows: Omit<ProductInsert, "user_id">[]) => Promise<{ error: string | null }>;
   productCount: number;
+  categories: string[];
 }
 
 type Stage = "input" | "loading" | "preview";
 
 interface PreviewItem extends GmarketProductResult {
   editedName: string;
+  selectedCategory: string;
 }
 
-export default function GmarketImportModal({ onClose, onImport, productCount }: Props) {
+export default function GmarketImportModal({ onClose, onImport, productCount, categories }: Props) {
   const { session } = useAuth();
   const [stage, setStage] = useState<Stage>("input");
   const [urlText, setUrlText] = useState("");
@@ -55,7 +57,7 @@ export default function GmarketImportModal({ onClose, onImport, productCount }: 
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ urls }),
+        body: JSON.stringify({ urls, categories }),
         signal: controller.signal,
       });
 
@@ -68,6 +70,7 @@ export default function GmarketImportModal({ onClose, onImport, productCount }: 
       const preview: PreviewItem[] = data.results.map((r) => ({
         ...r,
         editedName: r.product_name,
+        selectedCategory: r.matched_category ?? "",
       }));
       setItems(preview);
       setStage("preview");
@@ -95,15 +98,18 @@ export default function GmarketImportModal({ onClose, onImport, productCount }: 
 
     const rows: Omit<ProductInsert, "user_id">[] = successItems.map((item, idx) => ({
       product_name: item.editedName || item.product_name,
-      lowest_price: item.price,
+      lowest_price: item.price ?? 0,
       margin_rate: 0,
-      category: "",
+      category: item.selectedCategory,
+      source_category: item.category,
       purchase_url: item.url,
       memo: "",
       sort_order: productCount + idx,
       thumbnail_url: item.thumbnail_url,
       image_urls: item.image_urls,
       source_platform: "gmarket",
+      detail_html: null,
+      detail_image_url: null,
     }));
 
     const { error: importError } = await onImport(rows);
@@ -230,6 +236,31 @@ export default function GmarketImportModal({ onClose, onImport, productCount }: 
                           className="w-full px-2 py-1 text-sm bg-[var(--bg-card)] border border-[var(--border)] rounded text-[var(--text-primary)] outline-none focus:border-blue-400"
                           placeholder="상품명"
                         />
+                        {/* 카테고리 행 */}
+                        <div className="flex items-center gap-2">
+                          {item.category && (
+                            <span className="text-xs text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded shrink-0">
+                              G마켓: {item.category}
+                            </span>
+                          )}
+                          <select
+                            value={item.selectedCategory}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setItems((prev) =>
+                                prev.map((p, i) =>
+                                  i === idx ? { ...p, selectedCategory: val } : p
+                                )
+                              );
+                            }}
+                            className="flex-1 min-w-0 px-2 py-0.5 text-xs bg-[var(--bg-card)] border border-[var(--border)] rounded text-[var(--text-primary)] outline-none focus:border-blue-400"
+                          >
+                            <option value="">카테고리 선택 (선택사항)</option>
+                            {categories.map((cat) => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                          </select>
+                        </div>
                         <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
                           <span className="text-green-400 font-medium">
                             {item.price > 0

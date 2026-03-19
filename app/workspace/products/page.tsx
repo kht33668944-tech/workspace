@@ -197,6 +197,7 @@ export default function ProductsPage() {
           onClose={() => setImportModalOpen(false)}
           onImport={handleImport}
           productCount={allProducts.length}
+          categories={categories}
         />
       )}
     </div>

@@ -1,5 +1,24 @@
 import { chromium, type Browser, type BrowserContext } from "playwright";
 
+/**
+ * G마켓 전용 BrowserContext 생성.
+ * gmarket-purchase.ts와 동일한 방식 — extraHTTPHeaders 없이 브라우저 자체 헤더 사용.
+ * Cloudflare가 커스텀 헤더와 실제 브라우저 헤더 불일치를 감지하는 것을 방지.
+ */
+export async function createGmarketContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext({
+    locale: "ko-KR",
+    timezoneId: "Asia/Seoul",
+    viewport: { width: 1920, height: 1080 },
+  });
+
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => false });
+  });
+
+  return context;
+}
+
 const CHROME_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
