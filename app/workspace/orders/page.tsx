@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar, Truck, ChevronDown, ShoppingCart, History } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
@@ -68,6 +69,7 @@ function getCurrentMonth(): string {
 export default function OrdersPage() {
   usePreventBrowserSave();
   const { session } = useAuth();
+  const searchParams = useSearchParams();
   // 필터 상태를 sessionStorage에서 복원 (페이지 이동 후 돌아와도 유지)
   const saved = useMemo(() => loadFilterState(), []);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(saved?.month ?? getCurrentMonth());
@@ -87,7 +89,11 @@ export default function OrdersPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
   const exportMenuRef = useRef<HTMLDivElement>(null);
-  const [activeTab, setActiveTab] = useState<"orders" | "logs" | "tracking-logs">("orders");
+  const urlTab = searchParams.get("tab") as "logs" | "tracking-logs" | null;
+  const activeBatchId = searchParams.get("batch");
+  const [activeTab, setActiveTab] = useState<"orders" | "logs" | "tracking-logs">(
+    urlTab === "logs" || urlTab === "tracking-logs" ? urlTab : "orders"
+  );
 
   // 필터 상태 변경 시 sessionStorage에 저장
   useEffect(() => {
@@ -374,10 +380,10 @@ export default function OrdersPage() {
       </div>
 
       {/* 구매 로그 탭 */}
-      {activeTab === "logs" && <PurchaseLogTab />}
+      {activeTab === "logs" && <PurchaseLogTab initialBatchId={activeBatchId} />}
 
       {/* 운송장 로그 탭 */}
-      {activeTab === "tracking-logs" && <TrackingLogTab />}
+      {activeTab === "tracking-logs" && <TrackingLogTab initialBatchId={activeBatchId} />}
 
       {/* 발주서 탭 */}
       {activeTab === "orders" && (<>

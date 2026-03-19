@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Search, X, CheckCircle, AlertCircle, Square, ChevronDown, ChevronRight, Loader2, History } from "lucide-react";
 import { usePurchaseLogs } from "@/hooks/use-purchase-logs";
 import { formatLogDate, formatLogTime, getPlatformLabel } from "@/lib/log-format";
 import type { PurchaseLog } from "@/types/database";
 
-export default function PurchaseLogTab() {
+export default function PurchaseLogTab({ initialBatchId }: { initialBatchId?: string | null }) {
   // 검색
   const [search, setSearch] = useState("");
   const [activeSearch, setActiveSearch] = useState("");
@@ -18,7 +18,10 @@ export default function PurchaseLogTab() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   // 아코디언
-  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(
+    initialBatchId ? new Set([initialBatchId]) : new Set()
+  );
+  const batchRef = useRef<HTMLDivElement | null>(null);
 
   const { groupedByDay, loading } = usePurchaseLogs({
     search: activeSearch || undefined,
@@ -27,6 +30,15 @@ export default function PurchaseLogTab() {
     platform: platformFilter,
     status: statusFilter,
   });
+
+  // initialBatchId가 있으면 로드 완료 후 해당 배치로 스크롤
+  useEffect(() => {
+    if (!initialBatchId || loading) return;
+    const id = setTimeout(() => {
+      batchRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+    return () => clearTimeout(id);
+  }, [initialBatchId, loading]);
 
   const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter") setActiveSearch(search);
@@ -168,9 +180,14 @@ export default function PurchaseLogTab() {
           {/* 배치 목록 */}
           {day.batches.map((batch) => {
             const isExpanded = expandedBatches.has(batch.batchId);
+            const isTarget = batch.batchId === initialBatchId;
 
             return (
-              <div key={batch.batchId} className="border border-[var(--border)] rounded-lg overflow-hidden">
+              <div
+                key={batch.batchId}
+                ref={isTarget ? batchRef : null}
+                className={`border rounded-lg overflow-hidden ${isTarget ? "border-blue-500/50" : "border-[var(--border)]"}`}
+              >
                 {/* 배치 헤더 */}
                 <button
                   onClick={() => toggleBatch(batch.batchId)}

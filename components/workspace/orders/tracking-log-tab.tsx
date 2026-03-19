@@ -1,19 +1,22 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Search, X, CheckCircle, AlertCircle, HelpCircle, ChevronDown, ChevronRight, Loader2, Truck } from "lucide-react";
 import { useTrackingLogs } from "@/hooks/use-tracking-logs";
 import { formatLogDate, formatLogTime, getPlatformLabel } from "@/lib/log-format";
 import type { TrackingLog } from "@/types/database";
 
-export default function TrackingLogTab() {
+export default function TrackingLogTab({ initialBatchId }: { initialBatchId?: string | null }) {
   const [search, setSearch] = useState("");
   const [activeSearch, setActiveSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [platformFilter, setPlatformFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(
+    initialBatchId ? new Set([initialBatchId]) : new Set()
+  );
+  const batchRef = useRef<HTMLDivElement | null>(null);
 
   const { groupedByDay, loading } = useTrackingLogs({
     search: activeSearch || undefined,
@@ -22,6 +25,15 @@ export default function TrackingLogTab() {
     platform: platformFilter,
     status: statusFilter,
   });
+
+  // initialBatchId가 있으면 로드 완료 후 해당 배치로 스크롤
+  useEffect(() => {
+    if (!initialBatchId || loading) return;
+    const id = setTimeout(() => {
+      batchRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+    return () => clearTimeout(id);
+  }, [initialBatchId, loading]);
 
   const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter") setActiveSearch(search);
@@ -158,8 +170,13 @@ export default function TrackingLogTab() {
 
           {day.batches.map((batch) => {
             const isExpanded = expandedBatches.has(batch.batchId);
+            const isTarget = batch.batchId === initialBatchId;
             return (
-              <div key={batch.batchId} className="border border-[var(--border)] rounded-lg overflow-hidden">
+              <div
+                key={batch.batchId}
+                ref={isTarget ? batchRef : null}
+                className={`border rounded-lg overflow-hidden ${isTarget ? "border-blue-500/50" : "border-[var(--border)]"}`}
+              >
                 <button
                   onClick={() => toggleBatch(batch.batchId)}
                   className="w-full flex items-center gap-2 px-3 py-2.5 bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors text-left"

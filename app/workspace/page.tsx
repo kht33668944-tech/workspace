@@ -3,7 +3,7 @@
 import { useDashboard } from "@/hooks/use-dashboard";
 import KpiCards from "@/components/workspace/dashboard/kpi-cards";
 import TodoFlow from "@/components/workspace/dashboard/todo-flow";
-import AutomationStatus from "@/components/workspace/dashboard/automation-status";
+import ActivityLog from "@/components/workspace/dashboard/activity-log";
 import QuickActions from "@/components/workspace/dashboard/quick-actions";
 import RecentOrders from "@/components/workspace/dashboard/recent-orders";
 
@@ -40,11 +40,9 @@ export default function WorkspacePage() {
         </div>
       </div>
 
-      {/* 자동화 현황 */}
-      <AutomationStatus
-        unpurchasedCount={data.unpurchasedCount}
-        noTrackingCount={data.noTrackingCount}
-        failedLogs={data.failedLogs}
+      {/* 활동 로그 */}
+      <ActivityLog
+        activityLogs={data.activityLogs}
         loading={loading}
       />
 

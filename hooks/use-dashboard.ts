@@ -14,12 +14,14 @@ export interface DashboardRecentOrder {
   tracking_no: string | null;
 }
 
-export interface DashboardFailedLog {
-  id: string;
-  product_name: string | null;
+export interface ActivityLogBatch {
+  batchId: string;
+  type: "purchase" | "tracking";
   platform: string;
-  error_message: string | null;
-  created_at: string;
+  successCount: number;
+  failedCount: number;
+  cancelledCount: number;
+  startedAt: string;
 }
 
 export interface DashboardData {
@@ -38,7 +40,7 @@ export interface DashboardData {
   csCount: number;              // 교환준비 + 반품준비
   // 테이블/로그
   recentOrders: DashboardRecentOrder[];
-  failedLogs: DashboardFailedLog[];
+  activityLogs: ActivityLogBatch[];
 }
 
 const EMPTY_DATA: DashboardData = {
@@ -54,8 +56,28 @@ const EMPTY_DATA: DashboardData = {
   deliveredCount: 0,
   csCount: 0,
   recentOrders: [],
-  failedLogs: [],
+  activityLogs: [],
 };
+
+// 개별 로그 행을 배치 단위로 집계
+function groupIntoBatches(
+  rows: Array<{ batch_id: string; platform: string; status: string; created_at: string }>,
+  type: "purchase" | "tracking",
+): ActivityLogBatch[] {
+  const map = new Map<string, ActivityLogBatch>();
+  for (const r of rows) {
+    let batch = map.get(r.batch_id);
+    if (!batch) {
+      batch = { batchId: r.batch_id, type, platform: r.platform, successCount: 0, failedCount: 0, cancelledCount: 0, startedAt: r.created_at };
+      map.set(r.batch_id, batch);
+    }
+    if (r.created_at < batch.startedAt) batch.startedAt = r.created_at;
+    if (r.status === "success") batch.successCount++;
+    else if (r.status === "failed") batch.failedCount++;
+    else if (r.status === "cancelled") batch.cancelledCount++;
+  }
+  return Array.from(map.values());
+}
 
 function formatMonth(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
@@ -158,14 +180,20 @@ export function useDashboard() {
             .eq("user_id", uid)
             .order("created_at", { ascending: false })
             .limit(8),
-          // 6. 최근 실패 로그 5건
+          // 6. 최근 구매 로그 150건 (배치 집계용, 15배치 보장)
           supabase
             .from("purchase_logs")
-            .select("id,product_name,platform,error_message,created_at")
+            .select("batch_id,platform,status,created_at")
             .eq("user_id", uid)
-            .eq("status", "failed")
             .order("created_at", { ascending: false })
-            .limit(5),
+            .limit(150),
+          // 7. 최근 운송장 로그 150건 (배치 집계용, 15배치 보장)
+          supabase
+            .from("tracking_logs")
+            .select("batch_id,platform,status,created_at")
+            .eq("user_id", uid)
+            .order("created_at", { ascending: false })
+            .limit(150),
         ]),
         // 이번달 통계 (revenue + deliveredMargin, 페이지네이션)
         fetchMonthStats(uid, currentMonth),
@@ -173,7 +201,15 @@ export function useDashboard() {
         fetchMonthStats(uid, lastMonth),
       ]);
 
-      const [c0, c1, c2, c3, c4, c5, c6] = counts;
+      const [c0, c1, c2, c3, c4, c5, c6, c7] = counts;
+
+      // 구매/운송장 배치 집계 후 시간순 병합 (최신 15개)
+      type LogRow = { batch_id: string; platform: string; status: string; created_at: string };
+      const purchaseBatches = groupIntoBatches((c6.data ?? []) as LogRow[], "purchase");
+      const trackingBatches = groupIntoBatches((c7.data ?? []) as LogRow[], "tracking");
+      const activityLogs = [...purchaseBatches, ...trackingBatches]
+        .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+        .slice(0, 15);
 
       setData({
         currentMonthCount: currentStats.count,
@@ -188,7 +224,7 @@ export function useDashboard() {
         deliveredCount: c3.count ?? 0,
         csCount: c4.count ?? 0,
         recentOrders: (c5.data ?? []) as DashboardRecentOrder[],
-        failedLogs: (c6.data ?? []) as DashboardFailedLog[],
+        activityLogs,
       });
     } catch (err) {
       console.error("Failed to fetch dashboard data", err);

@@ -36,6 +36,7 @@
 - 컴포넌트는 app/ 폴더 구조 따르기
 - 오류 수정 시 원인 분석 먼저, 수정 후 반드시 테스트
 - `.env.local`은 절대 커밋하지 않음
+- Prettier 기본 포맷터 설정 (`.vscode/settings.json` — 저장 시 자동 포맷)
 
 ## 주요 파일 위치
 
@@ -51,6 +52,10 @@
 - 상품 테이블: `components/workspace/products/table/`
 - 사이드바: `components/workspace/sidebar.tsx`
 - 헤더: `components/workspace/header.tsx`
+
+### 대시보드
+- 대시보드 데이터 훅: `hooks/use-dashboard.ts`
+- 활동 로그 위젯: `components/workspace/dashboard/activity-log.tsx`
 
 ### 라이브러리
 - 엑셀 파서: `lib/excel-parser.ts`
