@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
 import type { Order, OrderInsert, OrderUpdate } from "@/types/database";
 
 interface UseOrdersOptions {
@@ -46,6 +47,7 @@ function makeDuplicateKey(
 
 export function useOrders(options: UseOrdersOptions = {}) {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [months, setMonths] = useState<string[]>([]);
@@ -301,7 +303,10 @@ export function useOrders(options: UseOrdersOptions = {}) {
 
   const undo = useCallback(() => {
     const group = undoStackRef.current.pop();
-    if (!group) return;
+    if (!group) {
+      showToast("더 이상 취소할 수 없습니다", "info");
+      return;
+    }
     // 그룹 내 모든 엔트리를 역순으로 되돌림
     for (let i = group.entries.length - 1; i >= 0; i--) {
       const entry = group.entries[i];
@@ -309,7 +314,11 @@ export function useOrders(options: UseOrdersOptions = {}) {
         updateOrder(entry.id, entry.prev, true);
       }
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    showToast(
+      `실행 취소 (${group.entries.length}개 변경)`,
+      "info"
+    );
+  }, [showToast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const deleteOrders = async (ids: string[]) => {
     // 배치 삭제 (한번에 최대 100개 — URL 길이 제한 방지)

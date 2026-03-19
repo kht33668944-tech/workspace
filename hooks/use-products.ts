@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
 import type { Product, ProductUpdate } from "@/types/database";
 
 interface UseProductsOptions {
@@ -26,6 +27,7 @@ const MAX_UNDO = 20;
 
 export function useProducts(options: UseProductsOptions = {}) {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const undoStackRef = useRef<UndoGroup[]>([]);
@@ -199,14 +201,21 @@ export function useProducts(options: UseProductsOptions = {}) {
 
   const undo = useCallback(() => {
     const group = undoStackRef.current.pop();
-    if (!group) return;
+    if (!group) {
+      showToast("더 이상 취소할 수 없습니다", "info");
+      return;
+    }
     for (let i = group.entries.length - 1; i >= 0; i--) {
       const entry = group.entries[i];
       if (entry.type === "update") {
         updateProduct(entry.id, entry.prev, true);
       }
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    showToast(
+      `실행 취소 (${group.entries.length}개 변경)`,
+      "info"
+    );
+  }, [showToast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const deleteProducts = async (ids: string[]) => {
     const BATCH_SIZE = 100;

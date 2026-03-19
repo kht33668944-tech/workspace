@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { X, Send, Clock } from "lucide-react";
 import { DELIVERY_STATUSES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
+import { sanitizeText } from "@/lib/sanitize";
 import type { Order, OrderUpdate, ConsultationLog } from "@/types/database";
 
 interface OrderSidePanelProps {
@@ -23,7 +24,7 @@ export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePa
   }, [logs.length]);
 
   const handleAddLog = () => {
-    const content = logInput.trim();
+    const content = sanitizeText(logInput.trim());
     if (!content) return;
 
     const newLog: ConsultationLog = {

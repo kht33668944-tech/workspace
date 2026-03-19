@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
+import { groupIntoBatches } from "@/lib/log-format";
+import type { BatchLogEntry } from "@/lib/log-format";
 
 export interface DashboardRecentOrder {
   id: string;
@@ -14,15 +16,8 @@ export interface DashboardRecentOrder {
   tracking_no: string | null;
 }
 
-export interface ActivityLogBatch {
-  batchId: string;
-  type: "purchase" | "tracking";
-  platform: string;
-  successCount: number;
-  failedCount: number;
-  cancelledCount: number;
-  startedAt: string;
-}
+// backwards-compat alias
+export type ActivityLogBatch = BatchLogEntry;
 
 export interface DashboardData {
   // KPI
@@ -59,25 +54,6 @@ const EMPTY_DATA: DashboardData = {
   activityLogs: [],
 };
 
-// 개별 로그 행을 배치 단위로 집계
-function groupIntoBatches(
-  rows: Array<{ batch_id: string; platform: string; status: string; created_at: string }>,
-  type: "purchase" | "tracking",
-): ActivityLogBatch[] {
-  const map = new Map<string, ActivityLogBatch>();
-  for (const r of rows) {
-    let batch = map.get(r.batch_id);
-    if (!batch) {
-      batch = { batchId: r.batch_id, type, platform: r.platform, successCount: 0, failedCount: 0, cancelledCount: 0, startedAt: r.created_at };
-      map.set(r.batch_id, batch);
-    }
-    if (r.created_at < batch.startedAt) batch.startedAt = r.created_at;
-    if (r.status === "success") batch.successCount++;
-    else if (r.status === "failed") batch.failedCount++;
-    else if (r.status === "cancelled") batch.cancelledCount++;
-  }
-  return Array.from(map.values());
-}
 
 function formatMonth(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;

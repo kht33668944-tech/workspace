@@ -487,12 +487,14 @@ function OrderTable({
         </table>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-1">
-          <span className="text-xs text-[var(--text-muted)]">
-            {pageStart + 1}-{Math.min(pageStart + PAGE_SIZE, sortedOrders.length)} / {sortedOrders.length}건
-          </span>
+      {/* 건수 표시 + 페이지네이션 */}
+      <div className="flex items-center justify-between px-1 min-h-[36px]">
+        <span className="text-xs text-[var(--text-muted)]">
+          {sortedOrders.length > 0
+            ? `${pageStart + 1}-${Math.min(pageStart + PAGE_SIZE, sortedOrders.length)} / ${sortedOrders.length}건`
+            : "0건"}
+        </span>
+        {totalPages > 1 && (
           <div className="flex items-center gap-1">
             <button onClick={() => setPage(0)} disabled={safePage === 0} className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">««</button>
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">«</button>
@@ -521,8 +523,8 @@ function OrderTable({
             <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={safePage >= totalPages - 1} className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">»</button>
             <button onClick={() => setPage(totalPages - 1)} disabled={safePage >= totalPages - 1} className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed">»»</button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
