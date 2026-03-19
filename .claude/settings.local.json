@@ -4,7 +4,18 @@
       "Bash(npm install lucide-react)",
       "Bash(npm list lucide-react)",
       "mcp__claude_ai_Notion__notion-get-users",
-      "mcp__claude_ai_Slack__slack_read_user_profile"
+      "mcp__claude_ai_Slack__slack_read_user_profile",
+      "mcp__supabase__get_project_url",
+      "Bash(node -e \"console.log\\(require\\(''crypto''\\).randomBytes\\(32\\).toString\\(''hex''\\)\\)\")",
+      "Bash(find /c/Users/kht33/Desktop/workspace -not -path */node_modules/* -not -path */.next/* -not -path */.git/* -not -path */.claude/* -type d)",
+      "Bash(wc -l /c/Users/kht33/Desktop/workspace/lib/scrapers/*.ts /c/Users/kht33/Desktop/workspace/components/workspace/orders/*.tsx /c/Users/kht33/Desktop/workspace/app/api/*/*.ts)",
+      "Bash(grep -r import.*from /c/Users/kht33/Desktop/workspace/components /c/Users/kht33/Desktop/workspace/lib --include=*.ts --include=*.tsx)",
+      "Bash(grep -r auction /c/Users/kht33/Desktop/workspace --include=*.ts --include=*.tsx --exclude-dir=node_modules --exclude-dir=.next)",
+      "Bash(git add:*)",
+      "Bash(claude config:*)",
+      "Bash(claude whoami:*)",
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "mcp__supabase__apply_migration"
     ]
   },
   "enableAllProjectMcpServers": true,

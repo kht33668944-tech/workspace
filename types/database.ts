@@ -144,6 +144,9 @@ export interface Product {
   purchase_url: string;
   memo: string;
   sort_order: number;
+  thumbnail_url: string | null;
+  image_urls: string[];
+  source_platform: string | null; // 'gmarket' | 'auction' 등
   created_at: string;
   updated_at: string;
 }

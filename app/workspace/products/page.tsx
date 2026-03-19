@@ -1,27 +1,32 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
-import { Plus, Trash2, Search, Settings2, Package } from "lucide-react";
+import { Plus, Trash2, Search, Settings2, Package, Download, Images } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
 import { buildRateMap } from "@/lib/product-calculations";
 import ProductTable from "@/components/workspace/products/product-table";
 import CommissionTab from "@/components/workspace/products/commission-tab";
-import type { CommissionPlatform } from "@/types/database";
+import ImageTab from "@/components/workspace/products/image-tab";
+import GmarketImportModal from "@/components/workspace/products/gmarket-import-modal";
+import type { CommissionPlatform, ProductInsert } from "@/types/database";
+
+type ActiveTab = "products" | "images" | "commission";
 
 export default function ProductsPage() {
   usePreventBrowserSave();
 
-  const [activeTab, setActiveTab] = useState<"products" | "commission">("products");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("products");
   const [search, setSearch] = useState("");
   const [activeSearch, setActiveSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [deleting, setDeleting] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
-  const { products, allProducts, loading, addProduct, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo } = useProducts({
+  const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo } = useProducts({
     search: activeSearch,
     columnFilters,
   });
@@ -74,37 +79,42 @@ export default function ProductsPage() {
     setColumnFilters(prev => ({ ...prev, [key]: values }));
   }, []);
 
+  const handleImport = async (rows: Omit<ProductInsert, "user_id">[]) => {
+    return insertProducts(rows as ProductInsert[]);
+  };
+
+  const TAB_CLASSES = (tab: ActiveTab) =>
+    `flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+      activeTab === tab
+        ? "border-blue-500 text-blue-400"
+        : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+    }`;
+
   return (
     <div className="space-y-4 md:space-y-6">
       {/* 탭 */}
       <div className="flex items-center gap-1 border-b border-[var(--border)]">
-        <button
-          onClick={() => setActiveTab("products")}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "products"
-              ? "border-blue-500 text-blue-400"
-              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-          }`}
-        >
+        <button onClick={() => setActiveTab("products")} className={TAB_CLASSES("products")}>
           <Package className="w-4 h-4" />
           상품 목록
         </button>
-        <button
-          onClick={() => setActiveTab("commission")}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "commission"
-              ? "border-blue-500 text-blue-400"
-              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-          }`}
-        >
+        <button onClick={() => setActiveTab("images")} className={TAB_CLASSES("images")}>
+          <Images className="w-4 h-4" />
+          이미지 관리
+        </button>
+        <button onClick={() => setActiveTab("commission")} className={TAB_CLASSES("commission")}>
           <Settings2 className="w-4 h-4" />
           수수료 설정
         </button>
       </div>
 
-      {activeTab === "commission" ? (
-        <CommissionTab />
-      ) : (
+      {activeTab === "commission" && <CommissionTab />}
+
+      {activeTab === "images" && (
+        <ImageTab products={allProducts} onUpdate={updateProduct} onDelete={deleteProducts} />
+      )}
+
+      {activeTab === "products" && (
         <>
           {/* 액션 바 */}
           <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
@@ -126,7 +136,7 @@ export default function ProductsPage() {
             </div>
 
             {/* 버튼 그룹 */}
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
               {selectedIds.size > 0 && (
                 <button
                   onClick={handleDelete}
@@ -137,6 +147,13 @@ export default function ProductsPage() {
                   {deleting ? "삭제 중..." : `${selectedIds.size}개 삭제`}
                 </button>
               )}
+              <button
+                onClick={() => setImportModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                지마켓 가져오기
+              </button>
               <button
                 onClick={addProduct}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
@@ -172,6 +189,15 @@ export default function ProductsPage() {
             categories={categories}
           />
         </>
+      )}
+
+      {/* 지마켓 가져오기 모달 */}
+      {importModalOpen && (
+        <GmarketImportModal
+          onClose={() => setImportModalOpen(false)}
+          onImport={handleImport}
+          productCount={allProducts.length}
+        />
       )}
     </div>
   );

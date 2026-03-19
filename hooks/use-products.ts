@@ -228,6 +228,13 @@ export function useProducts(options: UseProductsOptions = {}) {
     return { error: null };
   };
 
+  const updateProductImages = useCallback(
+    (id: string, imageUrls: string[], thumbnailUrl: string | null) => {
+      updateProduct(id, { image_urls: imageUrls, thumbnail_url: thumbnailUrl }, true);
+    },
+    [updateProduct]
+  );
+
   return {
     products: filteredProducts,
     allProducts: products,
@@ -236,6 +243,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     addProduct,
     insertProducts,
     updateProduct,
+    updateProductImages,
     deleteProducts,
     undo,
     startBatchUndo,
