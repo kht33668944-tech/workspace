@@ -6,6 +6,16 @@ import { DELIVERY_STATUSES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
 import { sanitizeText } from "@/lib/sanitize";
 import type { Order, OrderUpdate, ConsultationLog } from "@/types/database";
 
+function InfoRow({ label, value, highlight }: { label: string; value: string | null | undefined; highlight?: boolean }) {
+  if (!value) return null;
+  return (
+    <div>
+      <span className="text-[10px] text-[var(--text-muted)] block leading-none mb-0.5">{label}</span>
+      <span className={`text-xs leading-snug break-all ${highlight ? "text-amber-400 font-medium" : "text-[var(--text-secondary)]"}`}>{value}</span>
+    </div>
+  );
+}
+
 interface OrderSidePanelProps {
   order: Order;
   onUpdate: (id: string, updates: OrderUpdate) => void;
@@ -88,7 +98,7 @@ export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePa
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 flex flex-col overflow-hidden">
           {/* 배송상태 */}
           <div className="px-5 py-3 border-b border-[var(--border)]">
             <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">배송상태 변경</label>
@@ -103,13 +113,54 @@ export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePa
             </select>
           </div>
 
+          {/* 주문 정보 요약 */}
+          <div className="px-5 py-3 border-b border-[var(--border)]">
+            <h3 className="text-xs font-medium text-[var(--text-tertiary)] mb-2.5">주문 정보</h3>
+            <div className="space-y-1.5">
+              {/* 2열 그리드 행들 */}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                <InfoRow label="주문일" value={order.order_date} />
+                <InfoRow label="마켓" value={order.marketplace} />
+                <InfoRow label="수량" value={order.quantity != null ? `${order.quantity}개` : null} />
+                <InfoRow label="전화" value={order.recipient_phone} />
+              </div>
+              {/* 재무 */}
+              <div className="grid grid-cols-3 gap-x-4 gap-y-1.5 pt-0.5">
+                <InfoRow label="정산" value={order.settlement != null ? `${order.settlement.toLocaleString()}원` : null} />
+                <InfoRow label="원가" value={order.cost != null ? `${order.cost.toLocaleString()}원` : null} />
+                <InfoRow label="마진" value={order.margin != null ? `${order.margin.toLocaleString()}원` : null} />
+              </div>
+              {/* 운송장 */}
+              {order.tracking_no && (
+                <InfoRow label="운송장" value={`${order.courier ?? ""} ${order.tracking_no}`.trim()} />
+              )}
+              {/* 주소 */}
+              {(order.address || order.address_detail) && (
+                <InfoRow
+                  label="주소"
+                  value={[order.postal_code ? `(${order.postal_code})` : "", order.address, order.address_detail].filter(Boolean).join(" ")}
+                />
+              )}
+              {/* 배송메모 */}
+              {order.delivery_memo && (
+                <InfoRow label="배송메모" value={order.delivery_memo} highlight />
+              )}
+              {/* 구매주문번호 */}
+              {order.purchase_order_no && (
+                <InfoRow label="구매번호" value={order.purchase_order_no} />
+              )}
+            </div>
+          </div>
+
           {/* 상담내역 타임라인 */}
-          <div className="px-5 py-3">
-            <h3 className="text-xs font-medium text-[var(--text-tertiary)] mb-3">상담내역</h3>
+          <div className="flex-1 flex flex-col overflow-hidden px-5 py-3">
+            <h3 className="text-xs font-medium text-[var(--text-tertiary)] mb-3 shrink-0">상담내역</h3>
             {logs.length === 0 ? (
-              <p className="text-xs text-[var(--text-disabled)] text-center py-4">상담내역이 없습니다</p>
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-xs text-[var(--text-disabled)]">상담내역이 없습니다</p>
+              </div>
             ) : (
-              <div className="space-y-3">
+              <div className="flex-1 overflow-y-auto space-y-3">
                 {logs.map((log, i) => (
                   <div key={i} className="relative pl-5 border-l-2 border-[var(--border)]">
                     <div className="absolute left-[-5px] top-1 w-2 h-2 rounded-full bg-blue-500" />
@@ -123,9 +174,9 @@ export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePa
                     <p className="text-xs text-[var(--text-tertiary)] whitespace-pre-wrap">{log.content}</p>
                   </div>
                 ))}
+                <div ref={logsEndRef} />
               </div>
             )}
-            <div ref={logsEndRef} />
           </div>
         </div>
 

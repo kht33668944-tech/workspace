@@ -117,6 +117,8 @@ async function saveTrackingLogs(
   orderNos: string[],
 ) {
   const batchId = randomUUID();
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  const userId = authUser?.id ?? null;
 
   // purchase_order_no로 order_id, recipient_name, product_name 조회
   const { data: orders } = await supabase
@@ -129,7 +131,7 @@ async function saveTrackingLogs(
     if (o.purchase_order_no) orderMap.set(o.purchase_order_no, o);
   }
 
-  const base = { batch_id: batchId, platform, login_id: loginId };
+  const base = { batch_id: batchId, platform, login_id: loginId, user_id: userId };
 
   const logs = [
     ...result.success.map((s) => {
