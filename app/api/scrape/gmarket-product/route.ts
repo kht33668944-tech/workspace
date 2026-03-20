@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import type { BrowserContext, Cookie } from "playwright";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeProductName as llmNormalizeProductName, classifyCategory } from "@/lib/gemini";
 import { launchBrowser, createGmarketContext } from "@/lib/scrapers/browser";
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import { decrypt } from "@/lib/crypto";
+import { loadSession, saveSession } from "@/lib/scrapers/session-manager";
 
 export const maxDuration = 300;
 
@@ -23,6 +25,11 @@ export interface GmarketProductResult {
   image_urls: string[];
   error?: string;
 }
+
+export type GmarketScrapeSSEEvent =
+  | { type: "item_done"; result: GmarketProductResult; index: number; total: number }
+  | { type: "done" }
+  | { type: "error"; message: string };
 
 // ── G마켓 로그인 세션 캐시 (모듈 레벨 — 서버 프로세스 재시작 전까지 유지) ──────
 let gmarketCookieCache: Cookie[] | null = null;
@@ -98,24 +105,49 @@ async function loginToGmarket(context: BrowserContext): Promise<boolean> {
 
 /**
  * G마켓 로그인 세션을 보장.
- * 캐시된 쿠키가 신선하면 복원, 아니면 재로그인 후 캐시 갱신.
+ * L1: 모듈 메모리 캐시 (4h)
+ * L2: Supabase DB 세션 (24h, Railway 재시작 후에도 유효)
+ * L3: 재로그인
  */
-async function ensureGmarketLogin(context: BrowserContext): Promise<void> {
+async function ensureGmarketLogin(
+  context: BrowserContext,
+  supabase: SupabaseClient,
+  loginId: string
+): Promise<void> {
   const now = Date.now();
 
-  // 캐시된 쿠키가 있고 TTL 이내이면 바로 복원
+  // L1: 모듈 캐시 (프로세스 내, 4시간 유효)
   if (gmarketCookieCache && now - gmarketCookieCachedAt < COOKIE_TTL_MS) {
     await context.addCookies(gmarketCookieCache);
-    console.log("[gmarket-login] 캐시된 세션 복원");
+    console.log("[gmarket-login] L1 메모리 캐시 복원");
     return;
   }
 
-  // 로그인 수행
+  // L2: Supabase DB 세션 (24시간 유효, 재시작 후에도 유지)
+  if (loginId) {
+    const dbCookies = await loadSession(supabase, "gmarket", loginId);
+    if (dbCookies) {
+      await context.addCookies(dbCookies);
+      gmarketCookieCache = dbCookies;
+      gmarketCookieCachedAt = now;
+      console.log("[gmarket-login] L2 DB 세션 복원");
+      return;
+    }
+  }
+
+  // L3: 재로그인
   const ok = await loginToGmarket(context);
   if (ok) {
-    gmarketCookieCache = await context.cookies();
+    const cookies = await context.cookies();
+    gmarketCookieCache = cookies;
     gmarketCookieCachedAt = Date.now();
-    console.log(`[gmarket-login] 세션 캐시 저장 (쿠키 ${gmarketCookieCache.length}개)`);
+    console.log(`[gmarket-login] L3 재로그인 완료 (쿠키 ${cookies.length}개)`);
+    if (loginId) {
+      // fire and forget — 실패해도 스크래핑 계속
+      saveSession(supabase, "gmarket", loginId, cookies).catch((e) =>
+        console.warn("[gmarket-login] DB 세션 저장 실패:", e)
+      );
+    }
   }
 }
 
@@ -380,51 +412,103 @@ async function scrapeGmarketProduct(
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
-  if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+  if (!token) {
+    return new Response(JSON.stringify({ error: "인증 필요" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   const supabase = getSupabaseClient(token);
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "인증 실패" }, { status: 401 });
+  if (!user) {
+    return new Response(JSON.stringify({ error: "인증 실패" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   const body = (await request.json()) as ScrapeRequest;
   if (!body.urls || body.urls.length === 0) {
-    return NextResponse.json({ error: "URL이 없습니다." }, { status: 400 });
+    return new Response(JSON.stringify({ error: "URL이 없습니다." }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const validUrls = body.urls.filter(
     (u) => typeof u === "string" && u.includes("gmarket.co.kr")
   );
   if (validUrls.length === 0) {
-    return NextResponse.json({ error: "유효한 지마켓 URL이 없습니다." }, { status: 400 });
+    return new Response(JSON.stringify({ error: "유효한 지마켓 URL이 없습니다." }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const serviceClient = getServiceSupabaseClient();
+  const categories = Array.isArray(body.categories) ? body.categories : [];
 
-  await browserPool.acquire();
-  const browser = await launchBrowser();
-  const context = await createGmarketContext(browser);
+  // 로그인 ID 미리 조회 (session-manager에 전달용)
+  const cred = await getGmarketCredential();
 
-  try {
-    // 로그인 세션 확보 (캐시 있으면 재사용, 없으면 로그인)
-    await ensureGmarketLogin(context);
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
 
-    const categories = Array.isArray(body.categories) ? body.categories : [];
+      function send(event: GmarketScrapeSSEEvent) {
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          // 스트림이 이미 닫힌 경우 무시
+        }
+      }
 
-    // 최대 2개 URL 병렬 처리 (동일 context 세션 재사용, Cloudflare 감지 방지)
-    const CONCURRENCY = 2;
-    const results: GmarketProductResult[] = new Array(validUrls.length);
-    for (let i = 0; i < validUrls.length; i += CONCURRENCY) {
-      const batch = validUrls.slice(i, i + CONCURRENCY);
-      const batchResults = await Promise.all(
-        batch.map((url) => scrapeGmarketProduct(url, user.id, serviceClient, context, categories))
-      );
-      batchResults.forEach((r, j) => { results[i + j] = r; });
-    }
+      await browserPool.acquire();
+      const browser = await launchBrowser();
+      const context = await createGmarketContext(browser);
 
-    return NextResponse.json({ results });
-  } finally {
-    await context.close();
-    await browser.close();
-    browserPool.release();
-  }
+      try {
+        await ensureGmarketLogin(context, supabase, cred?.id ?? "");
+
+        const CONCURRENCY = 2;
+        let doneCount = 0;
+
+        for (let i = 0; i < validUrls.length; i += CONCURRENCY) {
+          // 클라이언트가 연결을 끊었으면 중단
+          if (request.signal.aborted) break;
+
+          const batch = validUrls.slice(i, i + CONCURRENCY);
+          const batchResults = await Promise.all(
+            batch.map((url) =>
+              scrapeGmarketProduct(url, user.id, serviceClient, context, categories)
+            )
+          );
+
+          batchResults.forEach((result) => {
+            send({ type: "item_done", result, index: doneCount++, total: validUrls.length });
+          });
+        }
+
+        send({ type: "done" });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("[gmarket-product] 스트림 오류:", msg);
+        send({ type: "error", message: msg });
+      } finally {
+        await context.close().catch(() => {});
+        await browser.close().catch(() => {});
+        browserPool.release();
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }
