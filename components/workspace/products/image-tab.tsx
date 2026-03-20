@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Search, X, Copy, Check, ImageOff, Upload, Trash2, Loader2,
   Sparkles, FileText, ExternalLink, Play, ChevronDown, ChevronUp,
+  Star, Link2, Code2, Layers,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
@@ -66,70 +67,108 @@ interface ImageCellProps {
 }
 
 function ImageCell({ url, isThumb, onDelete, onSetThumbAndKeepOnly, onSetThumbOnly }: ImageCellProps) {
-  const [hovered, setHovered] = useState(false);
   const urlCopy = useCopy();
   const htmlCopy = useCopy();
 
   return (
-    <div
-      className={`relative w-14 h-14 rounded-lg overflow-hidden border-2 shrink-0 ${
-        isThumb ? "border-blue-500" : "border-[var(--border)]"
-      }`}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <img
-        src={url}
-        alt=""
-        loading="lazy"
-        className="w-full h-full object-cover cursor-pointer"
-        onClick={() => window.open(url, "_blank")}
-      />
+    <div className="flex flex-col gap-0.5 shrink-0">
+      {/* 이미지 */}
+      <div
+        className={`relative w-24 h-24 rounded-lg overflow-hidden border-2 ${
+          isThumb ? "border-blue-500" : "border-[var(--border)]"
+        }`}
+      >
+        <img
+          src={url}
+          alt=""
+          loading="lazy"
+          className="w-full h-full object-cover cursor-pointer"
+          onClick={() => window.open(url, "_blank")}
+        />
+        {isThumb && (
+          <div className="absolute top-0.5 left-0.5 bg-blue-500 rounded text-[8px] text-white px-1 leading-4 pointer-events-none">
+            대표
+          </div>
+        )}
+      </div>
 
-      {hovered && (
-        <div className="absolute inset-0 bg-black/75 flex flex-col items-center justify-center gap-0.5 p-0.5">
-          {!isThumb && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onSetThumbOnly(); }}
-              className="text-[8px] bg-blue-600 hover:bg-blue-700 text-white px-1 py-0.5 rounded w-full text-center leading-tight"
-            >
-              대표설정
-            </button>
-          )}
+      {/* 버튼 행 */}
+      <div className="flex items-center justify-center gap-0">
+        {!isThumb && (
           <button
-            onClick={(e) => { e.stopPropagation(); onSetThumbAndKeepOnly(); }}
-            className="text-[8px] bg-emerald-600 hover:bg-emerald-700 text-white px-1 py-0.5 rounded w-full text-center leading-tight"
+            onClick={onSetThumbOnly}
+            title="대표 설정"
+            className="p-1 rounded text-[var(--text-muted)] hover:text-blue-400 hover:bg-blue-400/10 transition-colors"
           >
-            이것만남기기
+            <Star className="w-3 h-3" />
           </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); urlCopy.copy(url); }}
-            className="text-[8px] bg-[var(--bg-card)]/80 hover:bg-[var(--border)] text-[var(--text-primary)] px-1 py-0.5 rounded flex items-center gap-0.5 w-full justify-center leading-tight"
-          >
-            {urlCopy.state === "copied" ? <Check className="w-2 h-2" /> : <Copy className="w-2 h-2" />}
-            URL복사
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); htmlCopy.copy(`<img src='${url}' />`); }}
-            className="text-[8px] bg-[var(--bg-card)]/80 hover:bg-[var(--border)] text-[var(--text-primary)] px-1 py-0.5 rounded flex items-center gap-0.5 w-full justify-center leading-tight"
-          >
-            {htmlCopy.state === "copied" ? <Check className="w-2 h-2" /> : <Copy className="w-2 h-2" />}
-            HTML복사
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            className="text-[8px] bg-red-600/80 hover:bg-red-600 text-white px-1 py-0.5 rounded w-full text-center leading-tight"
-          >
-            삭제
-          </button>
-        </div>
-      )}
+        )}
+        <button
+          onClick={onSetThumbAndKeepOnly}
+          title="이것만 남기기"
+          className="p-1 rounded text-[var(--text-muted)] hover:text-emerald-400 hover:bg-emerald-400/10 transition-colors"
+        >
+          <Layers className="w-3 h-3" />
+        </button>
+        <button
+          onClick={() => urlCopy.copy(url)}
+          title={urlCopy.state === "copied" ? "복사됨" : "URL 복사"}
+          className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border)] transition-colors"
+        >
+          {urlCopy.state === "copied" ? <Check className="w-3 h-3 text-emerald-400" /> : <Link2 className="w-3 h-3" />}
+        </button>
+        <button
+          onClick={() => htmlCopy.copy(`<img src='${url}' />`)}
+          title={htmlCopy.state === "copied" ? "복사됨" : "HTML 복사"}
+          className="p-1 rounded text-[var(--text-muted)] hover:text-amber-400 hover:bg-amber-400/10 transition-colors"
+        >
+          {htmlCopy.state === "copied" ? <Check className="w-3 h-3 text-emerald-400" /> : <Code2 className="w-3 h-3" />}
+        </button>
+        <button
+          onClick={onDelete}
+          title="삭제"
+          className="p-1 rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-red-400/10 transition-colors"
+        >
+          <Trash2 className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
-      {isThumb && (
-        <div className="absolute top-0.5 left-0.5 bg-blue-500 rounded text-[8px] text-white px-1 leading-4 pointer-events-none">
-          대표
+function DetailImageCell({ url, onClear }: { url: string; onClear: () => void }) {
+  const htmlCopy = useCopy();
+
+  return (
+    <div className="flex flex-col gap-0.5 shrink-0">
+      <div className="relative w-24 h-24 rounded-lg overflow-hidden border-2 border-amber-500">
+        <img
+          src={url}
+          alt=""
+          loading="lazy"
+          className="w-full h-full object-cover cursor-pointer"
+          onClick={() => window.open(url, "_blank")}
+        />
+        <div className="absolute top-0.5 left-0.5 bg-amber-500 rounded text-[8px] text-white px-1 leading-4 pointer-events-none">
+          상세
         </div>
-      )}
+      </div>
+      <div className="flex items-center justify-center gap-0">
+        <button
+          onClick={() => htmlCopy.copy(`<img src='${url}' />`)}
+          title={htmlCopy.state === "copied" ? "복사됨" : "HTML 복사"}
+          className="p-1 rounded text-[var(--text-muted)] hover:text-amber-400 hover:bg-amber-400/10 transition-colors"
+        >
+          {htmlCopy.state === "copied" ? <Check className="w-3 h-3 text-emerald-400" /> : <Code2 className="w-3 h-3" />}
+        </button>
+        <button
+          onClick={onClear}
+          title="상세이미지 삭제"
+          className="p-1 rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-red-400/10 transition-colors"
+        >
+          <Trash2 className="w-3 h-3" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -338,6 +377,13 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
     onUpdate(product.id, { image_urls: [imageUrl], thumbnail_url: imageUrl }, true);
   };
 
+  const handleClearDetailImage = async (product: Product) => {
+    if (product.detail_image_url) {
+      await supabase.storage.from("product-images").remove([urlToStoragePath(product.detail_image_url)]);
+    }
+    onUpdate(product.id, { detail_image_url: null }, true);
+  };
+
   const handleDeleteAll = async (product: Product) => {
     if (!confirm(`"${product.product_name}" 의 이미지 ${product.image_urls.length}장을 모두 삭제하시겠습니까?`)) return;
     await supabase.storage.from("product-images").remove(product.image_urls.map(urlToStoragePath));
@@ -481,15 +527,20 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
                       const isUploading = uploading === product.id;
                       const isExpanded = expandedImages.has(product.id);
                       const thumbTask = tasks[product.id];
+                      // 썸네일을 맨 앞으로 정렬
+                      const thumbUrl = product.thumbnail_url;
+                      const sortedImages = thumbUrl && product.image_urls.includes(thumbUrl)
+                        ? [thumbUrl, ...product.image_urls.filter((u) => u !== thumbUrl)]
+                        : product.image_urls;
                       const visibleImages = isExpanded
-                        ? product.image_urls
-                        : product.image_urls.slice(0, MAX_IMAGES_DEFAULT);
-                      const hiddenCount = product.image_urls.length - MAX_IMAGES_DEFAULT;
+                        ? sortedImages
+                        : sortedImages.slice(0, MAX_IMAGES_DEFAULT);
+                      const hiddenCount = sortedImages.length - MAX_IMAGES_DEFAULT;
 
                       return (
                         <div
                           key={product.id}
-                          className={`rounded-xl border px-3 py-2.5 transition-colors ${
+                          className={`rounded-xl border px-2 py-2 transition-colors ${
                             isSelected
                               ? "border-blue-500/50 bg-blue-500/5"
                               : "border-[var(--border)] bg-[var(--bg-main)]"
@@ -623,11 +674,30 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
                           </div>
 
                           {/* 이미지 행 */}
-                          {hasImages ? (
-                            <div className="flex gap-1.5 flex-wrap mt-2 pl-6">
-                              {visibleImages.map((url, idx) => (
+                          {hasImages || product.detail_image_url ? (
+                            <div className="flex gap-1 flex-wrap mt-1.5 pl-5">
+                              {/* 썸네일 (첫 번째) */}
+                              {visibleImages.slice(0, 1).map((url) => (
                                 <ImageCell
-                                  key={idx}
+                                  key={url}
+                                  url={url}
+                                  isThumb={product.thumbnail_url === url}
+                                  onDelete={() => handleDeleteImage(product, url)}
+                                  onSetThumbOnly={() => handleSetThumbOnly(product, url)}
+                                  onSetThumbAndKeepOnly={() => handleSetThumbAndKeepOnly(product, url)}
+                                />
+                              ))}
+                              {/* 상세이미지: 썸네일 바로 옆 */}
+                              {product.detail_image_url && (
+                                <DetailImageCell
+                                  url={product.detail_image_url}
+                                  onClear={() => handleClearDetailImage(product)}
+                                />
+                              )}
+                              {/* 나머지 이미지들 */}
+                              {visibleImages.slice(1).map((url) => (
+                                <ImageCell
+                                  key={url}
                                   url={url}
                                   isThumb={product.thumbnail_url === url}
                                   onDelete={() => handleDeleteImage(product, url)}
@@ -638,7 +708,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
                               {!isExpanded && hiddenCount > 0 && (
                                 <button
                                   onClick={() => toggleExpandImages(product.id)}
-                                  className="w-14 h-14 rounded-lg border-2 border-dashed border-[var(--border)] text-[var(--text-muted)] hover:border-blue-400 hover:text-blue-400 text-xs font-medium transition-colors flex items-center justify-center"
+                                  className="w-24 h-24 rounded-lg border-2 border-dashed border-[var(--border)] text-[var(--text-muted)] hover:border-blue-400 hover:text-blue-400 text-xs font-medium transition-colors flex items-center justify-center"
                                 >
                                   +{hiddenCount}
                                 </button>
@@ -646,14 +716,14 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
                               {isExpanded && hiddenCount > 0 && (
                                 <button
                                   onClick={() => toggleExpandImages(product.id)}
-                                  className="self-center text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors px-1"
+                                  className="self-start mt-9 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors px-1"
                                 >
                                   접기
                                 </button>
                               )}
                             </div>
                           ) : (
-                            <div className="flex items-center gap-2 text-xs text-[var(--text-disabled)] mt-2 pl-6">
+                            <div className="flex items-center gap-2 text-xs text-[var(--text-disabled)] mt-1.5 pl-5">
                               <ImageOff className="w-3.5 h-3.5" />
                               이미지 없음
                             </div>

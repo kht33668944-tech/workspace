@@ -321,7 +321,29 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 4. HTML 생성 ────────────────────────────────────────────────────────
+  // DB 저장/복사용: 원본 URL 유지 (가벼운 HTML)
   const detailHtml = buildDetailHtml(productName, thumbnailUrl, mergedSpecs);
+
+  // 스크린샷용: 썸네일을 서버에서 fetch해 base64로 변환 후 buildDetailHtml 재호출
+  // - page.route()는 setContent()에서 인터셉트 안 될 수 있어서 base64 임베드 방식 사용
+  // - String.replace() 쓰지 않고 buildDetailHtml 재호출 → base64의 $ 치환 오작동 방지
+  let screenshotThumbnail: string | null = thumbnailUrl;
+  if (thumbnailUrl) {
+    try {
+      const imgRes = await fetch(thumbnailUrl);
+      if (imgRes.ok) {
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        const ct = imgRes.headers.get("content-type") || "image/jpeg";
+        screenshotThumbnail = `data:${ct};base64,${buf.toString("base64")}`;
+        console.log("[detail] 썸네일 base64 변환 성공, bytes:", buf.length);
+      } else {
+        console.warn("[detail] 썸네일 fetch 실패, status:", imgRes.status, thumbnailUrl.slice(-60));
+      }
+    } catch (e) {
+      console.warn("[detail] 썸네일 fetch 오류:", (e as Error).message, thumbnailUrl.slice(-60));
+    }
+  }
+  const screenshotHtml = buildDetailHtml(productName, screenshotThumbnail, mergedSpecs);
 
   // ── 5. Playwright로 HTML → PNG 스크린샷 (스크래핑 브라우저 재사용) ────────
   const serviceClient = getServiceSupabaseClient();
@@ -332,8 +354,9 @@ export async function POST(request: NextRequest) {
     const screenshotCtx = await sharedBrowser.newContext({ viewport: { width: 1000, height: 800 } });
     const page = await screenshotCtx.newPage();
 
-    const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:0;background:#fff;}</style></head><body>${detailHtml}</body></html>`;
-    await page.setContent(fullHtml, { waitUntil: "domcontentloaded" });
+    // base64 임베드된 HTML 사용 → 외부 이미지 요청 없음
+    const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:0;background:#fff;}</style></head><body>${screenshotHtml}</body></html>`;
+    await page.setContent(fullHtml, { waitUntil: "load" });
 
     // 실제 콘텐츠 높이에 맞게 뷰포트 재설정
     const height = await page.evaluate(() => document.body.scrollHeight);

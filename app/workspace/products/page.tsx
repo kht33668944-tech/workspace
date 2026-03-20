@@ -1,21 +1,31 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
-import { Plus, Trash2, Search, Settings2, Package, Download, Images } from "lucide-react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { Plus, Trash2, Search, Settings2, Package, Download, Images, Play } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
 import { buildRateMap } from "@/lib/product-calculations";
+import { useAiTask } from "@/context/AiTaskContext";
+import { useAuth } from "@/context/AuthContext";
 import ProductTable from "@/components/workspace/products/product-table";
 import CommissionTab from "@/components/workspace/products/commission-tab";
 import ImageTab from "@/components/workspace/products/image-tab";
 import GmarketImportModal from "@/components/workspace/products/gmarket-import-modal";
+import BatchDetailModal from "@/components/workspace/products/batch-detail-modal";
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
 
 type ActiveTab = "products" | "images" | "commission";
 
 export default function ProductsPage() {
   usePreventBrowserSave();
+
+  const { session } = useAuth();
+  const {
+    batchItems, batchActive, batchVisible,
+    startBatch, dismissBatch, clearBatch,
+    registerOnUpdate, unregisterOnUpdate,
+  } = useAiTask();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("products");
   const [search, setSearch] = useState("");
@@ -32,6 +42,27 @@ export default function ProductsPage() {
   });
 
   const rateMap = useMemo(() => buildRateMap(rates), [rates]);
+
+  // products 탭에서 배치 완료 시 로컬 캐시 동기화
+  useEffect(() => {
+    if (activeTab !== "products") return;
+    registerOnUpdate(updateProduct);
+    return () => { unregisterOnUpdate(); };
+  }, [activeTab, updateProduct, registerOnUpdate, unregisterOnUpdate]);
+
+  const handleStartBatchDetail = useCallback(() => {
+    const selected = products.filter((p) => selectedIds.has(p.id));
+    if (selected.length === 0 || !session?.access_token) return;
+    startBatch(
+      selected.map((p) => ({
+        productId: p.id,
+        productName: p.product_name,
+        purchaseUrl: p.purchase_url,
+        thumbnailUrl: p.thumbnail_url,
+      })),
+      session.access_token
+    );
+  }, [products, selectedIds, session, startBatch]);
 
   const stats = useMemo(() => {
     const count = products.length;
@@ -138,14 +169,24 @@ export default function ProductsPage() {
             {/* 버튼 그룹 */}
             <div className="flex items-center gap-2 shrink-0">
               {selectedIds.size > 0 && (
-                <button
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors disabled:opacity-50"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  {deleting ? "삭제 중..." : `${selectedIds.size}개 삭제`}
-                </button>
+                <>
+                  <button
+                    onClick={handleStartBatchDetail}
+                    disabled={batchActive}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <Play className="w-4 h-4" />
+                    {batchActive ? "생성 중..." : `${selectedIds.size}개 상세페이지 생성`}
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    {deleting ? "삭제 중..." : `${selectedIds.size}개 삭제`}
+                  </button>
+                </>
               )}
               <button
                 onClick={() => setImportModalOpen(true)}
@@ -199,6 +240,11 @@ export default function ProductsPage() {
           productCount={allProducts.length}
           categories={categories}
         />
+      )}
+
+      {/* 상세페이지 일괄 생성 모달 */}
+      {batchVisible && (
+        <BatchDetailModal items={batchItems} onClose={dismissBatch} onClear={clearBatch} />
       )}
     </div>
   );

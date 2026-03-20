@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { X, Loader2, CheckCircle, AlertCircle, ExternalLink } from "lucide-react";
+import { useState, useRef, useCallback, useMemo } from "react";
+import { X, Loader2, CheckCircle, AlertCircle, ExternalLink, Plus } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import type { GmarketProductResult } from "@/app/api/scrape/gmarket-product/route";
 import type { ProductInsert } from "@/types/database";
@@ -23,29 +23,84 @@ interface PreviewItem extends GmarketProductResult {
 export default function GmarketImportModal({ onClose, onImport, productCount, categories }: Props) {
   const { session } = useAuth();
   const [stage, setStage] = useState<Stage>("input");
-  const [urlText, setUrlText] = useState("");
+  const [urlFields, setUrlFields] = useState<string[]>([""]);
   const [items, setItems] = useState<PreviewItem[]>([]);
   const [loadingStatus, setLoadingStatus] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  const parseUrls = (): string[] => {
-    return urlText
-      .split(/[\n,]+/)
-      .map((u) => u.trim())
-      .filter((u) => u.includes("gmarket.co.kr"));
-  };
+  const validUrls = useMemo(
+    () => urlFields.map((u) => u.trim()).filter((u) => u.includes("gmarket.co.kr")),
+    [urlFields]
+  );
+  const invalidCount = useMemo(
+    () => urlFields.filter((u) => u.trim() && !u.includes("gmarket.co.kr")).length,
+    [urlFields]
+  );
+
+  // 필드 변경: 마지막 칸이 채워지면 빈 칸 자동 추가
+  const handleChange = useCallback((index: number, value: string) => {
+    setUrlFields((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      // 마지막 칸에 내용이 생기면 새 빈 칸 추가
+      if (value.trim() && index === next.length - 1) {
+        next.push("");
+      }
+      return next;
+    });
+  }, []);
+
+  // 붙여넣기: 줄바꿈 감지 → 자동 분리
+  const handlePaste = useCallback((index: number, e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData("text");
+    if (!pasted.includes("\n")) return; // 단일 줄이면 기본 동작 유지
+
+    e.preventDefault();
+    const lines = pasted
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    setUrlFields((prev) => {
+      const next = [...prev];
+      // 현재 인덱스부터 lines로 채우기
+      lines.forEach((line, i) => {
+        next[index + i] = line;
+      });
+      // 항상 마지막에 빈 칸 보장
+      if (next[next.length - 1].trim()) next.push("");
+      return next;
+    });
+
+    // 포커스를 마지막 채워진 칸 다음으로
+    setTimeout(() => {
+      const nextIdx = index + lines.length;
+      inputRefs.current[nextIdx]?.focus();
+    }, 0);
+  }, []);
+
+  // 개별 삭제
+  const handleDelete = useCallback((index: number) => {
+    setUrlFields((prev) => {
+      if (prev.length === 1) return [""];
+      const next = prev.filter((_, i) => i !== index);
+      // 마지막 칸이 비어있지 않으면 빈 칸 추가
+      if (next[next.length - 1].trim()) next.push("");
+      return next;
+    });
+  }, []);
 
   const handleStart = async () => {
-    const urls = parseUrls();
-    if (urls.length === 0) {
+    if (validUrls.length === 0) {
       setError("유효한 지마켓 URL이 없습니다.\n(예: https://www.gmarket.co.kr/Item/...)");
       return;
     }
     setError(null);
     setStage("loading");
-    setLoadingStatus(`${urls.length}개 상품 스크래핑 중...`);
+    setLoadingStatus(`${validUrls.length}개 상품 스크래핑 중...`);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -57,7 +112,7 @@ export default function GmarketImportModal({ onClose, onImport, productCount, ca
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ urls, categories }),
+        body: JSON.stringify({ urls: validUrls, categories }),
         signal: controller.signal,
       });
 
@@ -123,7 +178,6 @@ export default function GmarketImportModal({ onClose, onImport, productCount, ca
 
   const successCount = items.filter((i) => !i.error).length;
   const failCount = items.filter((i) => !!i.error).length;
-  const validUrls = parseUrls();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -131,11 +185,18 @@ export default function GmarketImportModal({ onClose, onImport, productCount, ca
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0">
           <div>
-            <h2 className="text-base font-semibold text-[var(--text-primary)]">
-              지마켓 상품 가져오기
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">
+                지마켓 상품 가져오기
+              </h2>
+              {stage === "input" && validUrls.length > 0 && (
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400">
+                  {validUrls.length}개
+                </span>
+              )}
+            </div>
             <p className="text-xs text-[var(--text-muted)] mt-0.5">
-              {stage === "input" && "URL을 한 줄에 하나씩 붙여넣으세요"}
+              {stage === "input" && "URL을 하나씩 입력하거나 여러 개를 한 번에 붙여넣으세요"}
               {stage === "loading" && loadingStatus}
               {stage === "preview" && `성공 ${successCount}개${failCount > 0 ? ` / 실패 ${failCount}개` : ""}`}
             </p>
@@ -152,20 +213,79 @@ export default function GmarketImportModal({ onClose, onImport, productCount, ca
         <div className="flex-1 overflow-y-auto p-6">
           {/* ── INPUT 단계 ── */}
           {stage === "input" && (
-            <div className="space-y-3">
-              <textarea
-                value={urlText}
-                onChange={(e) => setUrlText(e.target.value)}
-                placeholder={`https://www.gmarket.co.kr/Item/DetailView/Item.asp?goodscode=...\nhttps://item.gmarket.co.kr/Item?goodscode=...\n\n여러 URL을 줄바꿈으로 구분하여 입력`}
-                className="w-full h-48 px-3 py-2.5 text-sm bg-[var(--bg-main)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] placeholder:text-[var(--text-muted)] resize-none outline-none focus:border-blue-400 font-mono"
-              />
-              {validUrls.length > 0 && (
-                <p className="text-xs text-blue-400">
-                  유효한 URL {validUrls.length}개 감지됨
-                </p>
-              )}
+            <div className="space-y-2">
+              {/* 카운트 배너 */}
+              <div className="flex items-center justify-between text-xs text-[var(--text-muted)] mb-3">
+                <span>
+                  현재 등록된 상품:{" "}
+                  <strong className={validUrls.length > 0 ? "text-blue-400" : "text-[var(--text-primary)]"}>
+                    {validUrls.length}개
+                  </strong>
+                </span>
+                {invalidCount > 0 && (
+                  <span className="text-amber-400">
+                    지마켓 URL이 아닌 항목 {invalidCount}개 제외됨
+                  </span>
+                )}
+              </div>
+
+              {/* URL 입력 리스트 */}
+              <div className="space-y-1.5">
+                {urlFields.map((url, idx) => {
+                  const isValid = url.trim().includes("gmarket.co.kr");
+                  const isInvalid = url.trim().length > 0 && !isValid;
+                  return (
+                    <div key={idx} className="flex items-center gap-2">
+                      <span className="text-xs text-[var(--text-disabled)] w-5 text-right shrink-0 select-none">
+                        {url.trim() ? idx + 1 : ""}
+                      </span>
+                      <div className="relative flex-1">
+                        <input
+                          ref={(el) => { inputRefs.current[idx] = el; }}
+                          type="text"
+                          value={url}
+                          onChange={(e) => handleChange(idx, e.target.value)}
+                          onPaste={(e) => handlePaste(idx, e)}
+                          placeholder={idx === 0 ? "https://www.gmarket.co.kr/Item/..." : ""}
+                          className={`w-full px-3 py-1.5 text-sm rounded-lg border bg-[var(--bg-main)] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none transition-colors font-mono ${
+                            isValid
+                              ? "border-blue-500/50 focus:border-blue-400"
+                              : isInvalid
+                              ? "border-amber-500/50 focus:border-amber-400"
+                              : "border-[var(--border)] focus:border-blue-400"
+                          }`}
+                        />
+                        {isValid && (
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-blue-400 pointer-events-none" />
+                        )}
+                      </div>
+                      {url.trim() ? (
+                        <button
+                          onClick={() => handleDelete(idx)}
+                          className="shrink-0 p-1 rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                          title="삭제"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <span className="w-6 shrink-0" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 직접 추가 버튼 */}
+              <button
+                onClick={() => setUrlFields((prev) => [...prev, ""])}
+                className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-blue-400 transition-colors mt-1 pl-7"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                칸 추가
+              </button>
+
               {error && (
-                <p className="text-xs text-red-400 whitespace-pre-wrap">{error}</p>
+                <p className="text-xs text-red-400 whitespace-pre-wrap pt-1">{error}</p>
               )}
             </div>
           )}
