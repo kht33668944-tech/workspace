@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import React, { useState, useCallback, useEffect } from "react";
+import { Plus, Trash2, Sparkles, Save } from "lucide-react";
 import { useCommissions, PLATFORM_FEE_FIELDS } from "@/hooks/use-commissions";
+import { useAuth } from "@/context/AuthContext";
 import type { CommissionPlatform, CommissionRate } from "@/types/database";
 import { COMMISSION_PLATFORM_LABELS } from "@/types/database";
+import { PLAYAUTO_SCHEMAS } from "@/lib/playauto-schema";
 
 const PLATFORMS: CommissionPlatform[] = ["smartstore", "esm", "coupang", "esm_5pct", "myeolchi"];
 
@@ -17,11 +19,74 @@ const PLATFORM_COLORS: Record<CommissionPlatform, { bg10: string; bg5: string; b
 };
 
 export default function CommissionTab() {
+  const { session } = useAuth();
   const { rates, categories, loading, updateRate, addCategory, deleteCategory } = useCommissions();
   const [editingCell, setEditingCell] = useState<{ id: string; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+
+  // 플레이오토 분류 매핑 상태
+  const [mappings, setMappings] = useState<Record<string, string>>({});
+  const [mappingLoading, setMappingLoading] = useState(false);
+  const [mappingSaving, setMappingSaving] = useState(false);
+
+  const userId = session?.user?.id;
+
+  // 매핑 로드
+  useEffect(() => {
+    if (!userId) return;
+    fetch("/api/products/playauto-mappings", {
+      headers: { "x-user-id": userId },
+    })
+      .then((r) => r.json())
+      .then((d: { mappings?: Array<{ user_category: string; playauto_code: string }> }) => {
+        const map: Record<string, string> = {};
+        (d.mappings ?? []).forEach((m) => { map[m.user_category] = m.playauto_code; });
+        setMappings(map);
+      })
+      .catch(() => {});
+  }, [userId]);
+
+  const handleMappingChange = (cat: string, code: string) => {
+    setMappings((prev) => ({ ...prev, [cat]: code }));
+  };
+
+  const handleAutoMap = async () => {
+    if (categories.length === 0) return;
+    setMappingLoading(true);
+    try {
+      const res = await fetch("/api/products/playauto-mappings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categories }),
+      });
+      const d = await res.json() as { suggestions?: Array<{ user_category: string; playauto_code: string }> };
+      const map: Record<string, string> = { ...mappings };
+      (d.suggestions ?? []).forEach((s) => { map[s.user_category] = s.playauto_code; });
+      setMappings(map);
+    } catch { /* ignore */ } finally {
+      setMappingLoading(false);
+    }
+  };
+
+  const handleSaveMappings = async () => {
+    if (!userId) return;
+    setMappingSaving(true);
+    try {
+      const rows = Object.entries(mappings).map(([user_category, playauto_code]) => ({
+        user_category,
+        playauto_code,
+      }));
+      await fetch("/api/products/playauto-mappings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-user-id": userId },
+        body: JSON.stringify({ mappings: rows }),
+      });
+    } catch { /* ignore */ } finally {
+      setMappingSaving(false);
+    }
+  };
 
   // 카테고리+플랫폼으로 rate 찾기
   const getRate = useCallback(
@@ -218,6 +283,52 @@ export default function CommissionTab() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* 플레이오토 상품분류 매핑 */}
+      <div className="border border-[var(--border)] rounded-lg p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-medium text-[var(--text-primary)]">플레이오토 상품분류 매핑</h3>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">내보내기 시 상품분류코드와 상품정보제공고시 항목 수가 자동 적용됩니다.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleAutoMap}
+              disabled={mappingLoading || categories.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-violet-600/20 text-violet-400 hover:bg-violet-600/30 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {mappingLoading ? "분석 중..." : "Gemini 자동매핑"}
+            </button>
+            <button
+              onClick={handleSaveMappings}
+              disabled={mappingSaving}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <Save className="w-3.5 h-3.5" />
+              {mappingSaving ? "저장 중..." : "저장"}
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {categories.map((cat) => (
+            <div key={cat} className="flex items-center gap-2 bg-[var(--bg-main)] rounded-lg px-3 py-2">
+              <span className="text-sm text-[var(--text-primary)] flex-1 truncate">{cat}</span>
+              <select
+                value={mappings[cat] ?? "35"}
+                onChange={(e) => handleMappingChange(cat, e.target.value)}
+                className="text-xs bg-[var(--bg-card)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-secondary)] outline-none focus:border-blue-400 shrink-0"
+              >
+                {PLAYAUTO_SCHEMAS.map((s) => (
+                  <option key={s.code} value={s.code}>
+                    {s.code} - {s.name} ({s.fields.length}개)
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* 카테고리 추가 */}

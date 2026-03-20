@@ -1,6 +1,8 @@
 import * as XLSX from "xlsx";
-import type { Order } from "@/types/database";
+import type { Order, Product, CommissionRate } from "@/types/database";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
+import { calcPlatformPrice, calcSettlementPrice, buildRateMap } from "@/lib/product-calculations";
+import { getSchemaByCode, DEFAULT_SCHEMA } from "@/lib/playauto-schema";
 
 /** 발주서 양식 엑셀 생성 (현재 발주서 테이블과 동일한 양식) */
 export function generateOrderExcel(orders: Order[]): { buffer: ArrayBuffer; filename: string } {
@@ -71,6 +73,89 @@ export function generatePlayAutoTrackingExcel(
   XLSX.utils.book_append_sheet(wb, ws, "운송장전송");
   const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
   const filename = `플레이오토_운송장_${today}.xlsx`;
+
+  return { buffer, filename };
+}
+
+/**
+ * 플레이오토 상품 대량등록 엑셀 생성 (스마트스토어 양식)
+ * categoryMappings: 내 카테고리 → 플레이오토 코드 매핑 (없으면 기타재화 35)
+ */
+export function generatePlayAutoProductExcel(
+  products: Product[],
+  metadataList: Array<{ model: string; brand: string; manufacturer: string }>,
+  commissionRates: CommissionRate[],
+  categoryMappings: Record<string, string> = {},
+  smartstoreCategoryCodes: string[] = []  // 상품별 스마트스토어 카테고리코드 (인덱스 순서 일치)
+): { buffer: ArrayBuffer; filename: string } {
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(2);
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const dateStr = `${yy}${mm}${dd}`;
+
+  const rateMap = buildRateMap(commissionRates);
+
+  // 이 배치에서 사용되는 최대 고시 개수를 계산 (컬럼 수 통일)
+  const maxFields = products.reduce((max, p) => {
+    const code = categoryMappings[p.category] ?? DEFAULT_SCHEMA.code;
+    const schema = getSchemaByCode(code);
+    return Math.max(max, schema.fields.length);
+  }, DEFAULT_SCHEMA.fields.length);
+
+  const data = products.map((p, i) => {
+    const settlementPrice = calcSettlementPrice(p.lowest_price, p.margin_rate);
+    const categoryRates = rateMap[p.category] ?? {};
+    const smartstoreRate = categoryRates.smartstore ?? 0;
+    const salePrice = smartstoreRate > 0
+      ? calcPlatformPrice(settlementPrice, smartstoreRate)
+      : p.lowest_price;
+
+    const meta = metadataList[i] ?? { model: "", brand: "", manufacturer: "" };
+    const sellerCode = `${dateStr}${String(i + 1).padStart(3, "0")}`;
+
+    const playautoCode = categoryMappings[p.category] ?? DEFAULT_SCHEMA.code;
+    const schema = getSchemaByCode(playautoCode);
+
+    const row: Record<string, string | number> = {
+      판매자관리코드: sellerCode,
+      카테고리코드: smartstoreCategoryCodes[i] ?? "",
+      "쇼핑몰(계정)": "스마트스토어=redgoom",
+      템플릿코드: "2200901",
+      온라인상품명: p.product_name,
+      판매수량: 2000,
+      판매가: salePrice,
+      공급가: 0,
+      원가: 0,
+      시중가: 0,
+      옵션조합: "옵션없음",
+      원산지: "기타=상세페이지참조",
+      복수원산지여부: "N",
+      과세여부: "과세",
+      배송방법: "무료",
+      배송비: 0,
+      기본이미지: p.thumbnail_url ?? "",
+      상세설명: p.detail_html ?? "",
+      "머리말/꼬리말템플릿코드": 14672,
+      모델명: meta.model,
+      브랜드: meta.brand,
+      제조사: meta.manufacturer,
+      상품분류코드: playautoCode,
+    };
+
+    // 이 상품의 고시 항목 채우기 (해당 카테고리 개수만큼 "상세페이지 참조", 나머지 빈칸)
+    for (let n = 1; n <= maxFields; n++) {
+      row[`상품정보제공고시${n}`] = n <= schema.fields.length ? "상세페이지 참조" : "";
+    }
+
+    return row;
+  });
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "대량등록");
+  const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  const filename = `플레이오토_스마트스토어_${dateStr}.xlsx`;
 
   return { buffer, filename };
 }

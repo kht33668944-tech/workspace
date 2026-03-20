@@ -1,0 +1,75 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
+
+/** GET: 스마트스토어 카테고리코드 목록 조회 */
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("smartstore_category_codes")
+    .select("id, category_code, category_type, category_name, created_at")
+    .eq("user_id", userId)
+    .order("category_type")
+    .order("category_name");
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ codes: data ?? [] });
+}
+
+/** POST: 카테고리코드 일괄 저장 (upsert) */
+export async function POST(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { codes } = (await req.json()) as {
+    codes: Array<{ category_code: string; category_type: string; category_name: string }>;
+  };
+  if (!Array.isArray(codes) || codes.length === 0) {
+    return NextResponse.json({ error: "데이터가 없습니다." }, { status: 400 });
+  }
+
+  const supabase = getSupabase();
+  const rows = codes.map((c) => ({
+    user_id: userId,
+    category_code: c.category_code.trim(),
+    category_type: c.category_type.trim(),
+    category_name: c.category_name.trim(),
+  }));
+
+  const { error } = await supabase
+    .from("smartstore_category_codes")
+    .upsert(rows, { onConflict: "user_id,category_code" });
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
+
+/** DELETE: 특정 코드 삭제 */
+export async function DELETE(req: NextRequest) {
+  const userId = req.headers.get("x-user-id");
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { ids } = (await req.json()) as { ids: string[] };
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return NextResponse.json({ error: "삭제할 항목이 없습니다." }, { status: 400 });
+  }
+
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("smartstore_category_codes")
+    .delete()
+    .eq("user_id", userId)
+    .in("id", ids);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}

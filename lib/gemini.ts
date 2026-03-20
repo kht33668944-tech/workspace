@@ -251,6 +251,169 @@ export async function groundedSearch(prompt: string): Promise<string | null> {
 }
 
 /**
+ * 사용자 카테고리 목록 → 플레이오토 상품분류코드 자동 매핑 (Gemini)
+ * @param userCategories 사용자 카테고리명 배열
+ * @param playautoSchemas 플레이오토 분류 목록 (code + name)
+ * @returns 각 카테고리에 대응하는 플레이오토 코드 배열
+ */
+export async function suggestPlayautoCategories(
+  userCategories: string[],
+  playautoSchemas: Array<{ code: string; name: string }>
+): Promise<string[]> {
+  const fallback = userCategories.map(() => "35");
+  if (!process.env.GEMINI_API_KEY || userCategories.length === 0) return fallback;
+
+  const schemaList = playautoSchemas.map((s) => `${s.code}: ${s.name}`).join("\n");
+  const categoryList = userCategories.map((c, i) => `${i + 1}. ${c}`).join("\n");
+
+  const result = await generateText(
+    `아래 "내 카테고리 목록"을 "플레이오토 분류 목록" 중 가장 적합한 것으로 매핑하세요.
+
+플레이오토 분류 목록:
+${schemaList}
+
+내 카테고리 목록:
+${categoryList}
+
+규칙:
+- 반드시 플레이오토 분류 코드(숫자)만 출력
+- 적합한 분류가 없으면 35(기타재화) 출력
+- 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
+["코드1", "코드2", ...]
+
+카테고리 개수: ${userCategories.length}개, 배열 항목도 반드시 ${userCategories.length}개`
+  );
+
+  if (!result) return fallback;
+
+  try {
+    const jsonMatch = result.match(/\[[\s\S]*?\]/);
+    if (!jsonMatch) return fallback;
+    const parsed = JSON.parse(jsonMatch[0]) as string[];
+    if (!Array.isArray(parsed)) return fallback;
+    const validCodes = new Set(playautoSchemas.map((s) => s.code));
+    return userCategories.map((_, i) => {
+      const code = String(parsed[i] ?? "35").trim();
+      return validCodes.has(code) ? code : "35";
+    });
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * 상품 목록 → 스마트스토어 카테고리코드 자동 매핑 (Gemini)
+ * @param products 상품 목록 (product_name, category, source_category)
+ * @param availableCodes 사용자가 등록한 스마트스토어 카테고리코드 목록
+ * @returns 각 상품에 대응하는 카테고리코드 (없으면 "" 반환)
+ */
+export async function suggestSmartStoreCategoryCodes(
+  products: Array<{ product_name: string; category: string; source_category: string }>,
+  availableCodes: Array<{ category_code: string; category_type: string; category_name: string }>
+): Promise<string[]> {
+  const fallback = products.map(() => "");
+  if (!process.env.GEMINI_API_KEY || products.length === 0 || availableCodes.length === 0) return fallback;
+
+  const codeList = availableCodes
+    .map((c) => `${c.category_code}: [${c.category_type}] ${c.category_name}`)
+    .join("\n");
+
+  const productList = products
+    .map((p, i) => `${i + 1}. 상품명: ${p.product_name} | 내카테고리: ${p.category || "없음"} | 원본카테고리: ${p.source_category || "없음"}`)
+    .join("\n");
+
+  const result = await generateText(
+    `아래 상품 목록을 분석해서 각 상품에 가장 적합한 스마트스토어 카테고리코드를 선택하세요.
+
+스마트스토어 카테고리코드 목록 (코드: [분류] 카테고리명):
+${codeList}
+
+상품 목록:
+${productList}
+
+규칙:
+- 반드시 위 카테고리코드 목록에 있는 코드 숫자만 선택
+- 적합한 카테고리가 없으면 빈 문자열("") 출력
+- 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
+["코드1", "코드2", ...]
+
+상품 개수: ${products.length}개, 배열 항목도 반드시 ${products.length}개`
+  );
+
+  if (!result) return fallback;
+
+  try {
+    const jsonMatch = result.match(/\[[\s\S]*?\]/);
+    if (!jsonMatch) return fallback;
+    const parsed = JSON.parse(jsonMatch[0]) as string[];
+    if (!Array.isArray(parsed)) return fallback;
+    const validCodes = new Set(availableCodes.map((c) => c.category_code));
+    return products.map((_, i) => {
+      const code = String(parsed[i] ?? "").trim();
+      return validCodes.has(code) ? code : "";
+    });
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * 상품명 배열에서 브랜드/모델명/제조사를 일괄 추출
+ * 플레이오토 대량등록 양식 생성 시 사용
+ * 한 번의 Gemini 호출로 N개 상품 메타데이터 추출
+ */
+export async function extractProductMetadataBatch(
+  productNames: string[]
+): Promise<Array<{ model: string; brand: string; manufacturer: string }>> {
+  const empty = productNames.map(() => ({ model: "", brand: "", manufacturer: "" }));
+  if (!process.env.GEMINI_API_KEY || productNames.length === 0) return empty;
+
+  const numbered = productNames.map((n, i) => `${i + 1}. ${n}`).join("\n");
+  const result = await generateText(
+    `아래 상품명 목록에서 각 상품의 브랜드(brand), 모델명(model), 제조사(manufacturer)를 추출하세요.
+
+상품명 목록:
+${numbered}
+
+규칙:
+- 브랜드: 제품을 판매하는 브랜드명 (예: 삼양, 코카콜라, CJ제일제당)
+- 모델명: 제품 고유 모델명/제품명 (예: 불닭볶음면, 제로, 햇반)
+- 제조사: 실제 제조하는 회사. 브랜드와 같으면 브랜드명 그대로 출력. OEM이면 실제 제조사 출력. 절대 빈 문자열 금지 — 모르면 브랜드명을 그대로 사용
+- 특수문자(&, /, (, ), %, + 등) 절대 사용 금지 — 한글, 영문, 숫자, 공백만 허용 (예: 동원 F&B → 동원 FB, CJ제일제당 → CJ제일제당)
+- 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
+
+[
+  {"model": "모델명1", "brand": "브랜드1", "manufacturer": "제조사1"},
+  {"model": "모델명2", "brand": "브랜드2", "manufacturer": "제조사2"}
+]
+
+상품 개수: ${productNames.length}개, JSON 배열 항목도 반드시 ${productNames.length}개`
+  );
+
+  if (!result) return empty;
+
+  try {
+    const jsonMatch = result.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return empty;
+    const parsed = JSON.parse(jsonMatch[0]) as Array<{
+      model?: string;
+      brand?: string;
+      manufacturer?: string;
+    }>;
+    if (!Array.isArray(parsed)) return empty;
+    const stripSpecial = (s: string) => s.replace(/[^가-힣a-zA-Z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+    return productNames.map((_, i) => {
+      const brand = stripSpecial(parsed[i]?.brand ?? "");
+      const model = stripSpecial(parsed[i]?.model ?? "");
+      const manufacturer = stripSpecial(parsed[i]?.manufacturer ?? "") || brand;
+      return { model, brand, manufacturer };
+    });
+  } catch {
+    return empty;
+  }
+}
+
+/**
  * 상품명 정규화 전용 헬퍼
  * 구조: 브랜드 + 제품명 + 옵션(용량/무게) + 수량
  */

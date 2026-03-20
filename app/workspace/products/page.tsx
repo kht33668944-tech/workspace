@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Plus, Trash2, Search, Settings2, Package, Download, Images, Play } from "lucide-react";
+import { Plus, Trash2, Search, Settings2, Package, Download, Images, Play, FileSpreadsheet, LayoutList } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
@@ -11,11 +11,13 @@ import { useAuth } from "@/context/AuthContext";
 import ProductTable from "@/components/workspace/products/product-table";
 import CommissionTab from "@/components/workspace/products/commission-tab";
 import ImageTab from "@/components/workspace/products/image-tab";
+import SmartStoreCategoryTab from "@/components/workspace/products/smartstore-category-tab";
 import GmarketImportModal from "@/components/workspace/products/gmarket-import-modal";
 import BatchDetailModal from "@/components/workspace/products/batch-detail-modal";
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
+import { downloadExcelFromBase64 } from "@/lib/excel-export";
 
-type ActiveTab = "products" | "images" | "commission";
+type ActiveTab = "products" | "images" | "commission" | "smartstore-category";
 
 export default function ProductsPage() {
   usePreventBrowserSave();
@@ -33,6 +35,7 @@ export default function ProductsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
@@ -114,6 +117,29 @@ export default function ProductsPage() {
     return insertProducts(rows as ProductInsert[]);
   };
 
+  const handlePlayAutoExport = async () => {
+    const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
+    if (ids.length === 0) return;
+    setExporting(true);
+    try {
+      const res = await fetch("/api/products/playauto-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productIds: ids, platform: "smartstore" }),
+      });
+      const json = await res.json() as { base64?: string; filename?: string; error?: string };
+      if (!res.ok || !json.base64 || !json.filename) {
+        alert(json.error ?? "내보내기 실패");
+        return;
+      }
+      downloadExcelFromBase64(json.base64, json.filename);
+    } catch {
+      alert("내보내기 중 오류가 발생했습니다.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const TAB_CLASSES = (tab: ActiveTab) =>
     `flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
       activeTab === tab
@@ -137,9 +163,15 @@ export default function ProductsPage() {
           <Settings2 className="w-4 h-4" />
           수수료 설정
         </button>
+        <button onClick={() => setActiveTab("smartstore-category")} className={TAB_CLASSES("smartstore-category")}>
+          <LayoutList className="w-4 h-4" />
+          스토어 카테고리
+        </button>
       </div>
 
       {activeTab === "commission" && <CommissionTab />}
+
+      {activeTab === "smartstore-category" && <SmartStoreCategoryTab />}
 
       {activeTab === "images" && (
         <ImageTab products={allProducts} onUpdate={updateProduct} onDelete={deleteProducts} />
@@ -188,6 +220,14 @@ export default function ProductsPage() {
                   </button>
                 </>
               )}
+              <button
+                onClick={handlePlayAutoExport}
+                disabled={exporting}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm bg-violet-600/20 text-violet-400 hover:bg-violet-600/30 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                {exporting ? "생성 중..." : `플레이오토${selectedIds.size > 0 ? ` ${selectedIds.size}개` : ""} 내보내기`}
+              </button>
               <button
                 onClick={() => setImportModalOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"

@@ -157,3 +157,27 @@ export interface Product {
 
 export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at">;
 export type ProductUpdate = Partial<Omit<Product, "id" | "user_id" | "created_at" | "updated_at">>;
+
+// ─── 플레이오토 카테고리 매핑 ───
+export interface PlayautoCategoryMapping {
+  id: string;
+  user_id: string;
+  user_category: string;    // 내 수수료 카테고리명
+  playauto_code: string;    // 플레이오토 상품분류코드 (예: "21")
+  created_at: string;
+  updated_at: string;
+}
+
+export type PlayautoCategoryMappingUpsert = Pick<PlayautoCategoryMapping, "user_category" | "playauto_code">;
+
+// ─── 스마트스토어 카테고리코드 ───
+export interface SmartStoreCategoryCode {
+  id: string;
+  user_id: string;
+  category_code: string;  // 스마트스토어 카테고리코드 (예: "6219426")
+  category_type: string;  // 분류 (예: "가공식품")
+  category_name: string;  // 카테고리명 (예: "생수")
+  created_at: string;
+}
+
+export type SmartStoreCategoryCodeInsert = Pick<SmartStoreCategoryCode, "category_code" | "category_type" | "category_name">;
