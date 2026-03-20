@@ -4,7 +4,7 @@ import { calcSettlementPrice, calcNetMargin, calcPlatformPrice } from "@/lib/pro
 
 export const EDITABLE_KEYS = new Set([
   "product_name", "lowest_price",
-  "margin_rate", "category", "purchase_url", "memo",
+  "margin_rate", "category", "purchase_url",
 ]);
 export const NUMERIC_KEYS = new Set(["lowest_price", "margin_rate"]);
 // 자동 계산 컬럼 (편집 불가)
@@ -27,7 +27,8 @@ export const COLUMNS: Col[] = [
   { key: "price_coupang", label: "쿠팡", minWidth: 80, align: "right" },
   { key: "price_myeolchi", label: "멸치쇼핑", minWidth: 80, align: "right" },
   { key: "purchase_url", label: "상품 구매 URL", minWidth: 150 },
-  { key: "memo", label: "메모", minWidth: 100 },
+  { key: "thumbnail_url", label: "썸네일 URL", minWidth: 80 },
+  { key: "detail_html", label: "상세페이지", minWidth: 80 },
 ];
 export const COL_COUNT = COLUMNS.length;
 
@@ -126,20 +127,50 @@ export function formatCell(
     }, n ? `${n}%` : "-");
   }
 
-  if (key === "purchase_url") {
+  if (key === "purchase_url" || key === "thumbnail_url") {
     const url = String(val);
     if (!url) return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
+    const display = url.replace(/^https?:\/\//, "").slice(0, 20) + (url.length > 28 ? "..." : "");
+    if (key === "thumbnail_url") {
+      return React.createElement("span", {
+        title: url, className: "text-[var(--text-secondary)] text-xs truncate block max-w-full",
+      }, display);
+    }
     return React.createElement("a", {
       href: url, target: "_blank", rel: "noopener noreferrer",
       className: "text-blue-400 text-xs truncate block max-w-full hover:underline",
       title: url, onClick: (e: React.MouseEvent) => e.stopPropagation(),
-    }, url.replace(/^https?:\/\//, "").slice(0, 35) + (url.length > 45 ? "..." : ""));
+    }, display);
+  }
+
+  if (key === "detail_html") {
+    const html = String(val);
+    const display = html.slice(0, 20) + (html.length > 20 ? "..." : "");
+    return React.createElement("span", {
+      title: html,
+      className: "text-[var(--text-secondary)] text-xs truncate block max-w-full",
+    }, display);
   }
 
   if (key === "category") {
+    const CATEGORY_COLORS = [
+      "bg-purple-500/20 text-purple-400",
+      "bg-blue-500/20 text-blue-400",
+      "bg-green-500/20 text-green-400",
+      "bg-orange-500/20 text-orange-400",
+      "bg-pink-500/20 text-pink-400",
+      "bg-teal-500/20 text-teal-400",
+      "bg-yellow-500/20 text-yellow-400",
+      "bg-red-500/20 text-red-400",
+      "bg-indigo-500/20 text-indigo-400",
+      "bg-cyan-500/20 text-cyan-400",
+    ];
+    const str = String(val);
+    const hash = str.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    const colorClass = CATEGORY_COLORS[hash % CATEGORY_COLORS.length];
     return React.createElement("span", {
-      className: "inline-block px-2 py-0.5 rounded text-xs font-medium bg-purple-500/20 text-purple-400",
-    }, String(val));
+      className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${colorClass}`,
+    }, str);
   }
 
   if (NUMERIC_KEYS.has(key)) {

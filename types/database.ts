@@ -150,6 +150,7 @@ export interface Product {
   source_platform: string | null; // 'gmarket' | 'auction' 등
   detail_html: string | null; // 플레이오토 대량등록용 상세페이지 HTML
   detail_image_url: string | null; // AI 생성 상세페이지 이미지 URL
+  registration_status: string; // 상품 등록 상태
   created_at: string;
   updated_at: string;
 }

@@ -402,6 +402,10 @@ function ProductTable({
     setSort(dir ? { key, dir } : null);
   }, []);
 
+  const handleStatusChange = useCallback((id: string, status: string) => {
+    onUpdate(id, { registration_status: status });
+  }, [onUpdate]);
+
   if (loading) return (
     <div className="flex items-center justify-center py-20">
       <div className="w-6 h-6 border-2 border-[var(--text-muted)] border-t-[var(--text-primary)] rounded-full animate-spin" />
@@ -435,6 +439,9 @@ function ProductTable({
             <tr>
               <th className={`px-2 py-2.5 sticky left-0 bg-[var(--table-header-bg)] z-30 border-r border-[var(--border-subtle)] ${isMobile ? "w-11" : "w-10"}`}>
                 <input type="checkbox" checked={allSelected} onChange={onSelectAll} className={`accent-blue-500 ${isMobile ? "w-5 h-5" : ""}`} />
+              </th>
+              <th className="px-2 py-2.5 text-xs font-medium text-(--text-tertiary) whitespace-nowrap border-r border-(--border-subtle) text-left" style={{ width: 72, minWidth: 72 }}>
+                등록상태
               </th>
               {visibleColumns.map(col => (
                 <ResizableHeader
@@ -477,6 +484,7 @@ function ProductTable({
                   onCommit={handleCommit} onBlurSave={saveValue}
                   onEditValueChange={handleEditValueChange}
                   onSelectToggle={onSelectToggle} onFillStart={handleFillStart}
+                  onStatusChange={handleStatusChange}
                   isMobile={isMobile}
                   visibleColumns={visibleColumns}
                   rateMap={rateMap}

@@ -7,11 +7,13 @@ import { downloadExcelFromBase64 } from "@/lib/excel-export";
 import type { ExcelArchive } from "@/types/database";
 
 type ArchiveMeta = Omit<ExcelArchive, "file_data">;
+type TabType = "playauto_tracking" | "order_export";
 
 export default function ArchivePage() {
   const { session } = useAuth();
   const [archives, setArchives] = useState<ArchiveMeta[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<TabType>("playauto_tracking");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
@@ -36,6 +38,14 @@ export default function ArchivePage() {
   useEffect(() => {
     fetchArchives();
   }, [fetchArchives]);
+
+  // 탭 전환 시 선택 초기화
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+    setSelectedIds(new Set());
+  };
+
+  const tabArchives = archives.filter((a) => a.file_type === activeTab);
 
   const handleDownload = async (id: string, fileName: string) => {
     if (!session?.access_token) return;
@@ -65,10 +75,10 @@ export default function ArchivePage() {
   };
 
   const handleSelectAll = () => {
-    if (selectedIds.size === archives.length) {
+    if (selectedIds.size === tabArchives.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(archives.map((a) => a.id)));
+      setSelectedIds(new Set(tabArchives.map((a) => a.id)));
     }
   };
 
@@ -113,13 +123,8 @@ export default function ArchivePage() {
     return Math.max(0, days);
   };
 
-  const fileTypeLabel = (type: string) => {
-    return type === "order_export" ? "발주서" : "플레이오토 운송장";
-  };
-
-  const fileTypeIcon = (type: string) => {
-    return type === "order_export" ? FileSpreadsheet : Truck;
-  };
+  const trackingCount = archives.filter((a) => a.file_type === "playauto_tracking").length;
+  const orderCount = archives.filter((a) => a.file_type === "order_export").length;
 
   return (
     <div className="space-y-4">
@@ -143,37 +148,76 @@ export default function ArchivePage() {
         )}
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-[var(--border-subtle)]">
+        <button
+          onClick={() => handleTabChange("playauto_tracking")}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+            activeTab === "playauto_tracking"
+              ? "border-purple-400 text-purple-400"
+              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+          }`}
+        >
+          <Truck className="w-4 h-4" />
+          플레이오토 운송장
+          {trackingCount > 0 && (
+            <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === "playauto_tracking" ? "bg-purple-500/20 text-purple-400" : "bg-[var(--bg-hover)] text-[var(--text-muted)]"}`}>
+              {trackingCount}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => handleTabChange("order_export")}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+            activeTab === "order_export"
+              ? "border-blue-400 text-blue-400"
+              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+          }`}
+        >
+          <FileSpreadsheet className="w-4 h-4" />
+          발주서
+          {orderCount > 0 && (
+            <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === "order_export" ? "bg-blue-500/20 text-blue-400" : "bg-[var(--bg-hover)] text-[var(--text-muted)]"}`}>
+              {orderCount}
+            </span>
+          )}
+        </button>
+      </div>
+
       {/* Content */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-6 h-6 text-[var(--text-muted)] animate-spin" />
         </div>
-      ) : archives.length === 0 ? (
+      ) : tabArchives.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-[var(--text-muted)]">
           <Archive className="w-12 h-12 mb-3 opacity-30" />
           <p className="text-sm">보관된 파일이 없습니다</p>
-          <p className="text-xs mt-1">배송조회 수집 후 엑셀 내보내기를 하면 자동으로 저장됩니다</p>
+          <p className="text-xs mt-1">
+            {activeTab === "playauto_tracking"
+              ? "운송장 수집 후 자동으로 저장됩니다"
+              : "발주서 엑셀 내보내기 시 자동으로 저장됩니다"}
+          </p>
         </div>
       ) : (
         <div className="space-y-1">
-          {/* 전체 선택 */}
+          {/* 전체 선택 헤더 */}
           <div className="flex items-center gap-3 px-4 py-2 text-xs text-[var(--text-muted)]">
             <input
               type="checkbox"
-              checked={selectedIds.size === archives.length && archives.length > 0}
+              checked={selectedIds.size === tabArchives.length && tabArchives.length > 0}
               onChange={handleSelectAll}
               className="w-3.5 h-3.5 rounded border-[var(--border-strong)] bg-[var(--bg-hover)] accent-blue-500"
             />
             <span className="w-48">파일명</span>
-            <span className="w-24">유형</span>
             <span className="w-16 text-center">건수</span>
             <span className="w-40">생성일</span>
             <span className="w-20 text-center">남은 기간</span>
             <span className="w-20 text-center ml-auto">다운로드</span>
           </div>
 
-          {archives.map((archive) => {
-            const Icon = fileTypeIcon(archive.file_type);
+          {tabArchives.map((archive) => {
+            const Icon = activeTab === "order_export" ? FileSpreadsheet : Truck;
             const remaining = getRemainingDays(archive.expires_at);
             const isExpiringSoon = remaining <= 2;
 
@@ -194,17 +238,9 @@ export default function ArchivePage() {
                 />
 
                 <div className="w-48 flex items-center gap-2 min-w-0">
-                  <Icon className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
+                  <Icon className={`w-4 h-4 shrink-0 ${activeTab === "order_export" ? "text-blue-400" : "text-purple-400"}`} />
                   <span className="text-sm text-[var(--text-primary)] truncate">{archive.file_name}</span>
                 </div>
-
-                <span className={`w-24 text-xs px-2 py-0.5 rounded-full border text-center ${
-                  archive.file_type === "order_export"
-                    ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                    : "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                }`}>
-                  {fileTypeLabel(archive.file_type)}
-                </span>
 
                 <span className="w-16 text-sm text-[var(--text-tertiary)] text-center">{archive.order_count}건</span>
 

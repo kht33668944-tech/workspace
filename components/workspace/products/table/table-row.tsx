@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback, memo } from "react";
 import type { Product, CommissionPlatform } from "@/types/database";
 import { COLUMNS, EDITABLE_KEYS, COMPUTED_KEYS, formatCell, type Col } from "./table-utils";
+import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
 
 interface RowProps {
   product: Product; rowIdx: number; colWidths: Record<string, number>;
@@ -18,6 +19,7 @@ interface RowProps {
   onEditValueChange: (r: number, c: number, v: string) => void;
   onSelectToggle: (id: string) => void;
   onFillStart: (r: number, c: number, v: unknown) => void;
+  onStatusChange: (id: string, status: string) => void;
   isMobile?: boolean;
   visibleColumns?: Col[];
   rateMap: Record<string, Record<CommissionPlatform, number>>;
@@ -28,9 +30,19 @@ const MemoRow = memo(function Row({
   product, rowIdx, colWidths, isChecked, activeCol, editingCol, initialChar,
   selMinC, selMaxC, showFillHandle, fillHandleCol, fillHighlightCol,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onCommit, onBlurSave, onEditValueChange, onSelectToggle, onFillStart,
-  isMobile, visibleColumns, rateMap, categories,
+  onStatusChange, isMobile, visibleColumns, rateMap, categories,
 }: RowProps) {
   const [editValue, setEditValue] = useState("");
+  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const handleCopyCell = useCallback((key: string, text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 1500);
+    });
+  }, []);
+  const statusDropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectRef = useRef<HTMLSelectElement>(null);
   const editRef = useRef("");
@@ -88,6 +100,17 @@ const MemoRow = memo(function Row({
     onCommit(rowIdx, editingCol, e.target.value, "none");
   }, [rowIdx, editingCol, onCommit]);
 
+  useEffect(() => {
+    if (!statusDropdownOpen) return;
+    const h = (e: MouseEvent) => {
+      if (statusDropdownRef.current && !statusDropdownRef.current.contains(e.target as Node)) {
+        setStatusDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [statusDropdownOpen]);
+
   return (
     <tr className={`border-t border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)] ${isMobile ? "cursor-pointer active:bg-[var(--bg-hover)]" : ""}`}>
       <td className={`px-2 ${isMobile ? "py-2" : "py-1.5"} sticky left-0 bg-[var(--cell-sticky-bg)] z-10 border-r border-[var(--border-subtle)]`}>
@@ -98,6 +121,31 @@ const MemoRow = memo(function Row({
           onClick={(e) => e.stopPropagation()}
           className={`accent-blue-500 ${isMobile ? "w-5 h-5" : ""}`}
         />
+      </td>
+      <td className={`relative px-1.5 ${isMobile ? "py-2" : "py-1.5"} border-r border-(--border-subtle)`} style={isMobile ? undefined : { width: 72, minWidth: 72, maxWidth: 72 }}>
+        <div ref={statusDropdownRef} className="relative">
+          <button
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); setStatusDropdownOpen(o => !o); }}
+            className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity whitespace-nowrap ${REGISTRATION_STATUS_COLORS[product.registration_status] || "bg-gray-500/20 text-gray-400"}`}
+          >
+            {product.registration_status || "등록전"}
+          </button>
+          {statusDropdownOpen && (
+            <div className="absolute left-0 top-full mt-1 z-50 bg-(--bg-card) border border-(--border) rounded-lg shadow-xl min-w-[90px]" onClick={e => e.stopPropagation()}>
+              {REGISTRATION_STATUSES.map(s => (
+                <button
+                  key={s}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); onStatusChange(product.id, s); setStatusDropdownOpen(false); }}
+                  className={`w-full text-left px-2.5 py-1.5 text-xs hover:bg-(--bg-hover) transition-colors flex items-center gap-1.5 ${product.registration_status === s ? "font-medium" : ""}`}
+                >
+                  <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${REGISTRATION_STATUS_COLORS[s]}`}>{s}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </td>
       {cols.map((col) => {
         const ci = COLUMNS.findIndex(c => c.key === col.key);
@@ -149,6 +197,19 @@ const MemoRow = memo(function Row({
                   className="absolute left-0 top-0 h-full min-w-[280px] w-max bg-[var(--bg-card)] border-2 border-blue-500 rounded px-1.5 text-xs text-[var(--text-primary)] outline-none z-30 shadow-lg"
                 />
               )
+            ) : (col.key === "thumbnail_url" || col.key === "detail_html") && val ? (
+              <div
+                className={`text-xs truncate min-h-[22px] leading-[22px] px-1 cursor-pointer transition-colors ${
+                  copiedKey === col.key
+                    ? "text-green-400"
+                    : "hover:text-blue-400"
+                } ${isSelected ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""}`}
+                title={copiedKey === col.key ? "복사됨!" : `클릭하여 전체 복사\n${String(val)}`}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); handleCopyCell(col.key, String(val)); }}
+              >
+                {copiedKey === col.key ? "✓ 복사됨" : formatCell(col.key, val, product, rateMap)}
+              </div>
             ) : (
               <div className={`text-xs truncate min-h-[22px] leading-[22px] px-1 ${
                 isSelected ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""
@@ -182,7 +243,8 @@ const MemoRow = memo(function Row({
   prev.isMobile === next.isMobile &&
   prev.visibleColumns === next.visibleColumns &&
   prev.rateMap === next.rateMap &&
-  prev.categories === next.categories
+  prev.categories === next.categories &&
+  prev.onStatusChange === next.onStatusChange
 );
 
 export default MemoRow;
