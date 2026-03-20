@@ -264,9 +264,9 @@ export async function POST(request: NextRequest) {
   const specsList: ProductSpecs[] = [];
 
   if (detailImageUrls.length > 0) {
-    const urlsToOcr = detailImageUrls.slice(0, 8);
+    const urlsToOcr = detailImageUrls.slice(0, 5);
     const ocrResults = await Promise.allSettled(
-      urlsToOcr.map((url) => analyzeImageFromUrl(url, OCR_PROMPT))
+      urlsToOcr.map((url) => analyzeImageFromUrl(url, OCR_PROMPT, "gemini-2.0-flash"))
     );
 
     for (const result of ocrResults) {
