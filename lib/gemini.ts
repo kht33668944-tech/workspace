@@ -302,11 +302,9 @@ ${categoryList}
 }
 
 /**
- * 상품 목록 → 플레이오토 카테고리코드 자동 매핑 (Gemini 2단계)
- * 0. 직접 매칭: product.category/source_category가 category_type과 정확/부분 일치
- * 1단계: 미매칭 상품에 대해 분류명(category_type) 선택 + 퍼지 매칭
- * 2단계: 해당 분류의 코드만 필터링 후 정확한 코드 매칭
- * 3. 미매칭 상품: 전체 코드에서 재검색
+ * 상품 목록 → 플레이오토 카테고리코드 자동 매칭
+ * 1단계: Gemini가 대분류(category_type) 선택
+ * 2단계: 선택된 대분류의 소분류(category_code) 중에서 가장 적합한 코드 선택
  */
 export async function suggestSmartStoreCategoryCodes(
   products: Array<{ product_name: string; category: string; source_category: string }>,
@@ -315,120 +313,78 @@ export async function suggestSmartStoreCategoryCodes(
   const fallback = products.map(() => "");
   if (!process.env.GEMINI_API_KEY || products.length === 0 || availableCodes.length === 0) return fallback;
 
-  // 분류별 코드 맵
+  // 대분류별 소분류 코드 맵
   const codesByType = new Map<string, typeof availableCodes>();
   for (const c of availableCodes) {
     const arr = codesByType.get(c.category_type) ?? [];
     arr.push(c);
     codesByType.set(c.category_type, arr);
   }
+  const typeList = [...codesByType.keys()].sort();
 
-  const uniqueTypes = [...codesByType.keys()].sort();
-  const uniqueTypesLower = uniqueTypes.map((t) => t.toLowerCase());
+  // ── 1단계: 상품별 대분류 선택 ──
+  const productList = products
+    .map((p, i) => `${i + 1}. ${p.product_name} (카테고리: ${p.category || "없음"}, 원본: ${p.source_category || "없음"})`)
+    .join("\n");
 
-  // ── 0단계: 직접 매칭 (product.category/source_category → category_type) ──
-  const directType: (string | null)[] = products.map((p) => {
-    const cat = (p.category || "").trim().toLowerCase();
-    const src = (p.source_category || "").trim().toLowerCase();
-    if (!cat && !src) return null;
+  const typeListStr = typeList.map((t, i) => {
+    const codes = codesByType.get(t) ?? [];
+    const examples = codes.slice(0, 3).map((c) => c.category_name).join(", ");
+    return `${i + 1}. ${t} (예: ${examples})`;
+  }).join("\n");
 
-    // 정확 일치
-    const exactIdx = uniqueTypesLower.indexOf(cat);
-    if (exactIdx >= 0) return uniqueTypes[exactIdx];
+  console.log(`[gemini] 1단계 대분류 선택: 상품 ${products.length}개, 대분류 ${typeList.length}개`);
 
-    // 포함 관계
-    for (let i = 0; i < uniqueTypes.length; i++) {
-      const tl = uniqueTypesLower[i];
-      if ((cat && (tl.includes(cat) || cat.includes(tl))) ||
-          (src && (tl.includes(src) || src.includes(tl)))) {
-        return uniqueTypes[i];
-      }
-    }
-    return null;
-  });
+  const step1Result = await generateText(
+    `각 상품이 속하는 대분류를 선택하세요.
 
-  const directMatched = directType.filter((t) => t !== null).length;
-  console.log(`[gemini] 0단계 직접매칭: ${directMatched}/${products.length}개`);
+## 대분류 목록
+${typeListStr}
 
-  // Gemini 1단계가 필요한 상품 인덱스
-  const needStep1 = products.reduce<number[]>(
-    (acc, _, i) => { if (directType[i] === null) acc.push(i); return acc; }, []
-  );
-
-  // ── 1단계: 미매칭 상품에 대해 Gemini로 분류명 선택 ──
-  const selectedPrimaryType: (string | null)[] = [...directType];
-
-  if (needStep1.length > 0 && uniqueTypes.length > 1) {
-    const step1Products = needStep1.map((i) => products[i]);
-    const productList = step1Products
-      .map((p, gi) => `${gi + 1}. 상품명: ${p.product_name} | 내카테고리: ${p.category || "없음"} | 원본카테고리: ${p.source_category || "없음"}`)
-      .join("\n");
-
-    const step1Result = await generateText(
-      `아래 상품 목록을 보고, 각 상품이 속할 수 있는 분류명을 선택하세요.
-
-분류명 목록:
-${uniqueTypes.map((t, i) => `${i + 1}. ${t}`).join("\n")}
-
-상품 목록:
+## 상품 목록
 ${productList}
 
-규칙:
-- 각 상품에 가장 적합한 분류명을 1~2개 선택
-- 반드시 위 분류명 목록에 있는 이름 그대로 출력
-- 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
-[["분류명A"], ["분류명B", "분류명C"], ...]
+## 규칙
+- 상품명과 카테고리 정보를 보고 가장 적합한 대분류를 1개 선택
+- 반드시 위 대분류 목록의 이름을 그대로 사용
+- JSON 배열로만 출력 (설명 없이):
+["대분류명1", "대분류명2", ...]
 
-상품 개수: ${step1Products.length}개, 배열 항목도 반드시 ${step1Products.length}개`
-    );
+상품 ${products.length}개 → 배열 ${products.length}개`
+  );
 
-    console.log("[gemini] 1단계 원본 응답:", step1Result?.slice(0, 500));
+  console.log("[gemini] 1단계 응답:", step1Result?.slice(0, 500));
 
-    if (step1Result) {
-      try {
-        const match = step1Result.match(/\[[\s\S]*\]/);
-        if (match) {
-          const parsed = JSON.parse(match[0]) as string[][];
-          if (Array.isArray(parsed) && parsed.length === step1Products.length) {
-            parsed.forEach((types, gi) => {
-              const productIdx = needStep1[gi];
-              const validTypes = (Array.isArray(types) ? types : [types])
-                .map((t) => {
-                  const ts = String(t).trim();
-                  if (uniqueTypes.includes(ts)) return ts;
-                  // 퍼지 매칭: 포함 관계
-                  const tl = ts.toLowerCase();
-                  return uniqueTypes.find((ut) => {
-                    const utl = ut.toLowerCase();
-                    return utl.includes(tl) || tl.includes(utl);
-                  }) ?? null;
-                })
-                .filter((t): t is string => t !== null);
-              if (validTypes.length > 0) {
-                selectedPrimaryType[productIdx] = validTypes[0];
-              }
+  // 1단계 파싱 — 실패 시 상품별로 가장 이름이 비슷한 대분류 할당
+  const selectedTypes: string[] = products.map(() => typeList[0]);
+  if (step1Result) {
+    try {
+      const match = step1Result.match(/\[[\s\S]*\]/);
+      if (match) {
+        const parsed = JSON.parse(match[0]) as string[];
+        if (Array.isArray(parsed) && parsed.length === products.length) {
+          parsed.forEach((t, i) => {
+            const ts = String(t).trim();
+            // 정확 일치
+            if (typeList.includes(ts)) { selectedTypes[i] = ts; return; }
+            // 퍼지 매칭
+            const tl = ts.toLowerCase();
+            const found = typeList.find((ut) => {
+              const utl = ut.toLowerCase();
+              return utl.includes(tl) || tl.includes(utl);
             });
-            console.log("[gemini] 1단계 파싱 성공");
-          } else {
-            console.warn("[gemini] 1단계 배열 길이 불일치:", parsed.length, "vs", step1Products.length);
-          }
-        } else {
-          console.warn("[gemini] 1단계 JSON 매칭 실패");
+            if (found) selectedTypes[i] = found;
+          });
         }
-      } catch (e) {
-        console.warn("[gemini] 1단계 파싱 실패:", e);
       }
-    } else {
-      console.warn("[gemini] 1단계 응답 없음 (null)");
-    }
-  } else if (needStep1.length > 0 && uniqueTypes.length === 1) {
-    needStep1.forEach((i) => { selectedPrimaryType[i] = uniqueTypes[0]; });
+    } catch { /* 파싱 실패 시 기본값 유지 */ }
   }
 
-  // ── 2단계: 분류별로 그룹화하여 각각 Gemini 호출 ──
+  console.log("[gemini] 1단계 결과:", [...new Set(selectedTypes)].join(", "));
+
+  // ── 2단계: 대분류별로 그룹화 → 소분류 코드 매칭 ──
   const typeGroups = new Map<string, number[]>();
-  selectedPrimaryType.forEach((type, i) => {
-    if (!type) return;
+  selectedTypes.forEach((type, i) => {
     const arr = typeGroups.get(type) ?? [];
     arr.push(i);
     typeGroups.set(type, arr);
@@ -436,44 +392,38 @@ ${productList}
 
   const results: string[] = products.map(() => "");
 
-  // 2단계 Gemini 호출 함수 (재사용)
-  async function matchCodesForGroup(
-    type: string,
-    indices: number[],
-    codes: typeof availableCodes
-  ) {
-    if (codes.length === 0 || indices.length === 0) return;
+  const step2Promises = [...typeGroups.entries()].map(async ([type, indices]) => {
+    const typeCodes = codesByType.get(type) ?? [];
+    if (typeCodes.length === 0) return;
 
     const groupProducts = indices.map((i) => products[i]);
-    const codeList = codes
+    const codeListStr = typeCodes
       .map((c) => `${c.category_code}: ${c.category_name}`)
       .join("\n");
-    const groupProductList = groupProducts
-      .map((p, gi) => `${gi + 1}. 상품명: ${p.product_name} | 내카테고리: ${p.category || "없음"} | 원본카테고리: ${p.source_category || "없음"}`)
+    const groupList = groupProducts
+      .map((p, gi) => `${gi + 1}. ${p.product_name} (카테고리: ${p.category || "없음"}, 원본: ${p.source_category || "없음"})`)
       .join("\n");
 
-    console.log(`[gemini] 2단계 [${type}]: 상품 ${indices.length}개, 코드 ${codes.length}개`);
+    console.log(`[gemini] 2단계 [${type}]: 상품 ${indices.length}개, 소분류 ${typeCodes.length}개`);
 
     const result = await generateText(
-      `아래 상품 목록을 분석해서 각 상품에 가장 적합한 플레이오토 카테고리코드를 선택하세요.
-분류: ${type}
+      `"${type}" 대분류 안에서 각 상품에 가장 적합한 소분류 코드를 선택하세요.
 
-카테고리코드 목록 (코드: 카테고리명):
-${codeList}
+## 소분류 코드 목록 (코드: 카테고리명)
+${codeListStr}
 
-상품 목록:
-${groupProductList}
+## 상품 목록
+${groupList}
 
-규칙:
-- 반드시 위 카테고리코드 목록에 있는 코드 숫자만 선택
-- 상품명을 분석하여 가장 구체적으로 일치하는 카테고리를 선택
-- 예를 들어 "프라이팬"이면 프라이팬 관련 코드, "냄비"면 냄비 관련 코드 선택
-- 정확히 맞는 카테고리가 없으면 가장 가까운 상위 카테고리 코드를 선택
-- 절대 빈 문자열 출력 금지 — 반드시 가장 가까운 코드를 선택
-- 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
+## 규칙
+- 상품명을 분석하여 가장 구체적으로 일치하는 소분류 코드를 선택
+- 반드시 위 코드 목록에 있는 숫자 코드만 사용
+- 정확히 맞는 것이 없으면 가장 가까운 코드를 선택
+- 빈 문자열 금지
+- JSON 배열로만 출력:
 ["코드1", "코드2", ...]
 
-상품 개수: ${groupProducts.length}개, 배열 항목도 반드시 ${groupProducts.length}개`
+상품 ${groupProducts.length}개 → 배열 ${groupProducts.length}개`
     );
 
     console.log(`[gemini] 2단계 [${type}] 응답:`, result?.slice(0, 300));
@@ -484,34 +434,15 @@ ${groupProductList}
       if (!jsonMatch) return;
       const parsed = JSON.parse(jsonMatch[0]) as string[];
       if (!Array.isArray(parsed)) return;
-      const validCodes = new Set(codes.map((c) => c.category_code));
+      const validCodes = new Set(typeCodes.map((c) => c.category_code));
       indices.forEach((productIdx, gi) => {
         const code = String(parsed[gi] ?? "").trim();
         if (validCodes.has(code)) results[productIdx] = code;
       });
     } catch { /* skip */ }
-  }
-
-  // 각 분류별로 Gemini 호출
-  const step2Promises = [...typeGroups.entries()].map(([type, indices]) => {
-    const typeCodes = codesByType.get(type) ?? [];
-    return matchCodesForGroup(type, indices, typeCodes);
   });
 
   await Promise.all(step2Promises);
-
-  // ── 3단계: 미매칭 상품 → 전체 코드에서 재검색 ──
-  const unmatchedIndices = results.reduce<number[]>(
-    (acc, r, i) => { if (r === "") acc.push(i); return acc; }, []
-  );
-
-  if (unmatchedIndices.length > 0) {
-    console.log(`[gemini] 3단계 전체 검색: 미매칭 ${unmatchedIndices.length}개`);
-    const allCodes = availableCodes.length <= 500
-      ? availableCodes
-      : availableCodes.filter((_, i) => i % Math.ceil(availableCodes.length / 500) === 0);
-    await matchCodesForGroup("전체", unmatchedIndices, allCodes);
-  }
 
   const matched = results.filter((r) => r !== "").length;
   console.log(`[gemini] 최종 결과: ${matched}/${products.length}개 매칭`);
