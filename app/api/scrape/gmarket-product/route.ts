@@ -109,6 +109,23 @@ async function loginToGmarket(context: BrowserContext): Promise<boolean> {
  * L2: Supabase DB 세션 (24h, Railway 재시작 후에도 유효)
  * L3: 재로그인
  */
+/** 실제 로그인 여부 확인 (지마켓 마이페이지 접근 시도) */
+async function verifyLogin(context: BrowserContext): Promise<boolean> {
+  const page = await context.newPage();
+  try {
+    await page.goto("https://www.gmarket.co.kr", { waitUntil: "domcontentloaded", timeout: 15000 });
+    const loggedIn = await page.evaluate(() => {
+      // 로그아웃 버튼이 있으면 로그인 상태
+      return !!document.querySelector(".link__logout, .btn-logout, [class*='logout']");
+    }).catch(() => false);
+    return loggedIn;
+  } catch {
+    return false;
+  } finally {
+    await page.close();
+  }
+}
+
 async function ensureGmarketLogin(
   context: BrowserContext,
   supabase: SupabaseClient,
@@ -120,37 +137,44 @@ async function ensureGmarketLogin(
   // L1: 모듈 캐시 (프로세스 내, 4시간 유효)
   if (gmarketCookieCache && now - gmarketCookieCachedAt < COOKIE_TTL_MS) {
     await context.addCookies(gmarketCookieCache);
-    console.log("[gmarket-login] L1 메모리 캐시 복원");
-    return;
+    if (await verifyLogin(context)) {
+      console.log("[gmarket-login] L1 메모리 캐시 복원 ✅");
+      return;
+    }
+    console.warn("[gmarket-login] L1 캐시 만료 → 재로그인 필요");
+    gmarketCookieCache = null;
   }
 
-  // L2: Supabase DB 세션 (24시간 유효, 재시작 후에도 유지)
+  // L2: Supabase DB 세션
   if (loginId) {
     const dbCookies = await loadSession(supabase, "gmarket", loginId);
     if (dbCookies) {
       await context.addCookies(dbCookies);
-      gmarketCookieCache = dbCookies;
-      gmarketCookieCachedAt = now;
-      console.log("[gmarket-login] L2 DB 세션 복원");
-      return;
+      if (await verifyLogin(context)) {
+        gmarketCookieCache = dbCookies;
+        gmarketCookieCachedAt = now;
+        console.log("[gmarket-login] L2 DB 세션 복원 ✅");
+        return;
+      }
+      console.warn("[gmarket-login] L2 DB 세션 만료 → 재로그인 필요");
     }
   }
 
   // L3: 재로그인
-  console.log("[gmarket-login] L1/L2 캐시 없음 → L3 재로그인 시도");
+  console.log("[gmarket-login] L3 재로그인 시도");
   const ok = await loginToGmarket(context);
-  if (ok) {
+  if (ok && await verifyLogin(context)) {
     const cookies = await context.cookies();
     gmarketCookieCache = cookies;
     gmarketCookieCachedAt = Date.now();
-    console.log(`[gmarket-login] L3 재로그인 완료 (쿠키 ${cookies.length}개)`);
+    console.log(`[gmarket-login] L3 재로그인 완료 ✅ (쿠키 ${cookies.length}개)`);
     if (loginId) {
       saveSession(supabase, "gmarket", loginId, cookies).catch((e) =>
         console.warn("[gmarket-login] DB 세션 저장 실패:", e)
       );
     }
   } else {
-    console.error("[gmarket-login] L3 재로그인 실패 — 비로그인 상태로 스크래핑 진행");
+    console.error("[gmarket-login] ❌ 로그인 실패 — 비로그인 상태로 스크래핑 진행");
   }
 }
 
@@ -504,16 +528,6 @@ export async function POST(request: NextRequest) {
 
       try {
         await ensureGmarketLogin(context, supabase, cred?.id ?? "");
-
-        // 로그인 확인: 아무 지마켓 페이지에서 로그인 상태 체크
-        const checkPage = await context.newPage();
-        await checkPage.goto("https://www.gmarket.co.kr", { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
-        const isLoggedIn = await checkPage.evaluate(() => {
-          const el = document.querySelector(".link__logout, .btn-logout, [class*='logout']");
-          return !!el;
-        }).catch(() => false);
-        await checkPage.close();
-        console.log(`[gmarket-login] 로그인 상태 확인: ${isLoggedIn ? "✅ 로그인됨" : "❌ 비로그인"}`);
 
         const CONCURRENCY = 2;
         let doneCount = 0;
