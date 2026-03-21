@@ -302,10 +302,9 @@ ${categoryList}
 }
 
 /**
- * 상품 목록 → 스마트스토어 카테고리코드 자동 매핑 (Gemini)
- * @param products 상품 목록 (product_name, category, source_category)
- * @param availableCodes 사용자가 등록한 스마트스토어 카테고리코드 목록
- * @returns 각 상품에 대응하는 카테고리코드 (없으면 "" 반환)
+ * 상품 목록 → 플레이오토 카테고리코드 자동 매핑 (Gemini 2단계)
+ * 1단계: 상품별 관련 분류명(category_type) 선택
+ * 2단계: 해당 분류의 코드만 필터링 후 정확한 코드 매칭
  */
 export async function suggestSmartStoreCategoryCodes(
   products: Array<{ product_name: string; category: string; source_category: string }>,
@@ -314,47 +313,140 @@ export async function suggestSmartStoreCategoryCodes(
   const fallback = products.map(() => "");
   if (!process.env.GEMINI_API_KEY || products.length === 0 || availableCodes.length === 0) return fallback;
 
-  const codeList = availableCodes
-    .map((c) => `${c.category_code}: [${c.category_type}] ${c.category_name}`)
-    .join("\n");
+  // 고유 분류명 목록
+  const uniqueTypes = [...new Set(availableCodes.map((c) => c.category_type))];
 
   const productList = products
     .map((p, i) => `${i + 1}. 상품명: ${p.product_name} | 내카테고리: ${p.category || "없음"} | 원본카테고리: ${p.source_category || "없음"}`)
     .join("\n");
 
-  const result = await generateText(
-    `아래 상품 목록을 분석해서 각 상품에 가장 적합한 스마트스토어 카테고리코드를 선택하세요.
+  // ── 1단계: 상품별 관련 분류명 선택 ──
+  const step1Result = await generateText(
+    `아래 상품 목록을 보고, 각 상품이 속할 수 있는 분류명을 선택하세요.
 
-스마트스토어 카테고리코드 목록 (코드: [분류] 카테고리명):
-${codeList}
+분류명 목록:
+${uniqueTypes.map((t, i) => `${i + 1}. ${t}`).join("\n")}
 
 상품 목록:
 ${productList}
 
 규칙:
-- 반드시 위 카테고리코드 목록에 있는 코드 숫자만 선택
-- 적합한 카테고리가 없으면 빈 문자열("") 출력
+- 각 상품에 가장 적합한 분류명을 1~2개 선택
+- 반드시 위 분류명 목록에 있는 이름 그대로 출력
 - 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
-["코드1", "코드2", ...]
+[["분류명A"], ["분류명B", "분류명C"], ...]
 
 상품 개수: ${products.length}개, 배열 항목도 반드시 ${products.length}개`
   );
 
-  if (!result) return fallback;
-
-  try {
-    const jsonMatch = result.match(/\[[\s\S]*?\]/);
-    if (!jsonMatch) return fallback;
-    const parsed = JSON.parse(jsonMatch[0]) as string[];
-    if (!Array.isArray(parsed)) return fallback;
-    const validCodes = new Set(availableCodes.map((c) => c.category_code));
-    return products.map((_, i) => {
-      const code = String(parsed[i] ?? "").trim();
-      return validCodes.has(code) ? code : "";
-    });
-  } catch {
-    return fallback;
+  // 1단계 결과 파싱
+  console.log("[gemini] 1단계 원본 응답:", step1Result?.slice(0, 500));
+  let selectedTypes: string[][] = products.map(() => uniqueTypes); // fallback: 전체
+  if (step1Result) {
+    try {
+      const match = step1Result.match(/\[[\s\S]*\]/);
+      if (match) {
+        const parsed = JSON.parse(match[0]) as string[][];
+        if (Array.isArray(parsed) && parsed.length === products.length) {
+          selectedTypes = parsed.map((types) =>
+            (Array.isArray(types) ? types : [types]).filter((t) => uniqueTypes.includes(String(t)))
+          );
+          console.log("[gemini] 1단계 파싱 성공:", selectedTypes);
+        } else {
+          console.warn("[gemini] 1단계 배열 길이 불일치:", parsed.length, "vs", products.length);
+        }
+      } else {
+        console.warn("[gemini] 1단계 JSON 매칭 실패");
+      }
+    } catch (e) {
+      console.warn("[gemini] 1단계 파싱 실패:", e);
+    }
+  } else {
+    console.warn("[gemini] 1단계 응답 없음 (null)");
   }
+
+  // ── 2단계: 분류별로 그룹화하여 각각 Gemini 호출 ──
+  // 분류별 코드 맵
+  const codesByType = new Map<string, typeof availableCodes>();
+  for (const c of availableCodes) {
+    const arr = codesByType.get(c.category_type) ?? [];
+    arr.push(c);
+    codesByType.set(c.category_type, arr);
+  }
+
+  // 상품별 주 분류 (첫 번째 선택된 분류)
+  const primaryType = selectedTypes.map((types) => types[0] ?? "");
+
+  // 분류별로 상품 그룹화
+  const typeGroups = new Map<string, number[]>(); // type → product indices
+  primaryType.forEach((type, i) => {
+    if (!type) return;
+    const arr = typeGroups.get(type) ?? [];
+    arr.push(i);
+    typeGroups.set(type, arr);
+  });
+
+  const results: string[] = products.map(() => "");
+
+  // 각 분류별로 Gemini 호출
+  const step2Promises = [...typeGroups.entries()].map(async ([type, indices]) => {
+    const typeCodes = codesByType.get(type) ?? [];
+    if (typeCodes.length === 0) return;
+
+    const groupProducts = indices.map((i) => products[i]);
+    const codeList = typeCodes
+      .map((c) => `${c.category_code}: ${c.category_name}`)
+      .join("\n");
+    const groupProductList = groupProducts
+      .map((p, gi) => `${gi + 1}. 상품명: ${p.product_name} | 내카테고리: ${p.category || "없음"} | 원본카테고리: ${p.source_category || "없음"}`)
+      .join("\n");
+
+    console.log(`[gemini] 2단계 [${type}]: 상품 ${indices.length}개, 코드 ${typeCodes.length}개`);
+
+    const result = await generateText(
+      `아래 상품 목록을 분석해서 각 상품에 가장 적합한 플레이오토 카테고리코드를 선택하세요.
+분류: ${type}
+
+카테고리코드 목록 (코드: 카테고리명):
+${codeList}
+
+상품 목록:
+${groupProductList}
+
+규칙:
+- 반드시 위 카테고리코드 목록에 있는 코드 숫자만 선택
+- 상품명을 분석하여 가장 구체적으로 일치하는 카테고리를 선택
+- 예를 들어 "프라이팬"이면 프라이팬 관련 코드, "냄비"면 냄비 관련 코드 선택
+- 정확히 맞는 카테고리가 없으면 가장 가까운 상위 카테고리 코드를 선택
+- 절대 빈 문자열 출력 금지 — 반드시 가장 가까운 코드를 선택
+- 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
+["코드1", "코드2", ...]
+
+상품 개수: ${groupProducts.length}개, 배열 항목도 반드시 ${groupProducts.length}개`
+    );
+
+    console.log(`[gemini] 2단계 [${type}] 응답:`, result?.slice(0, 300));
+
+    if (!result) return;
+    try {
+      const jsonMatch = result.match(/\[[\s\S]*?\]/);
+      if (!jsonMatch) return;
+      const parsed = JSON.parse(jsonMatch[0]) as string[];
+      if (!Array.isArray(parsed)) return;
+      const validCodes = new Set(typeCodes.map((c) => c.category_code));
+      indices.forEach((productIdx, gi) => {
+        const code = String(parsed[gi] ?? "").trim();
+        if (validCodes.has(code)) results[productIdx] = code;
+      });
+    } catch { /* skip */ }
+  });
+
+  await Promise.all(step2Promises);
+
+  const matched = results.filter((r) => r !== "").length;
+  console.log(`[gemini] 최종 결과: ${matched}/${products.length}개 매칭`);
+
+  return results;
 }
 
 /**
@@ -422,14 +514,16 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
 
 규칙:
 1. 구조: 브랜드명 + 제품명 + 옵션(용량/무게 등) + 수량
-2. 특수문자 완전 제거 (괄호 포함)
-3. 총수량이 이미 있으면 분리 표현 제거 (예: "20입 5입 4개" → "20입")
-4. 판매자 부가 설명 제거 (멀티팩, 이온음료, 쿠폰, 할인 등)
-5. 정리된 상품명 한 줄만 출력 (다른 설명 없이)
+2. 특수문자 완전 제거 — +, %, /, ., &, ~, ★, !, @, #, $, ^, *, 괄호() 등 모든 특수문자 사용 금지
+3. 허용 문자: 한글, 영문, 숫자, 공백만 사용
+4. 총수량이 이미 있으면 분리 표현 제거 (예: "20입 5입 4개" → "20입")
+5. 판매자 부가 설명 제거 (멀티팩, 이온음료, 쿠폰, 할인, HOT, NEW, 신제품 등)
+6. 정리된 상품명 한 줄만 출력 (다른 설명 없이)
 
 예시:
 - "삼양 불닭볶음면 20입 5입 4개 멀티팩" → "삼양 불닭볶음면 20입"
-- "홈런볼 4번들 4팩 41g 16개" → "홈런볼 4번들 4팩 41g 16개"
+- "(HOT신제품)오뚜기 진밀면 멀티팩(4개입x4팩) (총16개입)" → "오뚜기 진밀면 16개입"
+- "테크 베이킹소다+구연산 액체세제 일반/드럼 겸용 1.8L 4개" → "테크 베이킹소다 구연산 액체세제 일반 드럼 겸용 1.8L 4개"
 - "포카리스웨트 340ml 48캔 12캔 4팩 동아오츠카" → "포카리스웨트 340ml 48캔"
 
 원본: ${rawName}`;

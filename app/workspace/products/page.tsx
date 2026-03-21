@@ -36,6 +36,7 @@ export default function ProductsPage() {
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportStep, setExportStep] = useState("");
   const [importModalOpen, setImportModalOpen] = useState(false);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
@@ -121,6 +122,20 @@ export default function ProductsPage() {
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) return;
     setExporting(true);
+    setExportStep("상품 데이터 조회 중...");
+
+    // 단계별 메시지 자동 전환
+    const steps = [
+      { delay: 3000, msg: "수수료 및 카테고리코드 로드 중..." },
+      { delay: 7000, msg: "AI 브랜드/모델명 추출 중..." },
+      { delay: 12000, msg: "AI 카테고리코드 매칭 중 (1단계: 분류 선택)..." },
+      { delay: 20000, msg: "AI 카테고리코드 매칭 중 (2단계: 코드 매칭)..." },
+      { delay: 35000, msg: "엑셀 파일 생성 중..." },
+    ];
+    const timers = steps.map(({ delay, msg }) =>
+      setTimeout(() => setExportStep(msg), delay)
+    );
+
     try {
       const res = await fetch("/api/products/playauto-export", {
         method: "POST",
@@ -136,7 +151,9 @@ export default function ProductsPage() {
     } catch {
       alert("내보내기 중 오류가 발생했습니다.");
     } finally {
+      timers.forEach(clearTimeout);
       setExporting(false);
+      setExportStep("");
     }
   };
 
@@ -285,6 +302,14 @@ export default function ProductsPage() {
       {/* 상세페이지 일괄 생성 모달 */}
       {batchVisible && (
         <BatchDetailModal items={batchItems} onClose={dismissBatch} onClear={clearBatch} />
+      )}
+
+      {/* 플레이오토 내보내기 진행 상태 바 */}
+      {exporting && exportStep && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-lg">
+          <div className="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm text-[var(--text-primary)]">{exportStep}</span>
+        </div>
       )}
     </div>
   );

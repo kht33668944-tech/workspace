@@ -34,12 +34,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "조회된 상품이 없습니다." }, { status: 404 });
     }
 
-    // 수수료 + 플레이오토 매핑 + 스마트스토어 카테고리코드 동시 조회
+    // 수수료 + 플레이오토 매핑 + 카테고리코드 동시 조회
     const userId = products[0].user_id as string;
-    const [ratesResult, mappingsResult, ssCodesResult] = await Promise.all([
+
+    // 카테고리코드는 1000개 이상일 수 있으므로 페이지네이션
+    async function fetchAllCategoryCodes() {
+      const PAGE = 1000;
+      const all: Array<{ category_code: string; category_type: string; category_name: string }> = [];
+      let from = 0;
+      while (true) {
+        const { data } = await supabase
+          .from("smartstore_category_codes")
+          .select("category_code, category_type, category_name")
+          .eq("user_id", userId)
+          .range(from, from + PAGE - 1);
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      return all;
+    }
+
+    const [ratesResult, mappingsResult, allCategoryCodes] = await Promise.all([
       supabase.from("commission_rates").select("*").eq("user_id", userId),
       supabase.from("playauto_category_mappings").select("user_category, playauto_code").eq("user_id", userId),
-      supabase.from("smartstore_category_codes").select("category_code, category_type, category_name").eq("user_id", userId),
+      fetchAllCategoryCodes(),
     ]);
 
     if (ratesResult.error) {
@@ -52,7 +72,7 @@ export async function POST(req: NextRequest) {
       categoryMappings[m.user_category] = m.playauto_code;
     });
 
-    const availableSsCodes = ssCodesResult.data ?? [];
+    const availableSsCodes = allCategoryCodes;
 
     // Gemini로 브랜드/모델명/제조사 + 스마트스토어 카테고리코드 병렬 추출
     const productNames = products.map((p) => p.product_name as string);

@@ -122,7 +122,7 @@ export function generatePlayAutoProductExcel(
       카테고리코드: smartstoreCategoryCodes[i] ?? "",
       "쇼핑몰(계정)": "스마트스토어=redgoom",
       템플릿코드: "2200901",
-      온라인상품명: p.product_name,
+      "온라인 상품명": p.product_name,
       판매수량: 2000,
       판매가: salePrice,
       공급가: 0,

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, Upload, Save, Search, X } from "lucide-react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Plus, Trash2, Upload, Save, Search, X, ChevronDown, ChevronRight } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
@@ -29,6 +29,7 @@ export default function SmartStoreCategoryTab() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [collapsedTypes, setCollapsedTypes] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const userId = session?.user?.id;
@@ -55,15 +56,30 @@ export default function SmartStoreCategoryTab() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // 필터링
-  const filtered = search
-    ? rows.filter(
-        (r) =>
-          r.category_code.includes(search) ||
-          r.category_type.includes(search) ||
-          r.category_name.includes(search)
-      )
-    : rows;
+  // 검색 필터링 (대소문자 무시)
+  const filtered = useMemo(() => {
+    if (!search) return rows;
+    const q = search.toLowerCase();
+    return rows.filter(
+      (r) =>
+        r.category_code.toLowerCase().includes(q) ||
+        r.category_type.toLowerCase().includes(q) ||
+        r.category_name.toLowerCase().includes(q)
+    );
+  }, [rows, search]);
+
+  // 분류별 그룹화
+  const grouped = useMemo(() => {
+    const map = new Map<string, Row[]>();
+    for (const row of filtered) {
+      const type = row.category_type || "(미분류)";
+      const arr = map.get(type) ?? [];
+      arr.push(row);
+      map.set(type, arr);
+    }
+    // 분류명 기준 정렬
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [filtered]);
 
   const dirtyCount = rows.filter((r) => r.dirty || r.id === null).length;
 
@@ -89,6 +105,20 @@ export default function SmartStoreCategoryTab() {
     });
   }
 
+  function handleSelectGroup(_type: string, groupRows: Row[]) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const groupIds = groupRows.map((r) => r.id ?? "");
+      const allSelected = groupIds.every((id) => next.has(id));
+      if (allSelected) {
+        groupIds.forEach((id) => next.delete(id));
+      } else {
+        groupIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }
+
   function handleSelectAll() {
     if (selectedIds.size === filtered.length) {
       setSelectedIds(new Set());
@@ -97,10 +127,26 @@ export default function SmartStoreCategoryTab() {
     }
   }
 
+  function toggleCollapse(type: string) {
+    setCollapsedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }
+
+  function handleCollapseAll() {
+    if (collapsedTypes.size === grouped.length) {
+      setCollapsedTypes(new Set());
+    } else {
+      setCollapsedTypes(new Set(grouped.map(([type]) => type)));
+    }
+  }
+
   async function handleDeleteSelected() {
     if (selectedIds.size === 0) return;
 
-    // 신규(미저장) 행은 로컬에서만 제거
     const newIds = [...selectedIds].filter((id) => id.startsWith("__new__"));
     const savedIds = [...selectedIds].filter((id) => !id.startsWith("__new__"));
 
@@ -112,7 +158,6 @@ export default function SmartStoreCategoryTab() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { error?: string };
-        console.error("DELETE failed:", res.status, err);
         addToast(err.error ?? "삭제 실패", "error");
         return;
       }
@@ -129,7 +174,6 @@ export default function SmartStoreCategoryTab() {
     const toSave = rows.filter((r) => r.dirty || r.id === null || r.id.startsWith("__new__"));
     if (toSave.length === 0) return;
 
-    // 빈 코드 행 검증
     const invalid = toSave.filter((r) => !r.category_code.trim());
     if (invalid.length > 0) {
       addToast("카테고리코드가 비어있는 행이 있습니다.", "error");
@@ -156,7 +200,6 @@ export default function SmartStoreCategoryTab() {
         return;
       }
 
-      // 저장 후 전체 재로드
       const listRes = await fetch("/api/products/smartstore-categories", { headers: authHeader });
       const listJson = await listRes.json() as { codes?: SmartStoreCategoryCode[] };
       setRows(
@@ -189,7 +232,6 @@ export default function SmartStoreCategoryTab() {
 
         const newRows: Row[] = json
           .map((row) => {
-            // 헤더 유연하게 처리 (한글 or 영문 컬럼명)
             const code = String(
               row["표준카테고리코드"] ?? row["카테고리코드"] ?? row["category_code"] ?? row["A"] ?? ""
             ).trim();
@@ -208,7 +250,6 @@ export default function SmartStoreCategoryTab() {
           return;
         }
 
-        // 기존 코드와 중복되는 항목은 건너뛰고 새 항목만 추가
         const existingCodes = new Set(rows.map((r) => r.category_code));
         const unique = newRows.filter((r) => !existingCodes.has(r.category_code));
         const skipped = newRows.length - unique.length;
@@ -310,90 +351,102 @@ export default function SmartStoreCategoryTab() {
           </button>
         )}
 
+        <button
+          onClick={handleCollapseAll}
+          className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        >
+          {collapsedTypes.size === grouped.length ? "모두 펼치기" : "모두 접기"}
+        </button>
+
         <span className="text-xs text-[var(--text-muted)] ml-auto">
           총 <strong className="text-[var(--text-primary)]">{rows.length}</strong>개
           {search && ` (검색결과 ${filtered.length}개)`}
+          {" · "}분류 {grouped.length}개
         </span>
       </div>
 
-      {/* 테이블 */}
-      <div className="border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-[var(--bg-card)] border-b border-[var(--border)]">
-                <th className="w-10 px-3 py-2.5">
+      {/* 분류별 그룹 테이블 */}
+      <div className="space-y-2">
+        {grouped.length === 0 ? (
+          <div className="px-4 py-12 text-center text-sm text-[var(--text-muted)] border border-[var(--border)] rounded-lg">
+            {search ? "검색 결과가 없습니다." : "카테고리코드가 없습니다. 행 추가 또는 엑셀 업로드로 등록하세요."}
+          </div>
+        ) : (
+          grouped.map(([type, groupRows]) => {
+            const isCollapsed = collapsedTypes.has(type);
+            const groupSelectedCount = groupRows.filter((r) => selectedIds.has(r.id ?? "")).length;
+            const allGroupSelected = groupSelectedCount === groupRows.length;
+
+            return (
+              <div key={type} className="border border-[var(--border)] rounded-lg overflow-hidden">
+                {/* 그룹 헤더 */}
+                <div
+                  className="flex items-center gap-2 px-3 py-2 bg-[var(--bg-card)] cursor-pointer select-none hover:bg-[var(--bg-card)]/80"
+                  onClick={() => toggleCollapse(type)}
+                >
                   <input
                     type="checkbox"
-                    checked={filtered.length > 0 && selectedIds.size === filtered.length}
-                    onChange={handleSelectAll}
+                    checked={allGroupSelected && groupRows.length > 0}
+                    onChange={(e) => { e.stopPropagation(); handleSelectGroup(type, groupRows); }}
+                    onClick={(e) => e.stopPropagation()}
                     className="rounded"
                   />
-                </th>
-                <th className="px-3 py-2.5 text-left text-xs font-medium text-[var(--text-muted)] w-40">
-                  카테고리코드
-                </th>
-                <th className="px-3 py-2.5 text-left text-xs font-medium text-[var(--text-muted)] w-36">
-                  분류
-                </th>
-                <th className="px-3 py-2.5 text-left text-xs font-medium text-[var(--text-muted)]">
-                  카테고리명
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-4 py-12 text-center text-sm text-[var(--text-muted)]">
-                    {search ? "검색 결과가 없습니다." : "카테고리코드가 없습니다. 행 추가 또는 엑셀 업로드로 등록하세요."}
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((row) => (
-                  <tr
-                    key={row.id}
-                    className={`border-b border-[var(--border)] last:border-0 transition-colors ${
-                      row.dirty ? "bg-blue-500/5" : "hover:bg-[var(--bg-card)]"
-                    } ${selectedIds.has(row.id ?? "") ? "bg-blue-500/10" : ""}`}
-                  >
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(row.id ?? "")}
-                        onChange={() => handleToggleSelect(row.id ?? "")}
-                        className="rounded"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <input
-                        value={row.category_code}
-                        onChange={(e) => handleChange(row.id!, "category_code", e.target.value)}
-                        placeholder="예: 6219426"
-                        className="w-full px-2 py-1 text-sm bg-transparent border border-transparent hover:border-[var(--border)] focus:border-blue-400 rounded outline-none text-[var(--text-primary)]"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <input
-                        value={row.category_type}
-                        onChange={(e) => handleChange(row.id!, "category_type", e.target.value)}
-                        placeholder="예: 가공식품"
-                        className="w-full px-2 py-1 text-sm bg-transparent border border-transparent hover:border-[var(--border)] focus:border-blue-400 rounded outline-none text-[var(--text-primary)]"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <input
-                        value={row.category_name}
-                        onChange={(e) => handleChange(row.id!, "category_name", e.target.value)}
-                        placeholder="예: 생수"
-                        className="w-full px-2 py-1 text-sm bg-transparent border border-transparent hover:border-[var(--border)] focus:border-blue-400 rounded outline-none text-[var(--text-primary)]"
-                      />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                  {isCollapsed ? (
+                    <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" />
+                  )}
+                  <span className="text-sm font-medium text-[var(--text-primary)]">{type}</span>
+                  <span className="text-xs text-[var(--text-muted)]">({groupRows.length})</span>
+                  {groupSelectedCount > 0 && (
+                    <span className="text-xs text-blue-400 ml-1">{groupSelectedCount}개 선택</span>
+                  )}
+                </div>
+
+                {/* 그룹 내용 */}
+                {!isCollapsed && (
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {groupRows.map((row) => (
+                        <tr
+                          key={row.id}
+                          className={`border-t border-[var(--border)] transition-colors ${
+                            row.dirty ? "bg-blue-500/5" : "hover:bg-[var(--bg-card)]"
+                          } ${selectedIds.has(row.id ?? "") ? "bg-blue-500/10" : ""}`}
+                        >
+                          <td className="w-10 px-3 py-1.5">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(row.id ?? "")}
+                              onChange={() => handleToggleSelect(row.id ?? "")}
+                              className="rounded"
+                            />
+                          </td>
+                          <td className="w-32 px-3 py-1.5">
+                            <input
+                              value={row.category_code}
+                              onChange={(e) => handleChange(row.id!, "category_code", e.target.value)}
+                              placeholder="코드"
+                              className="w-full px-2 py-0.5 text-sm bg-transparent border border-transparent hover:border-[var(--border)] focus:border-blue-400 rounded outline-none text-[var(--text-primary)] font-mono"
+                            />
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              value={row.category_name}
+                              onChange={(e) => handleChange(row.id!, "category_name", e.target.value)}
+                              placeholder="카테고리명"
+                              className="w-full px-2 py-0.5 text-sm bg-transparent border border-transparent hover:border-[var(--border)] focus:border-blue-400 rounded outline-none text-[var(--text-primary)]"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
 
       {/* 엑셀 양식 안내 */}

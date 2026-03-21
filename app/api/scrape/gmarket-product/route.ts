@@ -185,7 +185,7 @@ function normalizeProductName(raw: string): string {
     name = name.replace(/\s+[가-힣]+$/, "");
   }
   name = name.replace(/[()（）]/g, " ");
-  name = name.replace(/[^\uAC00-\uD7A3\u3130-\u318F\uFFA0-\uFFDCa-zA-Z0-9\s/.+%]/g, " ");
+  name = name.replace(/[^\uAC00-\uD7A3\u3130-\u318F\uFFA0-\uFFDCa-zA-Z0-9\s]/g, " ");
 
   return name.replace(/\s{2,}/g, " ").trim();
 }
@@ -225,7 +225,10 @@ async function uploadImageToStorage(
   serviceClient: ReturnType<typeof getServiceSupabaseClient>
 ): Promise<string | null> {
   try {
-    const res = await fetch(imageUrl, {
+    const finalUrl = imageUrl.startsWith("//")
+      ? `https:${imageUrl}`
+      : imageUrl;
+    const res = await fetch(finalUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -280,9 +283,13 @@ async function scrapeGmarketProduct(
 
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // 가격 요소가 렌더링될 때까지 대기 (최대 8초, 없으면 그냥 진행)
-    await page.waitForSelector(".box__price, strong.price_real", {
-      timeout: 8000,
+    // 쿠폰가 요소가 렌더링될 때까지 대기 (JS 비동기 렌더링)
+    await page.waitForSelector(".price_innerwrap-coupon strong.price_real", {
+      timeout: 5000,
+    }).catch(() => {});
+    // fallback: 일반 판매가라도 대기
+    await page.waitForSelector(".box__price strong.price_real", {
+      timeout: 3000,
     }).catch(() => {});
 
     // ── DOM 데이터 한 번에 추출 (evaluate 3회 → 1회) ─────────
@@ -323,15 +330,34 @@ async function scrapeGmarketProduct(
           }
         }
 
-        // 가격 (1순위: 쿠폰가, 2순위: 판매가, 3순위: og:description)
-        function parsePrice(el: Element | null): number {
-          if (!el?.textContent) return 0;
-          const n = parseInt(el.textContent.replace(/[^0-9]/g, ""), 10);
+        // 가격 파싱: strong 요소에서 "원" 앞 숫자만 정확히 추출
+        function parsePriceEl(el: Element | null): number {
+          if (!el) return 0;
+          // childNodes에서 텍스트만 추출 (자식 span 텍스트 "원" 제외)
+          let numText = "";
+          el.childNodes.forEach((node) => {
+            if (node.nodeType === 3) numText += node.textContent; // 텍스트 노드만
+          });
+          if (!numText.trim()) {
+            // fallback: 전체 textContent에서 첫 번째 숫자그룹
+            const m = el.textContent?.match(/[\d,]+/);
+            if (m) numText = m[0];
+          }
+          const n = parseInt(numText.replace(/[^0-9]/g, ""), 10);
           return isNaN(n) ? 0 : n;
         }
-        let rawPrice =
-          parsePrice(document.querySelector(".box__price strong.price-coupon, .box__price strong[class*='coupon']")) ||
-          parsePrice(document.querySelector(".box__price strong.price_real")) || 0;
+
+        // 쿠폰 적용가: .price_innerwrap-coupon 안의 strong.price_real
+        const couponEl = document.querySelector(".price_innerwrap-coupon strong.price_real");
+        const couponPrice = parsePriceEl(couponEl);
+
+        // 일반 판매가: 쿠폰이 아닌 첫 번째 strong.price_real
+        const allPriceReals = Array.from(document.querySelectorAll(".box__price strong.price_real"));
+        const normalEl = allPriceReals.find((el) => !el.closest(".price_innerwrap-coupon"));
+        const salePrice = parsePriceEl(normalEl ?? null);
+
+        // 쿠폰가 우선, 없으면 판매가
+        let rawPrice = couponPrice || salePrice || 0;
         if (!rawPrice) {
           const desc = document.querySelector<HTMLMetaElement>('meta[property="og:description"]')?.content || "";
           const m = desc.match(/([0-9,]+)\s*원/);
@@ -374,7 +400,9 @@ async function scrapeGmarketProduct(
       classifyCategory(regexName, category, categories),
       Promise.all(
         limitedImageUrls.map((imgUrl, idx) => {
-          const ext = imgUrl.split("?")[0].split(".").pop()?.replace(/[^a-z]/gi, "") || "jpg";
+          const VALID_IMG_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"]);
+          const rawExt = imgUrl.split("?")[0].split(".").pop()?.replace(/[^a-z]/gi, "")?.toLowerCase() || "";
+          const ext = VALID_IMG_EXTS.has(rawExt) ? rawExt : "jpg";
           const storagePath = `products/${userId}/${timestamp}_${idx}.${ext}`;
           return uploadImageToStorage(imgUrl, storagePath, serviceClient);
         })
