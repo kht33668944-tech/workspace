@@ -114,6 +114,7 @@ async function ensureGmarketLogin(
   supabase: SupabaseClient,
   loginId: string
 ): Promise<void> {
+  console.log(`[gmarket-login] ensureGmarketLogin 시작 (loginId: ${loginId || "없음"})`);
   const now = Date.now();
 
   // L1: 모듈 캐시 (프로세스 내, 4시간 유효)
@@ -136,6 +137,7 @@ async function ensureGmarketLogin(
   }
 
   // L3: 재로그인
+  console.log("[gmarket-login] L1/L2 캐시 없음 → L3 재로그인 시도");
   const ok = await loginToGmarket(context);
   if (ok) {
     const cookies = await context.cookies();
@@ -143,11 +145,12 @@ async function ensureGmarketLogin(
     gmarketCookieCachedAt = Date.now();
     console.log(`[gmarket-login] L3 재로그인 완료 (쿠키 ${cookies.length}개)`);
     if (loginId) {
-      // fire and forget — 실패해도 스크래핑 계속
       saveSession(supabase, "gmarket", loginId, cookies).catch((e) =>
         console.warn("[gmarket-login] DB 세션 저장 실패:", e)
       );
     }
+  } else {
+    console.error("[gmarket-login] L3 재로그인 실패 — 비로그인 상태로 스크래핑 진행");
   }
 }
 
@@ -326,7 +329,7 @@ async function scrapeGmarketProduct(
           }
         }
 
-        // ── 가격 추출 (3단계 우선순위) ──────────────────────
+        // ── 가격 추출 ──────────────────────
         /** 숫자 문자열 → 양수 정수 변환 (실패 시 0) */
         function parsePrice(v: string | null | undefined): number {
           if (!v) return 0;
@@ -334,56 +337,39 @@ async function scrapeGmarketProduct(
           return isNaN(n) || n <= 0 ? 0 : n;
         }
 
-        // 1차: 인라인 스크립트 utparam_url 변수 (가장 안정적, 서버렌더링)
-        let scriptCouponPrice = 0;
-        let scriptSalePrice = 0;
-        try {
-          for (const script of Array.from(document.querySelectorAll("script:not([src])"))) {
-            const m = script.textContent?.match(/var\s+utparam_url\s*=\s*'([^']+)'/);
-            if (!m) continue;
-            const json = JSON.parse(decodeURIComponent(m[1])) as Record<string, string>;
-            scriptCouponPrice = parsePrice(json["coupon_price"]);
-            scriptSalePrice = parsePrice(json["promotion_price"]);
-            break;
-          }
-        } catch {
-          // 파싱 실패 시 DOM fallback으로 진행
-        }
-
-        // 2차: DOM 셀렉터 (fallback)
-        function parsePriceEl(el: Element | null): number {
-          if (!el) return 0;
-          let numText = "";
-          el.childNodes.forEach((node) => {
-            if (node.nodeType === 3) numText += node.textContent;
-          });
-          if (!numText.trim()) {
-            const mt = el.textContent?.match(/[\d,]+/);
-            if (mt) numText = mt[0];
-          }
-          return parsePrice(numText);
-        }
-
-        const couponEl = document.querySelector(".price_innerwrap-coupon strong.price_real");
-        const domCouponPrice = parsePriceEl(couponEl);
-
-        const allPriceReals = Array.from(document.querySelectorAll(".box__price strong.price_real"));
-        const normalEl = allPriceReals.find((el) => !el.closest(".price_innerwrap-coupon"));
-        const domSalePrice = parsePriceEl(normalEl ?? null);
-
-        // 3차: 쿠폰 상세내역 섹션 (스크립트·DOM 모두 실패 시)
-        let detailCouponPrice = 0;
-        if (!scriptCouponPrice && !domCouponPrice) {
-          const detailItems = document.querySelectorAll(".box__layer-coupon-information .list-item__price");
-          if (detailItems.length > 0) {
-            const numEl = detailItems[detailItems.length - 1].querySelector(".num");
-            detailCouponPrice = parsePrice(numEl?.textContent);
+        // 1차: "쿠폰적용가" / "클럽쿠폰가" 텍스트에서 가격 직접 추출 (로그인 상태면 클럽쿠폰가 우선)
+        const couponPrices: number[] = [];
+        for (const el of Array.from(document.querySelectorAll("*"))) {
+          const text = el.textContent || "";
+          if (
+            (text.includes("쿠폰적용가") || text.includes("클럽쿠폰가")) &&
+            text.includes("원") &&
+            el.children.length < 5
+          ) {
+            const match = text.match(/쿠폰[가]?\s*([0-9,]+)\s*원/);
+            if (match) {
+              const p = parseInt(match[1].replace(/,/g, ""), 10);
+              if (p > 0) couponPrices.push(p);
+            }
           }
         }
-
-        // 최종 가격 결정: 쿠폰가 우선, 없으면 판매가
-        const couponPrice = scriptCouponPrice || domCouponPrice || detailCouponPrice;
-        const salePrice = scriptSalePrice || domSalePrice;
+        // 가장 낮은 쿠폰가 (클럽쿠폰가가 일반 쿠폰가보다 항상 낮음)
+        const couponPrice = couponPrices.length > 0 ? Math.min(...couponPrices) : 0;
+        // 2차: 쿠폰가 없으면 판매가 (DOM 셀렉터)
+        let salePrice = 0;
+        if (!couponPrice) {
+          for (const sel of [
+            ".box__price strong.price_real",
+            ".price-real", ".selling-price", ".item-price",
+            '[class*="price"] strong', ".price strong",
+          ]) {
+            const el = document.querySelector(sel);
+            if (el?.textContent) {
+              const n = parseInt(el.textContent.replace(/[^0-9]/g, ""), 10);
+              if (n > 0) { salePrice = n; break; }
+            }
+          }
+        }
         let rawPrice = couponPrice || salePrice || 0;
 
         if (!rawPrice) {
