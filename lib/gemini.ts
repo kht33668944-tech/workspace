@@ -303,13 +303,13 @@ ${categoryList}
 
 // ── 카테고리코드 매칭 헬퍼 ──
 
-/** 텍스트를 슬래시/공백/쉼표로 분리하여 토큰 배열 반환 (1글자 이하 제외) */
+/** 텍스트를 슬래시/공백/쉼표/괄호 등으로 분리하여 토큰 배열 반환 */
 function tokenize(text: string): string[] {
   return text
     .toLowerCase()
-    .split(/[\/\s,·]+/)
+    .split(/[\/\s,·()>]+/)
     .map((t) => t.trim())
-    .filter((t) => t.length > 1);
+    .filter((t) => t.length > 0);
 }
 
 /** 상품과 카테고리코드 간 매칭 점수 계산 */
@@ -322,23 +322,27 @@ function scoreMatch(
   const srcTokens = tokenize(product.source_category || "");
   const productNameLower = product.product_name.toLowerCase();
 
-  // source_category 토큰이 category_name 토큰과 일치 (+10)
+  // source_category 토큰이 category_name 토큰과 정확 일치 (+10)
   for (const st of srcTokens) {
-    if (nameTokens.some((nt) => nt.includes(st) || st.includes(nt))) {
+    if (st.length >= 2 && nameTokens.some((nt) => nt === st)) {
       score += 10;
       break;
     }
   }
 
-  // product.category가 category_type과 일치 (+5)
-  if (product.category && code.category_type &&
-      product.category.toLowerCase() === code.category_type.toLowerCase()) {
-    score += 5;
+  // product.category가 category_type 토큰 중 하나와 일치 (+5)
+  // "가공식품" ↔ "음료/과자/가공식품" 같은 슬래시 구분 타입 지원
+  if (product.category && code.category_type) {
+    const catLower = product.category.toLowerCase();
+    const typeTokens = tokenize(code.category_type);
+    if (typeTokens.some((tt) => tt === catLower)) {
+      score += 5;
+    }
   }
 
-  // product_name에 category_name 토큰이 포함 (+3 per token)
+  // product_name에 category_name 토큰이 포함 (+3, 2글자 이상 토큰만)
   for (const nt of nameTokens) {
-    if (productNameLower.includes(nt)) {
+    if (nt.length >= 2 && productNameLower.includes(nt)) {
       score += 3;
     }
   }
