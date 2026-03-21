@@ -283,16 +283,12 @@ async function scrapeGmarketProduct(
 
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // 쿠폰가 요소가 렌더링될 때까지 대기 (JS 비동기 렌더링)
-    await page.waitForSelector(".price_innerwrap-coupon strong.price_real", {
+    // 판매가 요소 대기 (서버렌더링이므로 빠르게 잡힘)
+    await page.waitForSelector(".box__price strong.price_real", {
       timeout: 5000,
     }).catch(() => {});
-    // fallback: 일반 판매가라도 대기
-    await page.waitForSelector(".box__price strong.price_real", {
-      timeout: 3000,
-    }).catch(() => {});
 
-    // ── DOM 데이터 한 번에 추출 (evaluate 3회 → 1회) ─────────
+    // ── DOM 데이터 한 번에 추출 (evaluate 1회) ─────────
     const { rawName, category, rawPrice, rawImageUrls } = await page.evaluate(
       (): { rawName: string; category: string; rawPrice: number; rawImageUrls: string[] } => {
         // 상품명
@@ -330,38 +326,70 @@ async function scrapeGmarketProduct(
           }
         }
 
-        // 가격 파싱: strong 요소에서 "원" 앞 숫자만 정확히 추출
-        function parsePriceEl(el: Element | null): number {
-          if (!el) return 0;
-          // childNodes에서 텍스트만 추출 (자식 span 텍스트 "원" 제외)
-          let numText = "";
-          el.childNodes.forEach((node) => {
-            if (node.nodeType === 3) numText += node.textContent; // 텍스트 노드만
-          });
-          if (!numText.trim()) {
-            // fallback: 전체 textContent에서 첫 번째 숫자그룹
-            const m = el.textContent?.match(/[\d,]+/);
-            if (m) numText = m[0];
-          }
-          const n = parseInt(numText.replace(/[^0-9]/g, ""), 10);
-          return isNaN(n) ? 0 : n;
+        // ── 가격 추출 (3단계 우선순위) ──────────────────────
+        /** 숫자 문자열 → 양수 정수 변환 (실패 시 0) */
+        function parsePrice(v: string | null | undefined): number {
+          if (!v) return 0;
+          const n = parseInt(v.replace(/[^0-9]/g, ""), 10);
+          return isNaN(n) || n <= 0 ? 0 : n;
         }
 
-        // 쿠폰 적용가: .price_innerwrap-coupon 안의 strong.price_real
-        const couponEl = document.querySelector(".price_innerwrap-coupon strong.price_real");
-        const couponPrice = parsePriceEl(couponEl);
+        // 1차: 인라인 스크립트 utparam_url 변수 (가장 안정적, 서버렌더링)
+        let scriptCouponPrice = 0;
+        let scriptSalePrice = 0;
+        try {
+          for (const script of Array.from(document.querySelectorAll("script:not([src])"))) {
+            const m = script.textContent?.match(/var\s+utparam_url\s*=\s*'([^']+)'/);
+            if (!m) continue;
+            const json = JSON.parse(decodeURIComponent(m[1])) as Record<string, string>;
+            scriptCouponPrice = parsePrice(json["coupon_price"]);
+            scriptSalePrice = parsePrice(json["promotion_price"]);
+            break;
+          }
+        } catch {
+          // 파싱 실패 시 DOM fallback으로 진행
+        }
 
-        // 일반 판매가: 쿠폰이 아닌 첫 번째 strong.price_real
+        // 2차: DOM 셀렉터 (fallback)
+        function parsePriceEl(el: Element | null): number {
+          if (!el) return 0;
+          let numText = "";
+          el.childNodes.forEach((node) => {
+            if (node.nodeType === 3) numText += node.textContent;
+          });
+          if (!numText.trim()) {
+            const mt = el.textContent?.match(/[\d,]+/);
+            if (mt) numText = mt[0];
+          }
+          return parsePrice(numText);
+        }
+
+        const couponEl = document.querySelector(".price_innerwrap-coupon strong.price_real");
+        const domCouponPrice = parsePriceEl(couponEl);
+
         const allPriceReals = Array.from(document.querySelectorAll(".box__price strong.price_real"));
         const normalEl = allPriceReals.find((el) => !el.closest(".price_innerwrap-coupon"));
-        const salePrice = parsePriceEl(normalEl ?? null);
+        const domSalePrice = parsePriceEl(normalEl ?? null);
 
-        // 쿠폰가 우선, 없으면 판매가
+        // 3차: 쿠폰 상세내역 섹션 (스크립트·DOM 모두 실패 시)
+        let detailCouponPrice = 0;
+        if (!scriptCouponPrice && !domCouponPrice) {
+          const detailItems = document.querySelectorAll(".box__layer-coupon-information .list-item__price");
+          if (detailItems.length > 0) {
+            const numEl = detailItems[detailItems.length - 1].querySelector(".num");
+            detailCouponPrice = parsePrice(numEl?.textContent);
+          }
+        }
+
+        // 최종 가격 결정: 쿠폰가 우선, 없으면 판매가
+        const couponPrice = scriptCouponPrice || domCouponPrice || detailCouponPrice;
+        const salePrice = scriptSalePrice || domSalePrice;
         let rawPrice = couponPrice || salePrice || 0;
+
         if (!rawPrice) {
           const desc = document.querySelector<HTMLMetaElement>('meta[property="og:description"]')?.content || "";
-          const m = desc.match(/([0-9,]+)\s*원/);
-          if (m) rawPrice = parseInt(m[1].replace(/,/g, ""), 10);
+          const mt = desc.match(/([0-9,]+)\s*원/);
+          if (mt) rawPrice = parsePrice(mt[1]);
         }
 
         // 이미지 URL 수집 (실제 로딩은 route로 막았으므로 src 속성만 읽음)
@@ -387,7 +415,7 @@ async function scrapeGmarketProduct(
 
     await page.close(); // DOM 추출 완료 후 바로 닫기 (업로드 대기 불필요)
 
-    const price = typeof rawPrice === "number" && !isNaN(rawPrice) ? rawPrice
+    const price = typeof rawPrice === "number" && rawPrice > 0 ? rawPrice
       : (extractCouponPriceFromUrl(url) ?? 0);
 
     // ── LLM 호출 병렬화 + 이미지 업로드 동시 실행 ───────────
@@ -395,12 +423,12 @@ async function scrapeGmarketProduct(
     const limitedImageUrls = rawImageUrls.slice(0, 10).map(toHighResImageUrl);
     const timestamp = Date.now();
 
+    const VALID_IMG_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"]);
     const [product_name, matched_category, uploadResults] = await Promise.all([
       llmNormalizeProductName(regexName).then((n) => n ?? regexName),
       classifyCategory(regexName, category, categories),
       Promise.all(
         limitedImageUrls.map((imgUrl, idx) => {
-          const VALID_IMG_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"]);
           const rawExt = imgUrl.split("?")[0].split(".").pop()?.replace(/[^a-z]/gi, "")?.toLowerCase() || "";
           const ext = VALID_IMG_EXTS.has(rawExt) ? rawExt : "jpg";
           const storagePath = `products/${userId}/${timestamp}_${idx}.${ext}`;
