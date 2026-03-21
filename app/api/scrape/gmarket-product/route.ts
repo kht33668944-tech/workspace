@@ -394,6 +394,7 @@ async function scrapeGmarketProduct(
 
     const price = typeof rawPrice === "number" && rawPrice > 0 ? rawPrice
       : (extractCouponPriceFromUrl(url) ?? 0);
+    console.log(`[gmarket-product] 가격추출: rawPrice=${rawPrice}, finalPrice=${price}, url=${url.slice(0, 80)}`);
 
     // ── LLM 호출 병렬화 + 이미지 업로드 동시 실행 ───────────
     const regexName = normalizeProductName(rawName);
@@ -503,6 +504,16 @@ export async function POST(request: NextRequest) {
 
       try {
         await ensureGmarketLogin(context, supabase, cred?.id ?? "");
+
+        // 로그인 확인: 아무 지마켓 페이지에서 로그인 상태 체크
+        const checkPage = await context.newPage();
+        await checkPage.goto("https://www.gmarket.co.kr", { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+        const isLoggedIn = await checkPage.evaluate(() => {
+          const el = document.querySelector(".link__logout, .btn-logout, [class*='logout']");
+          return !!el;
+        }).catch(() => false);
+        await checkPage.close();
+        console.log(`[gmarket-login] 로그인 상태 확인: ${isLoggedIn ? "✅ 로그인됨" : "❌ 비로그인"}`);
 
         const CONCURRENCY = 2;
         let doneCount = 0;
