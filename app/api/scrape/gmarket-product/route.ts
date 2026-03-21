@@ -329,53 +329,44 @@ async function scrapeGmarketProduct(
           }
         }
 
-        // ── 가격 추출 ──────────────────────
-        /** 숫자 문자열 → 양수 정수 변환 (실패 시 0) */
-        function parsePrice(v: string | null | undefined): number {
-          if (!v) return 0;
-          const n = parseInt(v.replace(/[^0-9]/g, ""), 10);
-          return isNaN(n) || n <= 0 ? 0 : n;
-        }
-
-        // 1차: "쿠폰적용가" / "클럽쿠폰가" 텍스트에서 가격 직접 추출 (로그인 상태면 클럽쿠폰가 우선)
-        const couponPrices: number[] = [];
+        // ── 가격 추출 (클럽쿠폰가 > 쿠폰적용가 > 판매가) ──────────
+        // DOM에서 "쿠폰" 키워드가 포함된 요소의 가격을 모두 수집 → 최저가 사용
+        const allCouponPrices: number[] = [];
         for (const el of Array.from(document.querySelectorAll("*"))) {
           const text = el.textContent || "";
-          if (
-            (text.includes("쿠폰적용가") || text.includes("클럽쿠폰가")) &&
-            text.includes("원") &&
-            el.children.length < 5
-          ) {
-            const match = text.match(/쿠폰[가]?\s*([0-9,]+)\s*원/);
-            if (match) {
-              const p = parseInt(match[1].replace(/,/g, ""), 10);
-              if (p > 0) couponPrices.push(p);
+          if (el.children.length > 5) continue;
+          // "클럽쿠폰가", "쿠폰적용가" 등 쿠폰 관련 텍스트에서 가격 추출
+          if (text.includes("쿠폰") && text.includes("원")) {
+            // "쿠폰적용가27,450원", "클럽쿠폰가 23,450원" 등 매칭
+            const matches = text.matchAll(/(?:쿠폰[가적용]*)\s*([0-9,]+)\s*원/g);
+            for (const m of matches) {
+              const p = parseInt(m[1].replace(/,/g, ""), 10);
+              if (p > 1000) allCouponPrices.push(p);
             }
           }
         }
-        // 가장 낮은 쿠폰가 (클럽쿠폰가가 일반 쿠폰가보다 항상 낮음)
-        const couponPrice = couponPrices.length > 0 ? Math.min(...couponPrices) : 0;
-        // 2차: 쿠폰가 없으면 판매가 (DOM 셀렉터)
-        let salePrice = 0;
-        if (!couponPrice) {
-          for (const sel of [
+        const couponPrice = allCouponPrices.length > 0 ? Math.min(...allCouponPrices) : 0;
+
+        // 쿠폰가 없으면 판매가 fallback
+        let rawPrice = couponPrice;
+        if (!rawPrice) {
+          const priceSelectors = [
             ".box__price strong.price_real",
             ".price-real", ".selling-price", ".item-price",
             '[class*="price"] strong', ".price strong",
-          ]) {
+          ];
+          for (const sel of priceSelectors) {
             const el = document.querySelector(sel);
             if (el?.textContent) {
               const n = parseInt(el.textContent.replace(/[^0-9]/g, ""), 10);
-              if (n > 0) { salePrice = n; break; }
+              if (n > 0) { rawPrice = n; break; }
             }
           }
         }
-        let rawPrice = couponPrice || salePrice || 0;
-
         if (!rawPrice) {
           const desc = document.querySelector<HTMLMetaElement>('meta[property="og:description"]')?.content || "";
           const mt = desc.match(/([0-9,]+)\s*원/);
-          if (mt) rawPrice = parsePrice(mt[1]);
+          if (mt) rawPrice = parseInt(mt[1].replace(/,/g, ""), 10) || 0;
         }
 
         // 이미지 URL 수집 (실제 로딩은 route로 막았으므로 src 속성만 읽음)
