@@ -165,7 +165,7 @@ export default function ProductsPage() {
         </button>
         <button onClick={() => setActiveTab("smartstore-category")} className={TAB_CLASSES("smartstore-category")}>
           <LayoutList className="w-4 h-4" />
-          스토어 카테고리
+          플토 카테고리
         </button>
       </div>
 

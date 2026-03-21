@@ -22,7 +22,7 @@ function newTempId() {
 
 export default function SmartStoreCategoryTab() {
   const { session } = useAuth();
-  const { addToast } = useToast();
+  const { showToast: addToast } = useToast();
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,13 +105,15 @@ export default function SmartStoreCategoryTab() {
     const savedIds = [...selectedIds].filter((id) => !id.startsWith("__new__"));
 
     if (savedIds.length > 0) {
-      const res = await fetch("/api/products/smartstore-categories", {
-        method: "DELETE",
+      const res = await fetch("/api/products/smartstore-categories/delete", {
+        method: "POST",
         headers: { ...authHeader, "Content-Type": "application/json" },
         body: JSON.stringify({ ids: savedIds }),
       });
       if (!res.ok) {
-        addToast("삭제 실패", "error");
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        console.error("DELETE failed:", res.status, err);
+        addToast(err.error ?? "삭제 실패", "error");
         return;
       }
     }
@@ -189,10 +191,10 @@ export default function SmartStoreCategoryTab() {
           .map((row) => {
             // 헤더 유연하게 처리 (한글 or 영문 컬럼명)
             const code = String(
-              row["카테고리코드"] ?? row["category_code"] ?? row["A"] ?? ""
+              row["표준카테고리코드"] ?? row["카테고리코드"] ?? row["category_code"] ?? row["A"] ?? ""
             ).trim();
             const type = String(
-              row["분류"] ?? row["category_type"] ?? row["B"] ?? ""
+              row["분류명"] ?? row["분류"] ?? row["category_type"] ?? row["B"] ?? ""
             ).trim();
             const name = String(
               row["카테고리명"] ?? row["category_name"] ?? row["C"] ?? ""
@@ -206,18 +208,21 @@ export default function SmartStoreCategoryTab() {
           return;
         }
 
-        // 기존 코드와 중복 제거 후 병합
-        setRows((prev) => {
-          const existingCodes = new Set(prev.map((r) => r.category_code));
-          const unique = newRows.filter((r) => !existingCodes.has(r.category_code));
-          const updated = prev.map((r) => {
-            const match = newRows.find((nr) => nr.category_code === r.category_code);
-            return match ? { ...r, category_type: match.category_type, category_name: match.category_name, dirty: true } : r;
-          });
-          return [...updated, ...unique];
-        });
+        // 기존 코드와 중복되는 항목은 건너뛰고 새 항목만 추가
+        const existingCodes = new Set(rows.map((r) => r.category_code));
+        const unique = newRows.filter((r) => !existingCodes.has(r.category_code));
+        const skipped = newRows.length - unique.length;
 
-        addToast(`${newRows.length}개 항목을 불러왔습니다. 저장 버튼을 눌러 저장하세요.`, "info");
+        if (unique.length === 0) {
+          addToast(`모든 항목(${newRows.length}개)이 이미 등록되어 있습니다.`, "info");
+        } else {
+          setRows((prev) => [...prev, ...unique]);
+          if (skipped > 0) {
+            addToast(`${unique.length}개 추가, ${skipped}개 중복 건너뜀. 저장 버튼을 눌러 저장하세요.`, "info");
+          } else {
+            addToast(`${unique.length}개 항목을 불러왔습니다. 저장 버튼을 눌러 저장하세요.`, "info");
+          }
+        }
       } catch {
         addToast("엑셀 파일 읽기 실패", "error");
       }
@@ -234,9 +239,9 @@ export default function SmartStoreCategoryTab() {
       {/* 헤더 */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-[var(--text-primary)]">스마트스토어 카테고리코드</h2>
+          <h2 className="text-base font-semibold text-[var(--text-primary)]">플레이오토 카테고리코드</h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            플레이오토 대량등록 시 카테고리코드(B열)에 사용되는 스마트스토어 카테고리 목록입니다.
+            플레이오토 대량등록 시 카테고리코드(B열)에 사용되는 카테고리 목록입니다. (옥션/지마켓/11번가/멸치쇼핑/쿠팡 등 전 플랫폼 공통)
           </p>
         </div>
 
@@ -394,9 +399,9 @@ export default function SmartStoreCategoryTab() {
       {/* 엑셀 양식 안내 */}
       <div className="text-xs text-[var(--text-muted)] bg-[var(--bg-card)] rounded-lg px-4 py-3 border border-[var(--border)]">
         <strong className="text-[var(--text-primary)]">엑셀 업로드 양식:</strong>{" "}
-        A열 = 카테고리코드, B열 = 분류, C열 = 카테고리명 &nbsp;|&nbsp;
+        A열 = 표준카테고리코드, B열 = 분류명, C열 = 카테고리명 &nbsp;|&nbsp;
         첫 번째 행은 헤더(카테고리코드 / 분류 / 카테고리명)이거나 데이터 행이어도 무방합니다.
-        중복 코드는 자동으로 업데이트됩니다.
+        이미 등록된 코드는 자동으로 건너뜁니다.
       </div>
     </div>
   );

@@ -19,7 +19,8 @@ export async function GET(req: NextRequest) {
     .select("id, category_code, category_type, category_name, created_at")
     .eq("user_id", userId)
     .order("category_type")
-    .order("category_name");
+    .order("category_name")
+    .limit(5000);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ codes: data ?? [] });
@@ -53,23 +54,3 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true });
 }
 
-/** DELETE: 특정 코드 삭제 */
-export async function DELETE(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { ids } = (await req.json()) as { ids: string[] };
-  if (!Array.isArray(ids) || ids.length === 0) {
-    return NextResponse.json({ error: "삭제할 항목이 없습니다." }, { status: 400 });
-  }
-
-  const supabase = getSupabase();
-  const { error } = await supabase
-    .from("smartstore_category_codes")
-    .delete()
-    .eq("user_id", userId)
-    .in("id", ids);
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
-}
