@@ -217,23 +217,6 @@ function normalizeProductName(raw: string): string {
   return name.replace(/\s{2,}/g, " ").trim();
 }
 
-/** URL 파라미터에서 쿠폰가 추출 — NaN 반환 방지 */
-function extractCouponPriceFromUrl(url: string): number | null {
-  try {
-    const match = url.match(/utparam-url=([^&]+)/);
-    if (!match) return null;
-    const json = JSON.parse(decodeURIComponent(match[1])) as Record<string, string>;
-    const couponPrice = json["coupon_price"];
-    if (couponPrice) {
-      const n = parseInt(couponPrice, 10);
-      return isNaN(n) ? null : n;
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
 /** 지마켓 이미지 URL을 최대 해상도(1000px)로 변환 */
 function toHighResImageUrl(url: string): string {
   if (/\/still\/\d+/.test(url)) {
@@ -353,44 +336,21 @@ async function scrapeGmarketProduct(
           }
         }
 
-        // ── 가격 추출 (클럽쿠폰가 > 쿠폰적용가 > 판매가) ──────────
-        // DOM에서 "쿠폰" 키워드가 포함된 요소의 가격을 모두 수집 → 최저가 사용
-        const allCouponPrices: number[] = [];
-        for (const el of Array.from(document.querySelectorAll("*"))) {
-          const text = el.textContent || "";
-          if (el.children.length > 5) continue;
-          // "클럽쿠폰가", "쿠폰적용가" 등 쿠폰 관련 텍스트에서 가격 추출
-          if (text.includes("쿠폰") && text.includes("원")) {
-            // "쿠폰적용가27,450원", "클럽쿠폰가 23,450원" 등 매칭
-            const matches = text.matchAll(/(?:쿠폰[가적용]*)\s*([0-9,]+)\s*원/g);
-            for (const m of matches) {
-              const p = parseInt(m[1].replace(/,/g, ""), 10);
-              if (p > 1000) allCouponPrices.push(p);
-            }
-          }
+        // ── 가격 추출 (클럽쿠폰가 > 판매가) ──────────
+        // 1순위: 클럽쿠폰가 (.price_innerwrap-coupon .price_real)
+        let rawPrice = 0;
+        const couponPriceEl = document.querySelector(".price_innerwrap-coupon .price_real");
+        if (couponPriceEl?.textContent) {
+          const n = parseInt(couponPriceEl.textContent.replace(/[^0-9]/g, ""), 10);
+          if (n > 0) rawPrice = n;
         }
-        const couponPrice = allCouponPrices.length > 0 ? Math.min(...allCouponPrices) : 0;
-
-        // 쿠폰가 없으면 판매가 fallback
-        let rawPrice = couponPrice;
+        // 2순위: 판매가 (.box__price strong.price_real)
         if (!rawPrice) {
-          const priceSelectors = [
-            ".box__price strong.price_real",
-            ".price-real", ".selling-price", ".item-price",
-            '[class*="price"] strong', ".price strong",
-          ];
-          for (const sel of priceSelectors) {
-            const el = document.querySelector(sel);
-            if (el?.textContent) {
-              const n = parseInt(el.textContent.replace(/[^0-9]/g, ""), 10);
-              if (n > 0) { rawPrice = n; break; }
-            }
+          const salePriceEl = document.querySelector(".box__price strong.price_real");
+          if (salePriceEl?.textContent) {
+            const n = parseInt(salePriceEl.textContent.replace(/[^0-9]/g, ""), 10);
+            if (n > 0) rawPrice = n;
           }
-        }
-        if (!rawPrice) {
-          const desc = document.querySelector<HTMLMetaElement>('meta[property="og:description"]')?.content || "";
-          const mt = desc.match(/([0-9,]+)\s*원/);
-          if (mt) rawPrice = parseInt(mt[1].replace(/,/g, ""), 10) || 0;
         }
 
         // 이미지 URL 수집 (실제 로딩은 route로 막았으므로 src 속성만 읽음)
@@ -416,9 +376,8 @@ async function scrapeGmarketProduct(
 
     await page.close(); // DOM 추출 완료 후 바로 닫기 (업로드 대기 불필요)
 
-    const price = typeof rawPrice === "number" && rawPrice > 0 ? rawPrice
-      : (extractCouponPriceFromUrl(url) ?? 0);
-    console.log(`[gmarket-product] 가격추출: rawPrice=${rawPrice}, finalPrice=${price}, url=${url.slice(0, 80)}`);
+    const price = typeof rawPrice === "number" && rawPrice > 0 ? rawPrice : 0;
+    console.log(`[gmarket-product] 가격추출: price=${price}, url=${url.slice(0, 80)}`);
 
     // ── LLM 호출 병렬화 + 이미지 업로드 동시 실행 ───────────
     const regexName = normalizeProductName(rawName);
