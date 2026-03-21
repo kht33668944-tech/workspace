@@ -322,35 +322,38 @@ function scoreMatch(
   const srcTokens = tokenize(product.source_category || "");
   const productNameLower = product.product_name.toLowerCase();
 
-  // source_category 토큰이 category_name 토큰과 정확 일치 (+10)
+  // source_category 토큰 ↔ category_name 토큰 매칭
   for (const st of srcTokens) {
-    if (st.length >= 2 && nameTokens.some((nt) => nt === st)) {
-      score += 10;
-      break;
+    if (st.length < 2) continue;
+    // 정확 일치 (+10)
+    if (nameTokens.some((nt) => nt === st)) { score += 10; break; }
+    // 부분 일치: source가 name에 포함되거나 반대 (+6, 2글자 이상만)
+    if (nameTokens.some((nt) => nt.length >= 2 && (nt.includes(st) || st.includes(nt)))) {
+      score += 6; break;
     }
   }
 
-  // product.category가 category_type 토큰 중 하나와 일치 (+5)
-  // "가공식품" ↔ "음료/과자/가공식품" 같은 슬래시 구분 타입 지원
+  // product.category가 category_type 토큰 중 하나와 일치 (+3)
+  // 단독으로는 매칭 부족하도록 낮은 점수 (대분류만 같고 소분류 다른 경우 방지)
   if (product.category && code.category_type) {
     const catLower = product.category.toLowerCase();
     const typeTokens = tokenize(code.category_type);
     if (typeTokens.some((tt) => tt === catLower)) {
-      score += 5;
+      score += 3;
     }
   }
 
-  // product_name에 category_name 토큰이 포함 (+3, 2글자 이상 토큰만)
+  // product_name에 category_name 토큰이 포함 (+4, 2글자 이상 토큰만)
   for (const nt of nameTokens) {
     if (nt.length >= 2 && productNameLower.includes(nt)) {
-      score += 3;
+      score += 4;
     }
   }
 
   return score;
 }
 
-/** 최고 점수 코드 반환 (threshold 5 이상) */
+/** 최고 점수 코드 반환 (threshold 8 이상 — 대분류만 일치로는 매칭 안됨) */
 function findBestMatch(
   product: { product_name: string; category: string; source_category: string },
   codes: Array<{ category_code: string; category_type: string; category_name: string }>
@@ -366,7 +369,7 @@ function findBestMatch(
     }
   }
 
-  return bestScore >= 5 ? bestCode : null;
+  return bestScore >= 8 ? bestCode : null;
 }
 
 /**
