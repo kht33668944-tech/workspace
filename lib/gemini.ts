@@ -301,172 +301,60 @@ ${categoryList}
   }
 }
 
-// ── 카테고리코드 매칭 헬퍼 ──
-
-/** 텍스트를 슬래시/공백/쉼표/괄호 등으로 분리하여 토큰 배열 반환 */
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[\/\s,·()>]+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length > 0);
-}
-
-/** 상품과 카테고리코드 간 매칭 점수 계산 */
-function scoreMatch(
-  product: { product_name: string; category: string; source_category: string },
-  code: { category_code: string; category_type: string; category_name: string }
-): number {
-  let score = 0;
-  const nameTokens = tokenize(code.category_name);
-  const srcTokens = tokenize(product.source_category || "");
-  const productNameLower = product.product_name.toLowerCase();
-
-  // source_category 토큰 ↔ category_name 토큰 매칭
-  for (const st of srcTokens) {
-    if (st.length < 2) continue;
-    // 정확 일치 (+10)
-    if (nameTokens.some((nt) => nt === st)) { score += 10; break; }
-    // 부분 일치: source가 name에 포함되거나 반대 (+6, 2글자 이상만)
-    if (nameTokens.some((nt) => nt.length >= 2 && (nt.includes(st) || st.includes(nt)))) {
-      score += 6; break;
-    }
-  }
-
-  // product.category가 category_type 토큰 중 하나와 일치 (+3)
-  // 단독으로는 매칭 부족하도록 낮은 점수 (대분류만 같고 소분류 다른 경우 방지)
-  if (product.category && code.category_type) {
-    const catLower = product.category.toLowerCase();
-    const typeTokens = tokenize(code.category_type);
-    if (typeTokens.some((tt) => tt === catLower)) {
-      score += 3;
-    }
-  }
-
-  // product_name에 category_name 토큰이 포함 (+4, 2글자 이상 토큰만)
-  for (const nt of nameTokens) {
-    if (nt.length >= 2 && productNameLower.includes(nt)) {
-      score += 4;
-    }
-  }
-
-  return score;
-}
-
-/** 최고 점수 코드 반환 (threshold 8 이상 — 대분류만 일치로는 매칭 안됨) */
-function findBestMatch(
-  product: { product_name: string; category: string; source_category: string },
-  codes: Array<{ category_code: string; category_type: string; category_name: string }>
-): string | null {
-  let bestCode: string | null = null;
-  let bestScore = 0;
-
-  for (const code of codes) {
-    const s = scoreMatch(product, code);
-    if (s > bestScore) {
-      bestScore = s;
-      bestCode = code.category_code;
-    }
-  }
-
-  return bestScore >= 8 ? bestCode : null;
-}
-
 /**
- * 상품 목록 → 플레이오토 카테고리코드 자동 매칭
- * Phase 1: 텍스트 직접 매칭 (source_category/category/product_name 기반 스코어링)
- * Phase 2: Gemini fallback (Phase 1 실패 상품만, 전체 코드 1회 호출)
+ * 상품 목록 → 스마트스토어 카테고리코드 자동 매핑 (Gemini)
+ * @param products 상품 목록 (product_name, category, source_category)
+ * @param availableCodes 사용자가 등록한 스마트스토어 카테고리코드 목록
+ * @returns 각 상품에 대응하는 카테고리코드 (없으면 "" 반환)
  */
 export async function suggestSmartStoreCategoryCodes(
   products: Array<{ product_name: string; category: string; source_category: string }>,
   availableCodes: Array<{ category_code: string; category_type: string; category_name: string }>
 ): Promise<string[]> {
-  if (products.length === 0 || availableCodes.length === 0) return products.map(() => "");
+  const fallback = products.map(() => "");
+  if (!process.env.GEMINI_API_KEY || products.length === 0 || availableCodes.length === 0) return fallback;
 
-  const validCodeSet = new Set(availableCodes.map((c) => c.category_code));
-  const results: string[] = products.map(() => "");
+  const codeList = availableCodes
+    .map((c) => `${c.category_code}: [${c.category_type}] ${c.category_name}`)
+    .join("\n");
 
-  // ── Phase 1: 텍스트 직접 매칭 ──
-  const unmatchedIndices: number[] = [];
+  const productList = products
+    .map((p, i) => `${i + 1}. 상품명: ${p.product_name} | 내카테고리: ${p.category || "없음"} | 원본카테고리: ${p.source_category || "없음"}`)
+    .join("\n");
 
-  products.forEach((p, i) => {
-    const match = findBestMatch(p, availableCodes);
-    if (match) {
-      results[i] = match;
-    } else {
-      unmatchedIndices.push(i);
-    }
-  });
+  const result = await generateText(
+    `아래 상품 목록을 분석해서 각 상품에 가장 적합한 스마트스토어 카테고리코드를 선택하세요.
 
-  const phase1Matched = products.length - unmatchedIndices.length;
-  console.log(`[카테고리매칭] Phase1 텍스트매칭: ${phase1Matched}/${products.length}개 성공`);
+스마트스토어 카테고리코드 목록 (코드: [분류] 카테고리명):
+${codeList}
 
-  // ── Phase 2: Gemini fallback (미매칭 상품만) ──
-  if (unmatchedIndices.length > 0 && process.env.GEMINI_API_KEY) {
-    // 코드 목록 문자열 (대분류별 그룹핑)
-    const codesByType = new Map<string, typeof availableCodes>();
-    for (const c of availableCodes) {
-      const arr = codesByType.get(c.category_type) ?? [];
-      arr.push(c);
-      codesByType.set(c.category_type, arr);
-    }
-    const codeListStr = [...codesByType.entries()]
-      .map(([type, codes]) =>
-        `[${type}]\n${codes.map((c) => `${c.category_code}: ${c.category_name}`).join("\n")}`
-      )
-      .join("\n\n");
+상품 목록:
+${productList}
 
-    // 배치 처리 (한 번에 최대 30개)
-    const BATCH = 30;
-    for (let start = 0; start < unmatchedIndices.length; start += BATCH) {
-      const batchIndices = unmatchedIndices.slice(start, start + BATCH);
-      const batchProducts = batchIndices.map((i) => products[i]);
-      const batchList = batchProducts
-        .map((p, gi) => `${gi + 1}. ${p.product_name} (카테고리: ${p.category || "없음"}, 원본: ${p.source_category || "없음"})`)
-        .join("\n");
-
-      console.log(`[카테고리매칭] Phase2 Gemini: 상품 ${batchIndices.length}개, 코드 ${availableCodes.length}개`);
-
-      const result = await generateText(
-        `각 상품에 가장 적합한 카테고리코드를 선택하세요.
-
-## 카테고리코드 목록 (코드: 카테고리명)
-${codeListStr}
-
-## 상품 목록
-${batchList}
-
-## 규칙
-- 상품명과 카테고리 정보를 보고 가장 적합한 카테고리코드를 선택
-- 반드시 위 목록에 있는 숫자 코드만 사용
-- 정확히 맞는 것이 없으면 가장 가까운 코드를 선택
-- 빈 문자열 금지
-- JSON 배열로만 출력 (설명 없이):
+규칙:
+- 반드시 위 카테고리코드 목록에 있는 코드 숫자만 선택
+- 적합한 카테고리가 없으면 빈 문자열("") 출력
+- 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
 ["코드1", "코드2", ...]
 
-상품 ${batchProducts.length}개 → 배열 ${batchProducts.length}개`
-      );
+상품 개수: ${products.length}개, 배열 항목도 반드시 ${products.length}개`
+  );
 
-      console.log(`[카테고리매칭] Phase2 응답:`, result?.slice(0, 300));
+  if (!result) return fallback;
 
-      if (!result) continue;
-      try {
-        const jsonMatch = result.match(/\[[\s\S]*?\]/);
-        if (!jsonMatch) continue;
-        const parsed = JSON.parse(jsonMatch[0]) as string[];
-        if (!Array.isArray(parsed)) continue;
-        batchIndices.forEach((productIdx, gi) => {
-          const code = String(parsed[gi] ?? "").trim();
-          if (validCodeSet.has(code)) results[productIdx] = code;
-        });
-      } catch { /* skip */ }
-    }
+  try {
+    const jsonMatch = result.match(/\[[\s\S]*?\]/);
+    if (!jsonMatch) return fallback;
+    const parsed = JSON.parse(jsonMatch[0]) as string[];
+    if (!Array.isArray(parsed)) return fallback;
+    const validCodes = new Set(availableCodes.map((c) => c.category_code));
+    return products.map((_, i) => {
+      const code = String(parsed[i] ?? "").trim();
+      return validCodes.has(code) ? code : "";
+    });
+  } catch {
+    return fallback;
   }
-
-  const totalMatched = results.filter((r) => r !== "").length;
-  console.log(`[카테고리매칭] 최종: ${totalMatched}/${products.length}개 매칭 (Phase1: ${phase1Matched}, Phase2: ${totalMatched - phase1Matched})`);
-
-  return results;
 }
 
 /**
