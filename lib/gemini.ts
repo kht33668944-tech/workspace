@@ -451,7 +451,7 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
   // 마크다운 볼드(**) 제거
   cleaned = cleaned.replace(/\*\*/g, "").trim();
   // 특수문자 최종 정리 (허용: 한글, 영문, 숫자, 공백)
-  cleaned = cleaned.replace(/[^\uAC00-\uD7A3\u3130-\u318Fa-zA-Z0-9\s.]/g, "").replace(/\s{2,}/g, " ").trim();
+  cleaned = cleaned.replace(/[^\uAC00-\uD7A3\u3130-\u318Fa-zA-Z0-9\s]/g, "").replace(/\s{2,}/g, " ").trim();
 
   return cleaned || null;
 }

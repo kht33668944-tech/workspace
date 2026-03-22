@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import { groundedSearch } from "@/lib/gemini";
 import { launchBrowser } from "@/lib/scrapers/browser";
+import { browserPool } from "@/lib/scrapers/browser-pool";
 
 export const maxDuration = 300;
 
@@ -54,6 +55,38 @@ function isPlaceholder(value: SpecValue): boolean {
 
 function countFilledFields(specs: ProductSpecs): number {
   return Object.values(specs).filter((v) => !isPlaceholder(v as SpecValue)).length;
+}
+
+/** Gemini 응답에서 JSON 파싱 → placeholder 제거 후 ProductSpecs 반환 */
+function parseGroundedSpecs(raw: string): ProductSpecs | null {
+  try {
+    const cleaned = raw.replace(/```json\n?|\n?```/g, "").trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]) as ProductSpecs;
+    const result: ProductSpecs = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!isPlaceholder(value as SpecValue)) {
+        result[key] = value as SpecValue;
+      }
+    }
+    return Object.keys(result).length > 0 ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 이미지 URL → base64 data URI 변환 */
+async function fetchImageAsDataUri(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const ct = res.headers.get("content-type") || "image/jpeg";
+    return `data:${ct};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
 }
 
 function buildDetailHtml(productName: string, thumbnailUrl: string | null, specs: ProductSpecs): string {
@@ -165,28 +198,14 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
 - "상세페이지 참조" 같은 의미없는 값은 절대 넣지 마세요
 - 추가 설명 없이 JSON만 출력`;
 
+  // 1차 Gemini 검색 + 썸네일 base64 변환을 병렬 실행
   console.log("[detail] Gemini Grounding 검색 시작:", productName);
-  const groundedResult = await groundedSearch(groundingPrompt);
+  const [groundedResult, thumbDataUri] = await Promise.all([
+    groundedSearch(groundingPrompt),
+    thumbnailUrl ? fetchImageAsDataUri(thumbnailUrl) : Promise.resolve(null),
+  ]);
 
-  let specs: ProductSpecs = {};
-  if (groundedResult) {
-    try {
-      const cleaned = groundedResult.replace(/```json\n?|\n?```/g, "").trim();
-      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]) as ProductSpecs;
-        // placeholder 제거
-        for (const [key, value] of Object.entries(parsed)) {
-          if (!isPlaceholder(value as SpecValue)) {
-            specs[key] = value as SpecValue;
-          }
-        }
-      }
-    } catch {
-      console.warn("[detail] Gemini JSON 파싱 실패");
-    }
-  }
-
+  let specs: ProductSpecs = parseGroundedSpecs(groundedResult ?? "") ?? {};
   console.log("[detail] Gemini Grounding 결과:", countFilledFields(specs), "개 필드");
 
   // ── 2. 결과 부족 시 2차 검색 (다른 각도로) ─────────────────────────────────
@@ -219,21 +238,12 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
 - 확인할 수 없는 항목은 빈 문자열
 - 추가 설명 없이 JSON만 출력`;
 
-    const fallbackResult = await groundedSearch(fallbackPrompt);
-    if (fallbackResult) {
-      try {
-        const cleaned = fallbackResult.replace(/```json\n?|\n?```/g, "").trim();
-        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]) as ProductSpecs;
-          for (const [key, value] of Object.entries(parsed)) {
-            if (!isPlaceholder(value as SpecValue) && isPlaceholder(specs[key])) {
-              specs[key] = value as SpecValue;
-            }
-          }
+    const fallbackSpecs = parseGroundedSpecs(await groundedSearch(fallbackPrompt) ?? "");
+    if (fallbackSpecs) {
+      for (const [key, value] of Object.entries(fallbackSpecs)) {
+        if (isPlaceholder(specs[key])) {
+          specs[key] = value;
         }
-      } catch {
-        // 무시
       }
     }
     console.log("[detail] 2차 검색 후:", countFilledFields(specs), "개 필드");
@@ -248,27 +258,13 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
 
   // ── 3. HTML 생성 ────────────────────────────────────────────────────────
   const detailHtml = buildDetailHtml(productName, thumbnailUrl, specs);
-
-  // 스크린샷용: 썸네일을 base64로 변환
-  let screenshotThumbnail: string | null = thumbnailUrl;
-  if (thumbnailUrl) {
-    try {
-      const imgRes = await fetch(thumbnailUrl);
-      if (imgRes.ok) {
-        const buf = Buffer.from(await imgRes.arrayBuffer());
-        const ct = imgRes.headers.get("content-type") || "image/jpeg";
-        screenshotThumbnail = `data:${ct};base64,${buf.toString("base64")}`;
-      }
-    } catch (e) {
-      console.warn("[detail] 썸네일 fetch 오류:", (e as Error).message);
-    }
-  }
-  const screenshotHtml = buildDetailHtml(productName, screenshotThumbnail, specs);
+  const screenshotHtml = buildDetailHtml(productName, thumbDataUri ?? thumbnailUrl, specs);
 
   // ── 4. Playwright로 HTML → PNG 스크린샷 ────────────────────────────────
   const serviceClient = getServiceSupabaseClient();
   let detailImageUrl: string | null = null;
   let browser: Awaited<ReturnType<typeof launchBrowser>> | null = null;
+  await browserPool.acquire();
   try {
     browser = await launchBrowser();
     const screenshotCtx = await browser.newContext({ viewport: { width: 1000, height: 800 } });
@@ -298,6 +294,7 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
     console.error("[detail] Playwright 스크린샷 실패:", e);
   } finally {
     if (browser) await browser.close().catch(() => {});
+    browserPool.release();
   }
 
   // ── 5. DB 업데이트 ───────────────────────────────────────────────────────
