@@ -6,6 +6,12 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import type { Product, ProductUpdate } from "@/types/database";
 
+function urlToStoragePath(publicUrl: string): string {
+  const marker = "/product-images/";
+  const idx = publicUrl.indexOf(marker);
+  return idx >= 0 ? publicUrl.slice(idx + marker.length) : publicUrl;
+}
+
 interface UseProductsOptions {
   search?: string;
   categoryFilter?: string | null;
@@ -218,6 +224,27 @@ export function useProducts(options: UseProductsOptions = {}) {
   }, [showToast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const deleteProducts = async (ids: string[]) => {
+    // 삭제 대상 상품의 이미지 경로 수집
+    const storagePaths: string[] = [];
+    const toDelete = products.filter((p) => ids.includes(p.id));
+    for (const p of toDelete) {
+      if (p.image_urls?.length) {
+        storagePaths.push(...p.image_urls.map(urlToStoragePath));
+      }
+      if (p.detail_image_url) {
+        storagePaths.push(urlToStoragePath(p.detail_image_url));
+      }
+    }
+
+    // Storage 이미지 삭제
+    if (storagePaths.length > 0) {
+      const STORAGE_BATCH = 100;
+      for (let i = 0; i < storagePaths.length; i += STORAGE_BATCH) {
+        await supabase.storage.from("product-images").remove(storagePaths.slice(i, i + STORAGE_BATCH));
+      }
+    }
+
+    // DB 레코드 삭제
     const BATCH_SIZE = 100;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
