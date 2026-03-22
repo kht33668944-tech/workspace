@@ -5,13 +5,14 @@ import { Filter, Check, ArrowUp, ArrowDown } from "lucide-react";
 import type { Product } from "@/types/database";
 import type { Col, SortDir } from "./table-utils";
 
-export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allProducts, columnFilters, sort, onSort, isMobile }: {
+export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allProducts, columnFilters, sort, onSort, isMobile, stickyLeft }: {
   col: Col; width: number; onResize: (w: number) => void;
   hasFilter: boolean; filterOpen: boolean; onFilterToggle: () => void;
   selectedValues: string[]; onFilterChange: (v: string[]) => void; allProducts: Product[];
   columnFilters: Record<string, string[]>;
   sort: SortDir; onSort: (d: SortDir) => void;
   isMobile?: boolean;
+  stickyLeft?: number;
 }) {
   const sx = useRef(0), sw = useRef(0);
   const onMouseDown = (e: React.MouseEvent) => {
@@ -25,7 +26,7 @@ export const ResizableHeader = memo(function ResizableHeader({ col, width, onRes
     document.addEventListener("mouseup", onUp);
   };
   return (
-    <th className={`relative px-2 py-2.5 text-xs font-medium text-[var(--text-tertiary)] whitespace-nowrap select-none group border-r border-[var(--border-subtle)] ${col.align === "right" ? "text-right" : "text-left"}`} style={isMobile ? undefined : { width, minWidth: width }}>
+    <th className={`relative px-2 py-2.5 text-xs font-medium text-[var(--text-tertiary)] whitespace-nowrap select-none group border-r border-[var(--border-subtle)] ${col.align === "right" ? "text-right" : "text-left"} ${stickyLeft != null ? "sticky bg-[var(--table-header-bg)] z-30" : ""}`} style={isMobile ? undefined : { width, minWidth: width, ...(stickyLeft != null ? { left: stickyLeft, boxShadow: "2px 0 4px rgba(0,0,0,0.1)" } : {}) }}>
       <div className="flex items-center gap-1">
         <span className="truncate">{col.label}</span>
         {sort === "asc" && <ArrowUp className="w-3 h-3 text-blue-400 shrink-0" />}

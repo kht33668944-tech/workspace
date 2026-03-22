@@ -102,11 +102,13 @@ export function useDashboard() {
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
 
+  const userId = user?.id;
+
   const fetchData = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     setLoading(true);
 
-    const uid = user.id;
+    const uid = userId;
     const now = new Date();
     const currentMonth = formatMonth(now);
     const lastMonth = formatMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
@@ -208,7 +210,7 @@ export function useDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
     fetchData();

@@ -69,12 +69,13 @@ export default function ProductsPage() {
   }, [products, selectedIds, session, startBatch]);
 
   const stats = useMemo(() => {
-    const count = products.length;
+    const filled = products.filter(p => p.product_name?.trim());
+    const count = filled.length;
     const avgMargin = count > 0
-      ? products.reduce((sum, p) => sum + p.margin_rate, 0) / count
+      ? filled.reduce((sum, p) => sum + p.margin_rate, 0) / count
       : 0;
-    const withCategory = products.filter(p => p.category).length;
-    return { count, avgMargin: avgMargin.toFixed(1), withCategory };
+    const withCategory = filled.filter(p => p.category).length;
+    return { count, avgMargin: avgMargin.toFixed(1), withCategory, total: products.length };
   }, [products]);
 
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
@@ -264,7 +265,7 @@ export default function ProductsPage() {
 
           {/* 통계 */}
           <div className="flex items-center gap-4 text-xs text-[var(--text-muted)]">
-            <span>총 <strong className="text-[var(--text-primary)]">{stats.count}</strong>건</span>
+            <span>등록 <strong className="text-[var(--text-primary)]">{stats.count}</strong><span className="text-[var(--text-disabled)]">/{stats.total}</span>건</span>
             <span>평균 마진율 <strong className="text-blue-400">{stats.avgMargin}%</strong></span>
             <span>카테고리 설정 <strong className="text-purple-400">{stats.withCategory}</strong>건</span>
           </div>

@@ -111,14 +111,16 @@ export function useCommissions() {
 
   const categories = useMemo(() => [...new Set(rates.map((r) => r.category))], [rates]);
 
+  const userId = user?.id;
+
   const fetchRates = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     setLoading(true);
 
     const { data, error } = await supabase
       .from("commission_rates")
       .select("*")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .order("sort_order", { ascending: true });
 
     if (error) {
@@ -138,7 +140,7 @@ export function useCommissions() {
 
     setRates(data as CommissionRate[]);
     setLoading(false);
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seedDefaults = async () => {
     if (!user) return;

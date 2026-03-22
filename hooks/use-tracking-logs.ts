@@ -34,8 +34,10 @@ export function useTrackingLogs(options: UseTrackingLogsOptions = {}) {
   const [logs, setLogs] = useState<TrackingLog[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const userId = user?.id;
+
   const fetchLogs = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     setLoading(true);
 
     const PAGE_SIZE = 1000;
@@ -47,7 +49,7 @@ export function useTrackingLogs(options: UseTrackingLogsOptions = {}) {
       let query = supabase
         .from("tracking_logs")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
 
@@ -83,7 +85,7 @@ export function useTrackingLogs(options: UseTrackingLogsOptions = {}) {
 
     setLogs(allData);
     setLoading(false);
-  }, [user, options.search, options.dateFrom, options.dateTo, options.platform, options.status]);
+  }, [userId, options.search, options.dateFrom, options.dateTo, options.platform, options.status]);
 
   useEffect(() => {
     fetchLogs();

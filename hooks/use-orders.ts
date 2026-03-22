@@ -58,8 +58,10 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const fetchGenRef = useRef(0);
   const prevFetchGenRef = useRef(0);
 
+  const userId = user?.id;
+
   const fetchOrders = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     setLoading(true);
 
     // Supabase 기본 limit이 1000이므로 페이지네이션으로 전체 데이터 로드
@@ -72,7 +74,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
       let query = supabase
         .from("orders")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .order("order_date", { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
 
@@ -103,22 +105,22 @@ export function useOrders(options: UseOrdersOptions = {}) {
     setOrders(allData);
     fetchGenRef.current++;
     setLoading(false);
-  }, [user, options.month, options.marketplace, options.search]);
+  }, [userId, options.month, options.marketplace, options.search]);
 
   const fetchMonths = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     // order_month만 select하여 경량 쿼리, 클라이언트에서 unique 처리
     const { data } = await supabase
       .from("orders")
       .select("order_month")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .not("order_month", "is", null);
 
     if (data) {
       const unique = [...new Set(data.map((d) => d.order_month as string))].sort().reverse();
       setMonths(unique);
     }
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
     fetchOrders();

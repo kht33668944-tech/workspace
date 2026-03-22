@@ -42,9 +42,15 @@ export function useProducts(options: UseProductsOptions = {}) {
   const prevFiltersKeyRef = useRef<string>("");
   const fetchGenRef = useRef(0);
   const prevFetchGenRef = useRef(0);
+  // DB 업데이트 디바운스: 같은 상품에 대한 빠른 연속 업데이트를 하나로 합침
+  const pendingDbUpdates = useRef<Map<string, { updates: ProductUpdate; timer: ReturnType<typeof setTimeout> }>>(new Map());
+  // 상품 추가 시 중복 없는 sort_order 보장
+  const nextSortOrderRef = useRef(0);
+
+  const userId = user?.id;
 
   const fetchProducts = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     setLoading(true);
 
     const PAGE_SIZE = 1000;
@@ -56,8 +62,9 @@ export function useProducts(options: UseProductsOptions = {}) {
       let query = supabase
         .from("products")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true })
         .range(from, from + PAGE_SIZE - 1);
 
       if (options.search) {
@@ -80,8 +87,9 @@ export function useProducts(options: UseProductsOptions = {}) {
 
     setProducts(allData);
     fetchGenRef.current++;
+    nextSortOrderRef.current = allData.length;
     setLoading(false);
-  }, [user, options.search]);
+  }, [userId, options.search]);
 
   useEffect(() => {
     fetchProducts();
@@ -130,6 +138,7 @@ export function useProducts(options: UseProductsOptions = {}) {
   // 단일 상품 추가
   const addProduct = async () => {
     if (!user) return;
+    const sortOrder = nextSortOrderRef.current++;
     const newProduct = {
       user_id: user.id,
       product_name: "",
@@ -138,7 +147,7 @@ export function useProducts(options: UseProductsOptions = {}) {
       category: "",
       purchase_url: "",
       memo: "",
-      sort_order: products.length,
+      sort_order: sortOrder,
     };
 
     const { data, error } = await supabase
@@ -155,7 +164,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     setProducts((prev) => [...prev, data as Product]);
   };
 
-  // Optimistic update
+  // Optimistic update — DB 쓰기는 50ms 디바운스로 같은 상품 업데이트를 합침
   const updateProduct = useCallback((id: string, updates: ProductUpdate, skipUndo = false) => {
     if (!skipUndo) {
       setProducts((prev) => {
@@ -181,16 +190,29 @@ export function useProducts(options: UseProductsOptions = {}) {
       );
     }
 
-    supabase
-      .from("products")
-      .update(updates)
-      .eq("id", id)
-      .then(({ error }) => {
-        if (error) {
-          console.error("Update product failed:", error);
-          fetchProducts();
-        }
-      });
+    // 디바운스: 같은 상품에 대한 연속 업데이트를 하나의 DB 요청으로 합침
+    const pending = pendingDbUpdates.current.get(id);
+    if (pending) {
+      clearTimeout(pending.timer);
+      Object.assign(pending.updates, updates);
+    } else {
+      pendingDbUpdates.current.set(id, { updates: { ...updates }, timer: setTimeout(() => {}, 0) });
+    }
+    const entry = pendingDbUpdates.current.get(id)!;
+    entry.timer = setTimeout(() => {
+      const merged = entry.updates;
+      pendingDbUpdates.current.delete(id);
+      supabase
+        .from("products")
+        .update(merged)
+        .eq("id", id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Update product failed:", error);
+            fetchProducts();
+          }
+        });
+    }, 50);
   }, [fetchProducts]);
 
   const startBatchUndo = useCallback(() => {

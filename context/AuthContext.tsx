@@ -51,7 +51,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
       } else if (session) {
         setSession(session);
-        setUser(session.user);
+        // 같은 유저의 토큰 갱신인 경우 user 객체 참조를 유지하여 불필요한 리렌더 방지
+        setUser((prev) =>
+          prev?.id === session.user.id ? prev : session.user
+        );
         setLoading(false);
       }
       // session이 null이고 SIGNED_OUT이 아닌 경우 (예: TOKEN_REFRESHED 중간 상태) → 무시

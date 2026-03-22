@@ -440,12 +440,13 @@ function ProductTable({
               <th className={`px-2 py-2.5 sticky left-0 bg-[var(--table-header-bg)] z-30 border-r border-[var(--border-subtle)] ${isMobile ? "w-11" : "w-10"}`}>
                 <input type="checkbox" checked={allSelected} onChange={onSelectAll} className={`accent-blue-500 ${isMobile ? "w-5 h-5" : ""}`} />
               </th>
-              <th className="px-2 py-2.5 text-xs font-medium text-(--text-tertiary) whitespace-nowrap border-r border-(--border-subtle) text-left" style={{ width: 72, minWidth: 72 }}>
+              <th className="px-2 py-2.5 text-xs font-medium text-(--text-tertiary) whitespace-nowrap border-r border-(--border-subtle) text-left sticky left-[40px] bg-[var(--table-header-bg)] z-30" style={{ width: 72, minWidth: 72 }}>
                 등록상태
               </th>
               {visibleColumns.map(col => (
                 <ResizableHeader
                   key={col.key} col={col} width={isMobile ? 0 : colWidths[col.key]}
+                  stickyLeft={col.key === "product_name" ? 112 : undefined}
                   onResize={isMobile ? () => {} : (w => setColWidths(p => ({ ...p, [col.key]: w })))}
                   hasFilter={!!columnFilters[col.key]?.length}
                   filterOpen={filterOpen === col.key}

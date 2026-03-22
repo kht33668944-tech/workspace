@@ -122,7 +122,7 @@ const MemoRow = memo(function Row({
           className={`accent-blue-500 ${isMobile ? "w-5 h-5" : ""}`}
         />
       </td>
-      <td className={`relative px-1.5 ${isMobile ? "py-2" : "py-1.5"} border-r border-(--border-subtle)`} style={isMobile ? undefined : { width: 72, minWidth: 72, maxWidth: 72 }}>
+      <td className={`relative px-1.5 ${isMobile ? "py-2" : "py-1.5"} border-r border-(--border-subtle) sticky left-[40px] bg-[var(--cell-sticky-bg)] z-10`} style={isMobile ? undefined : { width: 72, minWidth: 72, maxWidth: 72 }}>
         <div ref={statusDropdownRef} className="relative">
           <button
             onMouseDown={(e) => e.stopPropagation()}
@@ -156,6 +156,7 @@ const MemoRow = memo(function Row({
         const isFillHL = ci === fillHighlightCol;
         const isEditable = EDITABLE_KEYS.has(col.key);
         const isComputed = COMPUTED_KEYS.has(col.key);
+        const isSticky = col.key === "product_name";
 
         return (
           <td
@@ -164,8 +165,8 @@ const MemoRow = memo(function Row({
               isComputed ? "bg-[var(--bg-subtle)]" :
               isFillHL ? "bg-blue-500/10 ring-1 ring-blue-500/30 ring-inset" :
               inSel && !isSelected ? "bg-blue-500/10" : ""
-            }`}
-            style={isMobile ? undefined : { width: colWidths[col.key], minWidth: colWidths[col.key], maxWidth: colWidths[col.key] }}
+            } ${isSticky ? "sticky bg-[var(--cell-sticky-bg)] z-10" : ""}`}
+            style={isMobile ? undefined : { width: colWidths[col.key], minWidth: colWidths[col.key], maxWidth: colWidths[col.key], ...(isSticky ? { left: 112, boxShadow: "2px 0 4px rgba(0,0,0,0.1)" } : {}) }}
             onMouseDown={isMobile ? undefined : ((e) => { if (e.button === 0) { e.preventDefault(); onCellMouseDown(rowIdx, ci); } })}
             onMouseEnter={isMobile ? undefined : (() => onCellMouseEnter(rowIdx, ci))}
             onDoubleClick={isMobile ? undefined : (() => onCellDoubleClick(rowIdx, ci))}

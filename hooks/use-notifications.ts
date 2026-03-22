@@ -19,21 +19,23 @@ export function useNotifications() {
     return localStorage.getItem(LAST_READ_KEY) ?? "";
   });
 
+  const userId = user?.id;
+
   const fetchNotifications = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     setLoading(true);
     try {
       const [purchaseRes, trackingRes] = await Promise.all([
         supabase
           .from("purchase_logs")
           .select("batch_id,platform,status,created_at")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .order("created_at", { ascending: false })
           .limit(150),
         supabase
           .from("tracking_logs")
           .select("batch_id,platform,status,created_at")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .order("created_at", { ascending: false })
           .limit(150),
       ]);
@@ -50,7 +52,7 @@ export function useNotifications() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [userId]);
 
   const markAsRead = useCallback(() => {
     const now = new Date().toISOString();
