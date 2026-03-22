@@ -195,7 +195,7 @@ function normalizeProductName(raw: string): string {
     .replace(/G마켓베스트/gi, "");
 
   name = name.replace(/(\d+)입\s*\+\s*(\d+)입/g, (_, a, b) =>
-    `${parseInt(a, 10) + parseInt(b, 10)}입`
+    `${parseInt(a, 10) + parseInt(b, 10)}개`
   );
   name = name.replace(/(\d+)개\s*\+\s*(\d+)개/g, (_, a, b) =>
     `${parseInt(a, 10) + parseInt(b, 10)}개`
@@ -207,6 +207,9 @@ function normalizeProductName(raw: string): string {
   name = name.replace(/(\d+)\s*SET\b/gi, "$1세트");
   name = name.replace(/(\d+)\s*BOX\b/gi, "$1박스");
   name = name.replace(/(\d+)\s*PACK?\b/gi, "$1팩");
+  // 입 → 개 통일 (캔/병/봉/포/매 등 고유 단위는 유지)
+  name = name.replace(/(\d+)\s*입\b/g, "$1개");
+  name = name.replace(/(\d+)\s*개입\b/g, "$1개");
 
   if (/\d/.test(name)) {
     name = name.replace(/\s+[가-힣]+$/, "");

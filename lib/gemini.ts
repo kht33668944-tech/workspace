@@ -423,16 +423,19 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
 규칙:
 1. 구조: 브랜드명 + 제품명 + 옵션(용량/무게 등) + 수량
 2. 특수문자 완전 제거 — +, %, /, ., &, ~, ★, !, @, #, $, ^, *, 괄호() 등 모든 특수문자 사용 금지
-3. 허용 문자: 한글, 영문, 숫자, 공백만 사용
-4. 총수량이 이미 있으면 분리 표현 제거 (예: "20입 5입 4개" → "20입")
-5. 판매자 부가 설명 제거 (멀티팩, 이온음료, 쿠폰, 할인, HOT, NEW, 신제품 등)
-6. 정리된 상품명 한 줄만 출력 (다른 설명 없이)
+3. 허용 문자: 한글, 숫자, 공백만 사용 (영문 금지)
+4. 영어 단어는 반드시 한글로 변환 — pet→펫, pack→팩, box→박스, set→세트, can→캔, mini→미니, slim→슬림, soft→소프트, clean→클린, fresh→프레시, light→라이트, plus→플러스, pro→프로, gold→골드, silver→실버, zero→제로, free→프리, ice→아이스, cool→쿨, hot→핫 등. 고유 브랜드명도 한글로 변환 (예: Downy→다우니, Tide→타이드). 단, 용량 단위(ml, L, g, kg)는 그대로 유지
+5. 총수량이 이미 있으면 분리 표현 제거 (예: "20입 5입 4개" → "20개")
+6. 수량 단위는 특별한 이유가 없으면 "개"로 통일 (입→개, EA→개, PCS→개). 캔/병/봉/포/매 등 해당 제품에 맞는 단위는 유지
+7. 판매자 부가 설명 제거 (멀티팩, 이온음료, 쿠폰, 할인, HOT, NEW, 신제품, 무료배송, 특가 등)
+8. 정리된 상품명 한 줄만 출력 (다른 설명 없이)
 
 예시:
-- "삼양 불닭볶음면 20입 5입 4개 멀티팩" → "삼양 불닭볶음면 20입"
-- "(HOT신제품)오뚜기 진밀면 멀티팩(4개입x4팩) (총16개입)" → "오뚜기 진밀면 16개입"
+- "삼양 불닭볶음면 20입 5입 4개 멀티팩" → "삼양 불닭볶음면 20개"
+- "(HOT신제품)오뚜기 진밀면 멀티팩(4개입x4팩) (총16개입)" → "오뚜기 진밀면 16개"
 - "테크 베이킹소다+구연산 액체세제 일반/드럼 겸용 1.8L 4개" → "테크 베이킹소다 구연산 액체세제 일반 드럼 겸용 1.8L 4개"
 - "포카리스웨트 340ml 48캔 12캔 4팩 동아오츠카" → "포카리스웨트 340ml 48캔"
+- "Downy Premium pet clean 1L 4개" → "다우니 프리미엄 펫 클린 1L 4개"
 
 원본: ${rawName}`;
 
@@ -450,8 +453,14 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
   cleaned = cleaned.split("\n")[0].trim();
   // 마크다운 볼드(**) 제거
   cleaned = cleaned.replace(/\*\*/g, "").trim();
-  // 특수문자 최종 정리 (허용: 한글, 영문, 숫자, 공백)
-  cleaned = cleaned.replace(/[^\uAC00-\uD7A3\u3130-\u318Fa-zA-Z0-9\s]/g, "").replace(/\s{2,}/g, " ").trim();
+  // 특수문자 최종 정리 (허용: 한글, 숫자, 공백, 용량 단위 ml/L/g/kg)
+  cleaned = cleaned
+    .replace(/(\d)\s*(ml|mL|ML|[Ll]|[Gg]|[Kk][Gg])\b/g, "$1__UNIT_$2__")  // 용량 단위 보호
+    .replace(/[a-zA-Z]+/g, "")  // 영문 제거
+    .replace(/__UNIT_(.+?)__/g, "$1")  // 용량 단위 복원
+    .replace(/[^\uAC00-\uD7A3\u3130-\u318Fa-zA-Z0-9\s]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 
   return cleaned || null;
 }
