@@ -436,5 +436,22 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
 
 원본: ${rawName}`;
 
-  return generateText(prompt);
+  const result = await generateText(prompt);
+  if (!result) return null;
+
+  // LLM이 설명까지 포함해서 응답하는 경우 정리된 상품명만 추출
+  let cleaned = result.trim();
+  // "정리된 상품명:" 패턴이 있으면 그 뒤의 값만 추출
+  const nameMatch = cleaned.match(/정리된\s*상품명[:\s]*(.+?)(?:\s*[-—]+|$)/m);
+  if (nameMatch) {
+    cleaned = nameMatch[1].trim();
+  }
+  // 여러 줄이면 첫 줄만 사용 (설명이 이어질 수 있음)
+  cleaned = cleaned.split("\n")[0].trim();
+  // 마크다운 볼드(**) 제거
+  cleaned = cleaned.replace(/\*\*/g, "").trim();
+  // 특수문자 최종 정리 (허용: 한글, 영문, 숫자, 공백)
+  cleaned = cleaned.replace(/[^\uAC00-\uD7A3\u3130-\u318Fa-zA-Z0-9\s.]/g, "").replace(/\s{2,}/g, " ").trim();
+
+  return cleaned || null;
 }
