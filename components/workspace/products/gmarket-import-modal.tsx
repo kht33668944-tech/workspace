@@ -313,6 +313,7 @@ export default function GmarketImportModal({ onClose, onImport, productCount, ca
       source_platform: "gmarket",
       detail_html: null,
       detail_image_url: null,
+      registration_status: "미등록",
     }));
 
     const { error: importError } = await onImport(rows);

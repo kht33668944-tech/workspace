@@ -1,19 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
+import { getServiceSupabaseClient } from "@/lib/api-helpers";
 
 /** GET: 스마트스토어 카테고리코드 목록 조회 (페이지네이션으로 전체 로드) */
 export async function GET(req: NextRequest) {
   const userId = req.headers.get("x-user-id");
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const supabase = getSupabase();
+  const supabase = getServiceSupabaseClient();
   const PAGE = 1000;
   const allData: Array<Record<string, unknown>> = [];
   let from = 0;
@@ -49,7 +42,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "데이터가 없습니다." }, { status: 400 });
   }
 
-  const supabase = getSupabase();
+  const supabase = getServiceSupabaseClient();
   const rows = codes.map((c) => ({
     user_id: userId,
     category_code: c.category_code.trim(),

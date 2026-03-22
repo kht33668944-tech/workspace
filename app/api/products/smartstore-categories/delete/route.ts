@@ -1,12 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
+import { getServiceSupabaseClient } from "@/lib/api-helpers";
 
 /** POST: 카테고리코드 일괄 삭제 (DELETE body 제한 우회) */
 export async function POST(req: NextRequest) {
@@ -19,7 +12,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "삭제할 항목이 없습니다." }, { status: 400 });
     }
 
-    const supabase = getSupabase();
+    const supabase = getServiceSupabaseClient();
 
     // 100개씩 배치 삭제 (Supabase .in() 제한 대응)
     const BATCH = 100;

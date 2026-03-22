@@ -1,20 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { encrypt } from "@/lib/crypto";
-
-function getSupabaseClient(accessToken: string) {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { global: { headers: { Authorization: `Bearer ${accessToken}` } } }
-  );
-}
-
-function getAccessToken(request: NextRequest): string | null {
-  const auth = request.headers.get("authorization");
-  if (auth?.startsWith("Bearer ")) return auth.slice(7);
-  return null;
-}
 
 // GET: 본인의 자격증명 목록 조회 (비밀번호 제외)
 export async function GET(request: NextRequest) {
