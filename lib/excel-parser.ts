@@ -399,6 +399,18 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
   }
   if (mapped.revenue === undefined) mapped.revenue = 0;
 
+  // 정산예정금액 자동 계산 (판매처별 수수료율)
+  // 스마트스토어: 판매가 * 0.93, 쿠팡: 판매가 * 0.89
+  if (!mapped.settlement || mapped.settlement === 0) {
+    const revenue = (mapped.revenue as number) || 0;
+    const mp = typeof mapped.marketplace === "string" ? mapped.marketplace : "";
+    if (revenue > 0 && mp.includes("스마트스토어")) {
+      mapped.settlement = Math.round(revenue * 0.93);
+    } else if (revenue > 0 && mp.includes("쿠팡")) {
+      mapped.settlement = Math.round(revenue * 0.89);
+    }
+  }
+
   // 수동 입력 필드 기본값
   if (mapped.settlement === undefined) mapped.settlement = 0;
   if (mapped.cost === undefined) mapped.cost = 0;
