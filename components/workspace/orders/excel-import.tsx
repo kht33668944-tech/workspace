@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
-import { Upload, X, FileSpreadsheet, Check, AlertTriangle, Copy } from "lucide-react";
+import { Upload, X, FileSpreadsheet, Check, AlertTriangle, Copy, Link } from "lucide-react";
 import { parseExcelFile, parseExcelSheet } from "@/lib/excel-parser";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/context/AuthContext";
 import type { OrderInsert } from "@/types/database";
 
 interface ExcelImportProps {
@@ -24,7 +26,13 @@ function extractDateFromFilename(filename: string): string | null {
   return null;
 }
 
+// 상품명 정규화: 공백 통일, 소문자 변환
+function normalizeProductName(name: string): string {
+  return name.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
 export default function ExcelImport({ onImport, onClose, checkDuplicates }: ExcelImportProps) {
+  const { user } = useAuth();
   const [dragOver, setDragOver] = useState(false);
   const [parsedOrders, setParsedOrders] = useState<OrderInsert[] | null>(null);
   const [fileName, setFileName] = useState("");
@@ -36,6 +44,8 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
   const [manualDate, setManualDate] = useState<string>("");
   const [duplicateIndices, setDuplicateIndices] = useState<Set<number>>(new Set());
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [matchedUrlCount, setMatchedUrlCount] = useState(0);
+  const enrichedRef = useRef(false); // 중복 매칭 방지
   const fileRef = useRef<HTMLInputElement>(null);
 
   // parsedOrders 변경 시 중복 체크 실행
@@ -54,6 +64,79 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
     });
     return () => { cancelled = true; };
   }, [parsedOrders, checkDuplicates]);
+
+  // 상품소싱에서 구매 URL 매칭
+  useEffect(() => {
+    if (!parsedOrders || parsedOrders.length === 0 || !user) {
+      setMatchedUrlCount(0);
+      return;
+    }
+    // 이미 매칭 완료된 결과면 스킵 (무한 루프 방지)
+    if (enrichedRef.current) {
+      enrichedRef.current = false;
+      return;
+    }
+    let cancelled = false;
+
+    (async () => {
+      // purchase_url이 없는 주문의 상품명 수집
+      const ordersNeedingUrl = parsedOrders
+        .map((o, i) => ({ index: i, name: o.product_name }))
+        .filter((o) => o.name);
+      if (ordersNeedingUrl.length === 0) return;
+
+      // 사용자의 전체 상품 목록 조회 (product_name, purchase_url만)
+      const PAGE_SIZE = 1000;
+      const allProducts: { product_name: string; purchase_url: string }[] = [];
+      let from = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { data } = await supabase
+          .from("products")
+          .select("product_name, purchase_url")
+          .eq("user_id", user.id)
+          .not("purchase_url", "is", null)
+          .range(from, from + PAGE_SIZE - 1);
+        if (!data || data.length === 0) break;
+        allProducts.push(...data);
+        hasMore = data.length === PAGE_SIZE;
+        from += PAGE_SIZE;
+      }
+      if (cancelled || allProducts.length === 0) return;
+
+      // 정규화된 상품명 → purchase_url 맵 생성
+      const productUrlMap = new Map<string, string>();
+      for (const p of allProducts) {
+        if (p.product_name && p.purchase_url) {
+          productUrlMap.set(normalizeProductName(p.product_name), p.purchase_url);
+        }
+      }
+
+      // 주문에 purchase_url 매칭
+      let matched = 0;
+      const enriched = parsedOrders.map((order) => {
+        // 이미 purchase_url이 있으면 스킵
+        if (order.purchase_url) return order;
+        if (!order.product_name) return order;
+
+        const normalized = normalizeProductName(order.product_name);
+        const url = productUrlMap.get(normalized);
+        if (url) {
+          matched++;
+          return { ...order, purchase_url: url };
+        }
+        return order;
+      });
+
+      if (!cancelled && matched > 0) {
+        enrichedRef.current = true;
+        setParsedOrders(enriched);
+        setMatchedUrlCount(matched);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [parsedOrders, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const duplicateCount = duplicateIndices.size;
 
@@ -365,6 +448,18 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
                 <div className="mb-4 text-xs text-[var(--text-muted)]">중복 확인 중...</div>
               )}
 
+              {/* 상품소싱 URL 매칭 결과 */}
+              {matchedUrlCount > 0 && (
+                <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Link className="w-4 h-4 text-green-400 shrink-0" />
+                    <span className="text-green-400 text-xs font-medium">
+                      상품소싱에서 구매 URL {matchedUrlCount}건이 자동 매칭되었습니다
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="max-h-64 overflow-auto rounded-lg border border-[var(--border)]">
                 <table className="w-full text-xs text-[var(--text-secondary)]">
                   <thead className="bg-[var(--bg-hover)] sticky top-0">
@@ -424,7 +519,7 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
         {parsedOrders && parsedOrders.length > 0 && (
           <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border)]">
             <button
-              onClick={() => { setParsedOrders(null); setFileName(""); setRawFile(null); setSheetNames([]); setManualDate(""); setDuplicateIndices(new Set()); }}
+              onClick={() => { setParsedOrders(null); setFileName(""); setRawFile(null); setSheetNames([]); setManualDate(""); setDuplicateIndices(new Set()); setMatchedUrlCount(0); enrichedRef.current = false; }}
               className="px-4 py-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
             >
               다시 선택
