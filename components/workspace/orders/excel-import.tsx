@@ -45,8 +45,56 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
   const [duplicateIndices, setDuplicateIndices] = useState<Set<number>>(new Set());
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [matchedUrlCount, setMatchedUrlCount] = useState(0);
-  const enrichedRef = useRef(false); // 중복 매칭 방지
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // 상품소싱에서 구매 URL 매칭 (파싱 직후 1회 호출)
+  const enrichWithProductUrls = useCallback(async (orders: OrderInsert[]): Promise<OrderInsert[]> => {
+    if (!user || orders.length === 0 || !orders.some((o) => o.product_name && !o.purchase_url)) {
+      setMatchedUrlCount(0);
+      return orders;
+    }
+
+    const PAGE_SIZE = 1000;
+    const allProducts: { product_name: string; purchase_url: string }[] = [];
+    let from = 0;
+    while (true) {
+      const { data } = await supabase
+        .from("products")
+        .select("product_name, purchase_url")
+        .eq("user_id", user.id)
+        .not("purchase_url", "is", null)
+        .range(from, from + PAGE_SIZE - 1);
+      if (!data || data.length === 0) break;
+      allProducts.push(...data);
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+    if (allProducts.length === 0) { setMatchedUrlCount(0); return orders; }
+
+    const productUrlMap = new Map<string, string>();
+    for (const p of allProducts) {
+      if (p.product_name && p.purchase_url) {
+        productUrlMap.set(normalizeProductName(p.product_name), p.purchase_url);
+      }
+    }
+
+    let matched = 0;
+    const enriched = orders.map((order) => {
+      if (order.purchase_url || !order.product_name) return order;
+      const url = productUrlMap.get(normalizeProductName(order.product_name));
+      if (url) { matched++; return { ...order, purchase_url: url }; }
+      return order;
+    });
+
+    setMatchedUrlCount(matched);
+    return matched > 0 ? enriched : orders;
+  }, [user]);
+
+  // 파싱된 주문을 세팅하는 공용 함수 (enrichment + duplicate check 한 번에)
+  const setOrdersWithEnrichment = useCallback(async (orders: OrderInsert[]) => {
+    const enriched = await enrichWithProductUrls(orders);
+    setParsedOrders(enriched);
+  }, [enrichWithProductUrls]);
 
   // parsedOrders 변경 시 중복 체크 실행
   useEffect(() => {
@@ -64,79 +112,6 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
     });
     return () => { cancelled = true; };
   }, [parsedOrders, checkDuplicates]);
-
-  // 상품소싱에서 구매 URL 매칭
-  useEffect(() => {
-    if (!parsedOrders || parsedOrders.length === 0 || !user) {
-      setMatchedUrlCount(0);
-      return;
-    }
-    // 이미 매칭 완료된 결과면 스킵 (무한 루프 방지)
-    if (enrichedRef.current) {
-      enrichedRef.current = false;
-      return;
-    }
-    let cancelled = false;
-
-    (async () => {
-      // purchase_url이 없는 주문의 상품명 수집
-      const ordersNeedingUrl = parsedOrders
-        .map((o, i) => ({ index: i, name: o.product_name }))
-        .filter((o) => o.name);
-      if (ordersNeedingUrl.length === 0) return;
-
-      // 사용자의 전체 상품 목록 조회 (product_name, purchase_url만)
-      const PAGE_SIZE = 1000;
-      const allProducts: { product_name: string; purchase_url: string }[] = [];
-      let from = 0;
-      let hasMore = true;
-      while (hasMore) {
-        const { data } = await supabase
-          .from("products")
-          .select("product_name, purchase_url")
-          .eq("user_id", user.id)
-          .not("purchase_url", "is", null)
-          .range(from, from + PAGE_SIZE - 1);
-        if (!data || data.length === 0) break;
-        allProducts.push(...data);
-        hasMore = data.length === PAGE_SIZE;
-        from += PAGE_SIZE;
-      }
-      if (cancelled || allProducts.length === 0) return;
-
-      // 정규화된 상품명 → purchase_url 맵 생성
-      const productUrlMap = new Map<string, string>();
-      for (const p of allProducts) {
-        if (p.product_name && p.purchase_url) {
-          productUrlMap.set(normalizeProductName(p.product_name), p.purchase_url);
-        }
-      }
-
-      // 주문에 purchase_url 매칭
-      let matched = 0;
-      const enriched = parsedOrders.map((order) => {
-        // 이미 purchase_url이 있으면 스킵
-        if (order.purchase_url) return order;
-        if (!order.product_name) return order;
-
-        const normalized = normalizeProductName(order.product_name);
-        const url = productUrlMap.get(normalized);
-        if (url) {
-          matched++;
-          return { ...order, purchase_url: url };
-        }
-        return order;
-      });
-
-      if (!cancelled && matched > 0) {
-        enrichedRef.current = true;
-        setParsedOrders(enriched);
-        setMatchedUrlCount(matched);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [parsedOrders, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const duplicateCount = duplicateIndices.size;
 
@@ -190,15 +165,17 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
       }
 
       setSheetNames(result.sheetNames);
-      setParsedOrders(result.orders);
       if (result.sheetOrderCounts) setSheetCounts(result.sheetOrderCounts);
       if (result.orders.length === 0) {
+        setParsedOrders(result.orders);
         setError("파싱된 데이터가 없습니다. 엑셀 형식을 확인해주세요.");
+      } else {
+        await setOrdersWithEnrichment(result.orders);
       }
     } catch {
       setError("엑셀 파일을 읽을 수 없습니다.");
     }
-  }, []);
+  }, [setOrdersWithEnrichment]);
 
   const handleSheetChange = useCallback(async (index: number) => {
     if (!rawFile) return;
@@ -206,14 +183,16 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
     setError(null);
     try {
       const orders = await parseExcelSheet(rawFile, index);
-      setParsedOrders(orders);
       if (orders.length === 0) {
+        setParsedOrders(orders);
         setError("이 시트에는 데이터가 없습니다.");
+      } else {
+        await setOrdersWithEnrichment(orders);
       }
     } catch {
       setError("시트를 읽을 수 없습니다.");
     }
-  }, [rawFile]);
+  }, [rawFile, setOrdersWithEnrichment]);
 
   const handleSheetPick = useCallback(async (index: number) => {
     if (!pendingFile) return;
@@ -225,15 +204,17 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
     setRawFile(pendingFile.file);
     try {
       const orders = await parseExcelSheet(pendingFile.file, index);
-      setParsedOrders(orders);
       if (orders.length === 0) {
+        setParsedOrders(orders);
         setError("이 시트에는 데이터가 없습니다.");
+      } else {
+        await setOrdersWithEnrichment(orders);
       }
     } catch {
       setError("시트를 읽을 수 없습니다.");
     }
     setPendingFile(null);
-  }, [pendingFile]);
+  }, [pendingFile, setOrdersWithEnrichment]);
 
   const handleImportAllSheets = useCallback(async () => {
     if (!pendingFile) return;
@@ -251,12 +232,14 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
         allOrders.push(...orders);
       } catch { /* skip */ }
     }
-    setParsedOrders(allOrders);
     if (allOrders.length === 0) {
+      setParsedOrders(allOrders);
       setError("파싱된 데이터가 없습니다.");
+    } else {
+      await setOrdersWithEnrichment(allOrders);
     }
     setPendingFile(null);
-  }, [pendingFile]);
+  }, [pendingFile, setOrdersWithEnrichment]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -519,7 +502,7 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
         {parsedOrders && parsedOrders.length > 0 && (
           <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border)]">
             <button
-              onClick={() => { setParsedOrders(null); setFileName(""); setRawFile(null); setSheetNames([]); setManualDate(""); setDuplicateIndices(new Set()); setMatchedUrlCount(0); enrichedRef.current = false; }}
+              onClick={() => { setParsedOrders(null); setFileName(""); setRawFile(null); setSheetNames([]); setManualDate(""); setDuplicateIndices(new Set()); setMatchedUrlCount(0); }}
               className="px-4 py-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
             >
               다시 선택

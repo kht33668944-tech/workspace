@@ -2,6 +2,12 @@ import * as XLSX from "xlsx";
 import { EXCEL_COLUMN_MAP, LEGACY_EXCEL_COLUMN_MAP } from "./constants";
 import type { OrderInsert } from "@/types/database";
 
+// 판매처별 정산 비율 (판매가 × rate = 정산예정금액)
+const SETTLEMENT_RATES: [string, number][] = [
+  ["스마트스토어", 0.93],
+  ["쿠팡", 0.89],
+];
+
 interface RawRow {
   [key: string]: string | number | undefined;
 }
@@ -400,14 +406,12 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
   if (mapped.revenue === undefined) mapped.revenue = 0;
 
   // 정산예정금액 자동 계산 (판매처별 수수료율)
-  // 스마트스토어: 판매가 * 0.93, 쿠팡: 판매가 * 0.89
   if (!mapped.settlement || mapped.settlement === 0) {
     const revenue = (mapped.revenue as number) || 0;
     const mp = typeof mapped.marketplace === "string" ? mapped.marketplace : "";
-    if (revenue > 0 && mp.includes("스마트스토어")) {
-      mapped.settlement = Math.round(revenue * 0.93);
-    } else if (revenue > 0 && mp.includes("쿠팡")) {
-      mapped.settlement = Math.round(revenue * 0.89);
+    const rate = SETTLEMENT_RATES.find(([key]) => mp.includes(key));
+    if (revenue > 0 && rate) {
+      mapped.settlement = Math.round(revenue * rate[1]);
     }
   }
 
