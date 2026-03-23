@@ -66,6 +66,11 @@ interface MonthStats {
 }
 
 // 한 달치 주문 전체를 페이지네이션으로 읽어 count/revenue/deliveredMargin 계산
+// 매출·마진은 배송완료 기준, 반품/취소 제외
+const EXCLUDED_STATUSES = new Set([
+  "취소준비", "취소완료", "반품준비", "반품완료",
+]);
+
 async function fetchMonthStats(uid: string, month: string): Promise<MonthStats> {
   const PAGE = 1000;
   let count = 0;
@@ -85,10 +90,14 @@ async function fetchMonthStats(uid: string, month: string): Promise<MonthStats> 
 
     const rows = data as Array<{ revenue: number; margin: number; delivery_status: string }>;
     count += rows.length;
-    revenue += rows.reduce((s, r) => s + (r.revenue ?? 0), 0);
-    deliveredMargin += rows
-      .filter((r) => r.delivery_status === "배송완료")
-      .reduce((s, r) => s + (r.margin ?? 0), 0);
+
+    for (const r of rows) {
+      if (EXCLUDED_STATUSES.has(r.delivery_status)) continue;
+      if (r.delivery_status === "배송완료") {
+        revenue += r.revenue ?? 0;
+        deliveredMargin += r.margin ?? 0;
+      }
+    }
 
     if (rows.length < PAGE) break;
     from += PAGE;

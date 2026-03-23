@@ -85,7 +85,10 @@ export default function KpiCards({
 
       {/* 매출 */}
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 md:p-5">
-        <p className="text-xs text-[var(--text-muted)] mb-2">{monthLabel} 매출</p>
+        <p className="text-xs text-[var(--text-muted)] mb-2">
+          {monthLabel} 매출{" "}
+          <span className="text-[var(--text-disabled)]">(배송완료)</span>
+        </p>
         {loading ? (
           <SkeletonBlock className="h-7 w-28 mb-2" />
         ) : (
