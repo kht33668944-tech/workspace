@@ -111,7 +111,9 @@ export function useProducts(options: UseProductsOptions = {}) {
           if (!(h.product_id in map)) map[h.product_id] = h.change_rate;
         });
         setPriceChanges(prev => {
-          if (JSON.stringify(prev) === JSON.stringify(map)) return prev;
+          const prevKeys = Object.keys(prev);
+          const mapKeys = Object.keys(map);
+          if (prevKeys.length === mapKeys.length && mapKeys.every(k => prev[k] === map[k])) return prev;
           return map;
         });
       })
@@ -147,14 +149,18 @@ export function useProducts(options: UseProductsOptions = {}) {
     if (!user) return { error: "Not authenticated" };
     const withUserId = rows.map((row) => ({ ...row, user_id: user.id }));
 
+    const inserted: Product[] = [];
     const BATCH_SIZE = 500;
     for (let i = 0; i < withUserId.length; i += BATCH_SIZE) {
       const batch = withUserId.slice(i, i + BATCH_SIZE);
-      const { error } = await supabase.from("products").insert(batch);
+      const { data, error } = await supabase.from("products").insert(batch).select();
       if (error) return { error: error.message };
+      if (data) inserted.push(...(data as Product[]));
     }
 
-    await fetchProducts();
+    setProducts((prev) => [...prev, ...inserted]);
+    nextSortOrderRef.current += inserted.length;
+    fetchGenRef.current++;
     return { error: null };
   };
 
@@ -296,7 +302,9 @@ export function useProducts(options: UseProductsOptions = {}) {
       const { error } = await supabase.from("products").delete().in("id", batch);
       if (error) return { error: error.message };
     }
-    await fetchProducts();
+    const idSet = new Set(ids);
+    setProducts((prev) => prev.filter((p) => !idSet.has(p.id)));
+    fetchGenRef.current++;
     return { error: null };
   };
 

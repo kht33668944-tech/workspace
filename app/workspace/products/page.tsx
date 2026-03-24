@@ -147,6 +147,18 @@ export default function ProductsPage() {
         return;
       }
 
+      const pendingUpdates: Array<{ id: string; price: number }> = [];
+      let flushTimer: ReturnType<typeof setTimeout> | null = null;
+      const flushUpdates = () => {
+        if (pendingUpdates.length === 0) return;
+        startBatchUndo();
+        for (const u of pendingUpdates) {
+          updateProduct(u.id, { lowest_price: u.price });
+        }
+        endBatchUndo();
+        pendingUpdates.length = 0;
+      };
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -172,16 +184,21 @@ export default function ProductsPage() {
                 : "실패";
               setScrapeProgress(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
               if (event.price > 0) {
-                updateProduct(event.id, { lowest_price: event.price });
+                pendingUpdates.push({ id: event.id, price: event.price });
+                if (flushTimer) clearTimeout(flushTimer);
+                flushTimer = setTimeout(flushUpdates, 200);
               }
             } else if (event.type === "done") {
+              flushUpdates();
               setScrapeProgress(`완료: ${event.updated}개 갱신, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패`);
             } else if (event.type === "error") {
+              flushUpdates();
               setScrapeProgress(`오류: ${event.message}`);
             }
           } catch {}
         }
       }
+      flushUpdates();
     } catch {
       setScrapeProgress("최저가 수집 중 오류 발생");
     } finally {
