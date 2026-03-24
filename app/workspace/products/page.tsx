@@ -45,7 +45,7 @@ export default function ProductsPage() {
   const [scrapeProgress, setScrapeProgress] = useState("");
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
-  const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges } = useProducts({
+  const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, refetchPriceChanges } = useProducts({
     search: activeSearch,
     columnFilters,
   });
@@ -189,15 +189,19 @@ export default function ProductsPage() {
                 flushTimer = setTimeout(flushUpdates, 200);
               }
             } else if (event.type === "done") {
+              if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
               flushUpdates();
+              refetchPriceChanges();
               setScrapeProgress(`완료: ${event.updated}개 갱신, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패`);
             } else if (event.type === "error") {
+              if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
               flushUpdates();
               setScrapeProgress(`오류: ${event.message}`);
             }
           } catch {}
         }
       }
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       flushUpdates();
     } catch {
       setScrapeProgress("최저가 수집 중 오류 발생");

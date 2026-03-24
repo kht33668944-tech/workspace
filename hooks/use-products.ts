@@ -97,9 +97,8 @@ export function useProducts(options: UseProductsOptions = {}) {
   }, [fetchProducts]);
 
   const priceChangesFetchedRef = useRef(false);
-  useEffect(() => {
-    if (!session?.access_token || loading || priceChangesFetchedRef.current) return;
-    priceChangesFetchedRef.current = true;
+  const fetchPriceChanges = useCallback(() => {
+    if (!session?.access_token) return;
     const today = new Date().toISOString().slice(0, 10);
     fetch(`/api/products/price-history?from=${today}&to=${today}`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
@@ -118,7 +117,13 @@ export function useProducts(options: UseProductsOptions = {}) {
         });
       })
       .catch(() => {});
-  }, [session?.access_token, loading]);
+  }, [session?.access_token]);
+
+  useEffect(() => {
+    if (loading || priceChangesFetchedRef.current) return;
+    priceChangesFetchedRef.current = true;
+    fetchPriceChanges();
+  }, [loading, fetchPriceChanges]);
 
   // 클라이언트 측 컬럼 필터링
   const filtersKey = JSON.stringify(options.columnFilters || {});
@@ -329,6 +334,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     startBatchUndo,
     endBatchUndo,
     priceChanges,
+    refetchPriceChanges: fetchPriceChanges,
   };
 }
 

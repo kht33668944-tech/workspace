@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { BrowserContext } from "playwright";
 import { launchBrowser, createGmarketContext } from "@/lib/scrapers/browser";
 import { browserPool } from "@/lib/scrapers/browser-pool";
-import { getAccessToken, getServiceSupabaseClient } from "@/lib/api-helpers";
+import { getAccessToken, getServiceSupabaseClient, getSupabaseClient } from "@/lib/api-helpers";
 import { decrypt } from "@/lib/crypto";
 import { loadSession, saveSession } from "@/lib/scrapers/session-manager";
 
@@ -164,9 +164,15 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({})) as { productIds?: string[] };
   const sb = getServiceSupabaseClient();
 
+  // JWT에서 user_id 추출하여 소유권 검증
+  const userSb = getSupabaseClient(token);
+  const { data: { user: authUser } } = await userSb.auth.getUser();
+  if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   let query = sb
     .from("products")
     .select("id, product_name, purchase_url, lowest_price")
+    .eq("user_id", authUser.id)
     .gt("purchase_url", "")
     .order("sort_order", { ascending: true });
 
@@ -226,19 +232,18 @@ export async function POST(request: NextRequest) {
             const previousPrice = r.lowest_price;
 
             if (r.price > 0 && r.price !== previousPrice) {
-              await Promise.all([
-                sb.from("products").update({ lowest_price: r.price }).eq("id", r.id),
-                sb.from("price_history").insert({
+              await sb.from("products").update({ lowest_price: r.price }).eq("id", r.id);
+              // 최초 가격 설정(0→N)은 이력에 기록하지 않음
+              if (previousPrice > 0) {
+                await sb.from("price_history").insert({
                   product_id: r.id,
                   previous_price: previousPrice,
                   new_price: r.price,
                   change_amount: r.price - previousPrice,
-                  change_rate: previousPrice > 0
-                    ? Math.round(((r.price - previousPrice) / previousPrice) * 10000) / 100
-                    : 0,
+                  change_rate: Math.round(((r.price - previousPrice) / previousPrice) * 10000) / 100,
                   source: "scrape",
-                }),
-              ]);
+                });
+              }
               updated++;
             } else if (r.price > 0) {
               unchanged++;
