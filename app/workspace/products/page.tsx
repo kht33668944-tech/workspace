@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Plus, Trash2, Search, Settings2, Package, Download, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp } from "lucide-react";
+import { Plus, Trash2, Search, Settings2, Package, Download, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
@@ -16,7 +16,8 @@ import GmarketImportModal from "@/components/workspace/products/gmarket-import-m
 import BatchDetailModal from "@/components/workspace/products/batch-detail-modal";
 import dynamic from "next/dynamic";
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
-import { downloadExcelFromBase64, type PlayAutoExportPlatform } from "@/lib/excel-export";
+import { downloadExcelFromBase64, type PlayAutoExportPlatform, PLATFORM_CONFIGS } from "@/lib/excel-export";
+import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
 
 const PriceHistoryTab = dynamic(() => import("@/components/workspace/products/price-history-tab"), { ssr: false });
 
@@ -44,6 +45,7 @@ export default function ProductsPage() {
   const [scrapingPrices, setScrapingPrices] = useState(false);
   const [scrapeProgress, setScrapeProgress] = useState("");
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
   const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, refetchPriceChanges } = useProducts({
@@ -115,6 +117,13 @@ export default function ProductsPage() {
     await deleteProducts([...selectedIds]);
     setSelectedIds(new Set());
     setDeleting(false);
+  };
+
+  const handleBulkStatusChange = async (status: string) => {
+    setStatusDropdownOpen(false);
+    if (selectedIds.size === 0) return;
+    const ids = [...selectedIds];
+    await Promise.all(ids.map(id => updateProduct(id, { registration_status: status })));
   };
 
   const handleColumnFilterChange = useCallback((key: string, values: string[]) => {
@@ -245,6 +254,7 @@ export default function ProductsPage() {
         return;
       }
       downloadExcelFromBase64(json.base64, json.filename);
+      saveToArchive(json.filename, json.base64, ids.length);
     } catch {
       alert("내보내기 중 오류가 발생했습니다.");
     } finally {
@@ -254,8 +264,16 @@ export default function ProductsPage() {
     }
   };
 
+  const saveToArchive = (fileName: string, fileData: string, count: number) => {
+    fetch("/api/archives", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify({ file_name: fileName, file_type: "playauto_product", file_data: fileData, order_count: count }),
+    }).catch(() => {});
+  };
+
   const handleExportAll = async () => {
-    const platforms: PlayAutoExportPlatform[] = ["smartstore", "gmarket_auction"];
+    const platforms: PlayAutoExportPlatform[] = ["smartstore", "gmarket_auction", "coupang"];
     setExportModalOpen(false);
     setExporting(true);
     setExportStep("전체 플랫폼 내보내기 중...");
@@ -264,19 +282,27 @@ export default function ProductsPage() {
     if (ids.length === 0) { setExporting(false); setExportStep(""); return; }
 
     try {
-      for (const platform of platforms) {
-        setExportStep(`${platform === "smartstore" ? "스마트스토어" : "지마켓·옥션"} 엑셀 생성 중...`);
-        const res = await fetch("/api/products/playauto-export", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-          body: JSON.stringify({ productIds: ids, platform }),
-        });
-        const json = await res.json() as { base64?: string; filename?: string; error?: string };
-        if (!res.ok || !json.base64 || !json.filename) {
-          alert(`${platform} 내보내기 실패: ${json.error ?? "알 수 없는 오류"}`);
-          continue;
+      const results = await Promise.allSettled(
+        platforms.map(async (platform) => {
+          const res = await fetch("/api/products/playauto-export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+            body: JSON.stringify({ productIds: ids, platform }),
+          });
+          const json = await res.json() as { base64?: string; filename?: string; error?: string };
+          if (!res.ok || !json.base64 || !json.filename) {
+            throw new Error(json.error ?? `${PLATFORM_CONFIGS[platform].filenameLabel} 내보내기 실패`);
+          }
+          return { platform, ...json } as { platform: PlayAutoExportPlatform; base64: string; filename: string };
+        })
+      );
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          downloadExcelFromBase64(r.value.base64, r.value.filename);
+          saveToArchive(r.value.filename, r.value.base64, ids.length);
+        } else {
+          alert(r.reason?.message ?? "내보내기 실패");
         }
-        downloadExcelFromBase64(json.base64, json.filename);
       }
     } catch {
       alert("내보내기 중 오류가 발생했습니다.");
@@ -362,6 +388,31 @@ export default function ProductsPage() {
                     <Play className="w-4 h-4" />
                     {batchActive ? "생성 중..." : `${selectedIds.size}개 상세페이지 생성`}
                   </button>
+                  <div className="relative">
+                    <button
+                      onClick={() => setStatusDropdownOpen(!statusDropdownOpen)}
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm bg-teal-600/20 text-teal-400 hover:bg-teal-600/30 rounded-lg transition-colors"
+                    >
+                      <Tags className="w-4 h-4" />
+                      등록상태 변경
+                    </button>
+                    {statusDropdownOpen && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setStatusDropdownOpen(false)} />
+                        <div className="absolute left-0 top-full mt-1 z-50 w-36 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
+                          {REGISTRATION_STATUSES.map(s => (
+                            <button
+                              key={s}
+                              onClick={() => handleBulkStatusChange(s)}
+                              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                            >
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${REGISTRATION_STATUS_COLORS[s]}`}>{s}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
                   <button
                     onClick={handleDelete}
                     disabled={deleting}
@@ -392,7 +443,7 @@ export default function ProductsPage() {
                 {exportModalOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setExportModalOpen(false)} />
-                    <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-xl overflow-hidden">
+                    <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
                       <div className="px-3 py-2 border-b border-[var(--border)]">
                         <span className="text-xs font-medium text-[var(--text-muted)]">플랫폼 선택</span>
                       </div>
@@ -411,12 +462,11 @@ export default function ProductsPage() {
                         지마켓·옥션
                       </button>
                       <button
-                        disabled
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-disabled)] cursor-not-allowed"
+                        onClick={() => handlePlayAutoExport("coupang")}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                       >
-                        <span className="w-2 h-2 rounded-full bg-red-400/40" />
+                        <span className="w-2 h-2 rounded-full bg-red-400" />
                         쿠팡
-                        <span className="ml-auto text-[10px] bg-[var(--bg-tertiary)] text-[var(--text-muted)] px-1.5 py-0.5 rounded">준비중</span>
                       </button>
                       <button
                         disabled

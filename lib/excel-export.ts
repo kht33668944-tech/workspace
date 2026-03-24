@@ -81,7 +81,7 @@ export function generatePlayAutoTrackingExcel(
 export type PlayAutoExportPlatform = "smartstore" | "gmarket_auction" | "coupang" | "myeolchi";
 
 /** 플랫폼별 고정값 설정 */
-const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
+export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
   shopAccount: string;
   templateCode: string;
   headerFooterTemplateCode: string;
@@ -103,9 +103,9 @@ const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
     filenameLabel: "지마켓옥션",
   },
   coupang: {
-    shopAccount: "",
-    templateCode: "",
-    headerFooterTemplateCode: "",
+    shopAccount: "쿠팡=redgoom",
+    templateCode: "2201570",
+    headerFooterTemplateCode: "14672",
     rateKey: "coupang",
     filenameLabel: "쿠팡",
   },

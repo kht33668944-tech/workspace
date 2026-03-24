@@ -89,9 +89,9 @@ export const REGISTRATION_STATUSES = ["등록전", "등록완료", "판매중지
 export type RegistrationStatus = typeof REGISTRATION_STATUSES[number];
 
 export const REGISTRATION_STATUS_COLORS: Record<string, string> = {
-  등록전: "bg-gray-500/20 text-gray-400",
-  등록완료: "bg-green-500/20 text-green-400",
-  판매중지: "bg-red-500/20 text-red-400",
+  등록전: "bg-gray-800 text-gray-200",
+  등록완료: "bg-green-900 text-green-300",
+  판매중지: "bg-red-900 text-red-300",
 };
 
 // 결제방식 목록

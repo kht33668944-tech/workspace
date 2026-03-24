@@ -60,7 +60,7 @@ export interface ExcelArchive {
   id: string;
   user_id: string;
   file_name: string;
-  file_type: "order_export" | "playauto_tracking";
+  file_type: "order_export" | "playauto_tracking" | "playauto_product";
   file_data: string; // base64 encoded xlsx
   order_count: number;
   created_at: string;

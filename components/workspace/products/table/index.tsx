@@ -10,6 +10,7 @@ import {
   norm, processValue,
   type ProductTableProps, type CellPos, type SelRange, type SortDir,
 } from "./table-utils";
+import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
 
 const PAGE_SIZE = 100;
 
@@ -443,8 +444,45 @@ function ProductTable({
               <th className={`px-2 py-2.5 sticky left-0 bg-[var(--table-header-bg)] z-30 border-r border-[var(--border-subtle)] ${isMobile ? "w-11" : "w-10"}`}>
                 <input type="checkbox" checked={allSelected} onChange={onSelectAll} className={`accent-blue-500 ${isMobile ? "w-5 h-5" : ""}`} />
               </th>
-              <th className="px-2 py-2.5 text-xs font-medium text-(--text-tertiary) whitespace-nowrap border-r border-(--border-subtle) text-left sticky left-[40px] bg-[var(--table-header-bg)] z-30" style={{ width: 72, minWidth: 72 }}>
-                등록상태
+              <th className="px-2 py-2.5 text-xs font-medium text-(--text-tertiary) whitespace-nowrap border-r border-(--border-subtle) text-left sticky left-[40px] bg-[var(--table-header-bg)] z-30 relative" style={{ width: 72, minWidth: 72 }}>
+                <button
+                  onClick={() => setFilterOpen(filterOpen === "__reg_status__" ? null : "__reg_status__")}
+                  className={`hover:text-[var(--text-primary)] transition-colors ${columnFilters.registration_status?.length ? "text-blue-400" : ""}`}
+                >
+                  등록상태 {columnFilters.registration_status?.length ? "●" : ""}
+                </button>
+                {filterOpen === "__reg_status__" && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setFilterOpen(null)} />
+                    <div className="absolute left-0 top-full mt-0.5 z-50 w-36 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
+                      {REGISTRATION_STATUSES.map(s => {
+                        const active = columnFilters.registration_status?.includes(s);
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => {
+                              const cur = columnFilters.registration_status || [];
+                              const next = active ? cur.filter(v => v !== s) : [...cur, s];
+                              onColumnFilterChange("registration_status", next);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[var(--bg-hover)] transition-colors"
+                          >
+                            <input type="checkbox" checked={!!active} readOnly className="accent-blue-500 pointer-events-none" />
+                            <span className={`inline-block px-1.5 py-0.5 rounded font-medium ${REGISTRATION_STATUS_COLORS[s]}`}>{s}</span>
+                          </button>
+                        );
+                      })}
+                      {columnFilters.registration_status?.length ? (
+                        <button
+                          onClick={() => onColumnFilterChange("registration_status", [])}
+                          className="w-full px-3 py-2 text-xs text-red-400 hover:bg-[var(--bg-hover)] transition-colors border-t border-[var(--border)]"
+                        >
+                          필터 초기화
+                        </button>
+                      ) : null}
+                    </div>
+                  </>
+                )}
               </th>
               {visibleColumns.map(col => (
                 <ResizableHeader

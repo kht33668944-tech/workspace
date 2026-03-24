@@ -40,15 +40,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "필수 필드 누락" }, { status: 400 });
   }
 
+  // playauto_product는 30일 보관, 나머지는 DB 트리거 기본값 7일
+  const insertData: Record<string, unknown> = {
+    user_id: user.id,
+    file_name,
+    file_type,
+    file_data,
+    order_count: order_count || 0,
+  };
+  if (file_type === "playauto_product") {
+    insertData.expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  }
+
   const { data, error } = await supabase
     .from("excel_archives")
-    .insert({
-      user_id: user.id,
-      file_name,
-      file_type,
-      file_data,
-      order_count: order_count || 0,
-    })
+    .insert(insertData)
     .select("id, file_name, file_type, order_count, created_at, expires_at")
     .single();
 

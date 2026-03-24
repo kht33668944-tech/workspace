@@ -134,7 +134,8 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const filtersKey = JSON.stringify(options.columnFilters || {});
   const hasActiveFilters = Object.entries(options.columnFilters || {}).some(([, v]) => v.length > 0);
 
-  if (filtersKey !== prevFiltersKeyRef.current || fetchGenRef.current !== prevFetchGenRef.current) {
+  if (filtersKey !== prevFiltersKeyRef.current) {
+    // 필터 설정 변경 시에만 전체 재평가
     prevFiltersKeyRef.current = filtersKey;
     prevFetchGenRef.current = fetchGenRef.current;
     if (!hasActiveFilters) {
@@ -143,6 +144,15 @@ export function useOrders(options: UseOrdersOptions = {}) {
       pinnedIdsRef.current = new Set(
         applyColumnFilters(orders, options.columnFilters || {}).map((o) => o.id)
       );
+    }
+  } else if (fetchGenRef.current !== prevFetchGenRef.current && hasActiveFilters && pinnedIdsRef.current) {
+    // 데이터 refetch 시: 삭제된 행 제거 + 새로 매칭되는 행 추가 (기존 pinned 유지)
+    prevFetchGenRef.current = fetchGenRef.current;
+    const currentIds = new Set(orders.map(o => o.id));
+    pinnedIdsRef.current = new Set([...pinnedIdsRef.current].filter(id => currentIds.has(id)));
+    const newMatching = applyColumnFilters(orders, options.columnFilters || {});
+    for (const o of newMatching) {
+      pinnedIdsRef.current.add(o.id);
     }
   }
 
