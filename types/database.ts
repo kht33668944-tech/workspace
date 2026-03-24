@@ -193,3 +193,48 @@ export interface PriceHistory {
   source: "scrape" | "manual";
   scraped_at: string;
 }
+
+// ─── 입출금 스냅샷 ───
+export interface CardEntry {
+  name: string;
+  accumulated: number;
+  daily_payment: number;
+  installment: number;
+  total: number;
+  payment_day?: number; // 1-31, 카드 결제일
+  payment_made?: number; // 결제일에 실제 납부한 금액
+}
+
+export interface PlatformEntry {
+  name: string;
+  delivered: number;
+  shipping: number;
+  cs: number;
+  total: number;
+  settled_amount?: number; // 실제 정산 입금된 금액
+}
+
+export interface CashEntry {
+  name: string;
+  amount: number;
+}
+
+export interface DailySnapshot {
+  id: string;
+  user_id: string;
+  date: string;
+  cards: CardEntry[];
+  platforms: PlatformEntry[];
+  cash: CashEntry[];
+  pending_purchase: number;
+  total_cards: number;
+  total_platforms: number;
+  total_cash: number;
+  net_balance: number;
+  memo: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type DailySnapshotInsert = Omit<DailySnapshot, "id" | "created_at" | "updated_at">;
+export type DailySnapshotUpdate = Partial<Omit<DailySnapshot, "id" | "user_id" | "created_at" | "updated_at">>;
