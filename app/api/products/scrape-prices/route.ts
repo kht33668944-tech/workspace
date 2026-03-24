@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import type { BrowserContext } from "playwright";
 import { launchBrowser, createGmarketContext } from "@/lib/scrapers/browser";
 import { browserPool } from "@/lib/scrapers/browser-pool";
@@ -159,7 +159,7 @@ type SSEEvent =
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
-  if (!token) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const sb = getServiceSupabaseClient();
 
@@ -172,9 +172,7 @@ export async function POST(request: NextRequest) {
     .order("sort_order", { ascending: true });
 
   if (error || !products?.length) {
-    return new Response(JSON.stringify({ error: "가격 추출할 상품이 없습니다." }), {
-      status: 400, headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json({ error: "가격 추출할 상품이 없습니다." }, { status: 400 });
   }
 
   const gmarketProducts = products.filter((p) => p.purchase_url.includes("gmarket.co.kr"));

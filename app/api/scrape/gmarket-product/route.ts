@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import type { BrowserContext, Cookie } from "playwright";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeProductName as llmNormalizeProductName, classifyCategory } from "@/lib/gemini";
@@ -433,37 +433,25 @@ async function scrapeGmarketProduct(
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) {
-    return new Response(JSON.stringify({ error: "인증 필요" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json({ error: "인증 필요" }, { status: 401 });
   }
 
   const supabase = getSupabaseClient(token);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    return new Response(JSON.stringify({ error: "인증 실패" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json({ error: "인증 실패" }, { status: 401 });
   }
 
   const body = (await request.json()) as ScrapeRequest;
   if (!body.urls || body.urls.length === 0) {
-    return new Response(JSON.stringify({ error: "URL이 없습니다." }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json({ error: "URL이 없습니다." }, { status: 400 });
   }
 
   const validUrls = body.urls.filter(
     (u) => typeof u === "string" && u.includes("gmarket.co.kr")
   );
   if (validUrls.length === 0) {
-    return new Response(JSON.stringify({ error: "유효한 지마켓 URL이 없습니다." }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json({ error: "유효한 지마켓 URL이 없습니다." }, { status: 400 });
   }
 
   const serviceClient = getServiceSupabaseClient();

@@ -4,6 +4,10 @@ import type { ScrapeResult } from "./types";
 
 const LOGIN_URL = "https://signin.auction.co.kr/Authenticate/MobileLogin.aspx?url=http%3a%2f%2fwww.auction.co.kr&return_value=0&loginType=0";
 const TRACKING_URL = "https://tracking.auction.co.kr";
+const TIMEOUT_NAV = 60000;
+const TIMEOUT_LOGIN = 30000;
+const TIMEOUT_TRACKING = 15000;
+const TIMEOUT_RETRY = 20000;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -79,15 +83,15 @@ export async function collectAuctionTracking(
   try {
     // 1. 로그인
     console.log("[auction] 로그인 중...");
-    await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: 60000 });
+    await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: TIMEOUT_NAV });
 
     const loginInput = page.locator("#typeMemberInputId");
-    await loginInput.waitFor({ state: "visible", timeout: 30000 });
+    await loginInput.waitFor({ state: "visible", timeout: TIMEOUT_LOGIN });
     await loginInput.fill(loginId);
     await page.locator("#typeMemberInputPassword").fill(loginPw);
 
     await Promise.all([
-      page.waitForURL((url) => !url.toString().includes("signin.auction.co.kr"), { timeout: 30000 }).catch(() => null),
+      page.waitForURL((url) => !url.toString().includes("signin.auction.co.kr"), { timeout: TIMEOUT_LOGIN }).catch(() => null),
       page.getByRole("button", { name: "로그인" }).click(),
     ]);
 
@@ -109,6 +113,7 @@ export async function collectAuctionTracking(
     const trackingPage = await context.newPage();
     const retryQueue: string[] = [];
 
+    try {
     for (let i = 0; i < orderNos.length; i++) {
       if (abortSignal?.aborted) {
         console.log("[auction] 사용자 중단 요청 → 남은 주문 건너뜀");
@@ -120,7 +125,7 @@ export async function collectAuctionTracking(
         if (i > 0) await delay(2000);
 
         const url = `${TRACKING_URL}/?orderNo=${orderNo}`;
-        await trackingPage.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+        await trackingPage.goto(url, { waitUntil: "domcontentloaded", timeout: TIMEOUT_TRACKING });
         await trackingPage.waitForTimeout(1000); // 페이지 로딩 안정화
 
         const data = await extractTrackingFromPage(trackingPage);
@@ -171,7 +176,7 @@ export async function collectAuctionTracking(
           if (i > 0) await delay(3000);
 
           const url = `${TRACKING_URL}/?orderNo=${orderNo}`;
-          await trackingPage.goto(url, { waitUntil: "networkidle", timeout: 20000 });
+          await trackingPage.goto(url, { waitUntil: "networkidle", timeout: TIMEOUT_RETRY });
           await trackingPage.waitForTimeout(1500);
 
           const data = await extractTrackingFromPage(trackingPage);
@@ -204,7 +209,9 @@ export async function collectAuctionTracking(
       }
     }
 
-    await trackingPage.close();
+    } finally {
+      await trackingPage.close().catch(() => {});
+    }
     console.log("[auction] 수집 완료:", `성공=${result.success.length}, 실패=${result.failed.length}, 미발견=${result.notFound.length}`);
   } catch (err) {
     console.error("[auction] 수집 오류:", err);

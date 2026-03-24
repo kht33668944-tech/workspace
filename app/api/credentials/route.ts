@@ -22,7 +22,12 @@ export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
-  const body = await request.json();
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "잘못된 요청 형식입니다." }, { status: 400 });
+  }
   const { platform, login_id, login_pw, label, group_name } = body;
 
   if (!platform || !login_id || !login_pw) {

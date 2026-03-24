@@ -8,6 +8,10 @@ import type {
 
 const LOGIN_URL = "https://signinssl.gmarket.co.kr/login/login";
 const TRACKING_URL = "https://tracking.gmarket.co.kr/track";
+const TIMEOUT_NAV = 60000;
+const TIMEOUT_LOGIN = 30000;
+const TIMEOUT_API = 30000;
+const TIMEOUT_TRACKING = 10000;
 
 function formatDate(d: Date): string {
   return d.toISOString();
@@ -34,15 +38,15 @@ export async function collectGmarketTracking(
   try {
     // 1. 로그인
     console.log("[gmarket] 로그인 중...");
-    await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: 60000 });
+    await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: TIMEOUT_NAV });
 
     const loginInput = page.getByPlaceholder("아이디");
-    await loginInput.waitFor({ state: "visible", timeout: 30000 });
+    await loginInput.waitFor({ state: "visible", timeout: TIMEOUT_LOGIN });
     await loginInput.fill(loginId);
     await page.locator("#typeMemberInputPassword").fill(loginPw);
 
     await Promise.all([
-      page.waitForURL((url) => !url.toString().includes("login/login"), { timeout: 30000 }).catch(() => null),
+      page.waitForURL((url) => !url.toString().includes("login/login"), { timeout: TIMEOUT_LOGIN }).catch(() => null),
       page.getByRole("button", { name: "로그인", exact: false }).first().click(),
     ]);
 
@@ -81,9 +85,9 @@ export async function collectGmarketTracking(
     console.log("[gmarket] my.gmarket.co.kr 이동...");
     const firstApiPromise = page.waitForResponse(
       (res) => res.url().includes("/api/pays/paging") && res.status() === 200,
-      { timeout: 30000 }
+      { timeout: TIMEOUT_API }
     );
-    await page.goto("https://my.gmarket.co.kr/ko/pc/main", { waitUntil: "networkidle", timeout: 60000 });
+    await page.goto("https://my.gmarket.co.kr/ko/pc/main", { waitUntil: "networkidle", timeout: TIMEOUT_NAV });
 
     const firstApiRes = await firstApiPromise;
     const firstData = await firstApiRes.json() as GmarketOrderResponse;
@@ -201,10 +205,10 @@ async function getTrackingFromPage(
   page: import("playwright").Page,
   orderNo: string
 ): Promise<{ courier: string; trackingNo: string } | null> {
+  const trackingPage = await page.context().newPage();
   try {
-    const trackingPage = await page.context().newPage();
     const url = `${TRACKING_URL}/${orderNo}?trackingType=DELIVERY&charset=ko`;
-    await trackingPage.goto(url, { waitUntil: "domcontentloaded", timeout: 10000 });
+    await trackingPage.goto(url, { waitUntil: "domcontentloaded", timeout: TIMEOUT_TRACKING });
 
     const data = await trackingPage.evaluate(() => {
       const el = document.getElementById("__NEXT_DATA__");
@@ -222,13 +226,13 @@ async function getTrackingFromPage(
       }
     });
 
-    await trackingPage.close();
-
     if (data?.courier) {
       return { courier: normalizeCourier(data.courier), trackingNo: data.trackingNo };
     }
     return data;
   } catch {
     return null;
+  } finally {
+    await trackingPage.close().catch(() => {});
   }
 }

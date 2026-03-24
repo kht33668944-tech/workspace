@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { purchaseGmarket } from "@/lib/scrapers/gmarket-purchase";
 import { purchaseOhouse } from "@/lib/scrapers/ohouse-purchase";
@@ -38,19 +38,13 @@ export async function POST(request: NextRequest) {
   try {
     const token = getAccessToken(request);
     if (!token) {
-      return new Response(JSON.stringify({ error: "인증 필요" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "인증 필요" }, { status: 401 });
     }
 
     const body = (await request.json()) as AutoPurchaseRequest;
 
     if (!body.orders || body.orders.length === 0) {
-      return new Response(JSON.stringify({ error: "구매할 주문이 없습니다." }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "구매할 주문이 없습니다." }, { status: 400 });
     }
 
     let platform: string;
@@ -66,10 +60,7 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (error || !cred) {
-        return new Response(JSON.stringify({ error: "등록된 계정을 찾을 수 없습니다." }), {
-          status: 404,
-          headers: { "Content-Type": "application/json" },
-        });
+        return NextResponse.json({ error: "등록된 계정을 찾을 수 없습니다." }, { status: 404 });
       }
 
       platform = cred.platform;
@@ -77,10 +68,7 @@ export async function POST(request: NextRequest) {
       loginPw = decrypt(cred.login_pw_encrypted);
     } else {
       if (!body.platform || !body.loginId || !body.loginPw) {
-        return new Response(JSON.stringify({ error: "계정 정보가 필요합니다." }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        });
+        return NextResponse.json({ error: "계정 정보가 필요합니다." }, { status: 400 });
       }
       platform = body.platform;
       loginId = body.loginId;
@@ -88,16 +76,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (platform === "gmarket" && (!body.paymentPin || body.paymentPin.length !== 6)) {
-      return new Response(JSON.stringify({ error: "결제 비밀번호 6자리가 필요합니다." }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "결제 비밀번호 6자리가 필요합니다." }, { status: 400 });
     }
     if (platform !== "gmarket" && platform !== "ohouse") {
-      return new Response(JSON.stringify({ error: `${platform}은(는) 아직 자동구매를 지원하지 않습니다.` }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: `${platform}은(는) 아직 자동구매를 지원하지 않습니다.` }, { status: 400 });
     }
 
     // SSE 스트림 생성
@@ -105,10 +87,11 @@ export async function POST(request: NextRequest) {
     const { signal } = abortController;
 
     // 클라이언트 연결 끊김 감지
-    request.signal.addEventListener("abort", () => {
+    const onAbort = () => {
       console.log("[auto-purchase] 클라이언트 연결 끊김 → 작업 중단");
       abortController.abort();
-    });
+    };
+    request.signal.addEventListener("abort", onAbort);
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -260,6 +243,7 @@ export async function POST(request: NextRequest) {
             sendEvent({ type: "error", message: `서버 오류: ${msg}` });
           }
         } finally {
+          request.signal.removeEventListener("abort", onAbort);
           controller.close();
         }
       },
@@ -273,9 +257,9 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (err) {
-    return new Response(
-      JSON.stringify({ error: `서버 오류: ${err instanceof Error ? err.message : String(err)}` }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+    return NextResponse.json(
+      { error: `서버 오류: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 500 }
     );
   }
 }
