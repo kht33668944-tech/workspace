@@ -116,7 +116,29 @@ export function processValue(colKey: string, raw: string, revenue?: number): unk
   return t || null;
 }
 
-export function formatCell(key: string, val: unknown): React.ReactNode {
+// 택배사별 배송조회 URL 매핑
+const COURIER_TRACKING_URLS: Record<string, (trackingNo: string) => string> = {
+  "CJ대한통운": (no) => `https://trace.cjlogistics.com/web/detail.jsp?slipno=${no}`,
+  "한진택배": (no) => `https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mession-open&wblnumText2=${no}`,
+  "롯데택배": (no) => `https://www.lotteglogis.com/home/reservation/tracking/link498?InvNo=${no}`,
+  "우체국택배": (no) => `https://service.epost.go.kr/trace.RetrieveDomRi498.comm?sid1=${no}`,
+  "로젠택배": (no) => `https://www.ilogen.com/web/personal/trace/${no}`,
+  "경동택배": (no) => `https://kdexp.com/service/shipment/find.do?barcode=${no}`,
+  "대신택배": (no) => `https://www.ds3211.co.kr/freight/internalFreightSearch.ht?billno=${no}`,
+  "일양로지스": (no) => `https://www.ilyanglogis.com/functionality/tracking_result.asp?hawb_no=${no}`,
+  "합동택배": (no) => `https://hdexp.co.kr/shipment_tracking.html?barcode=${no}`,
+  "천일택배": (no) => `https://www.chunil.co.kr/HTrace/HTrace.jsp?transNo=${no}`,
+  "CJ국제특송": (no) => `https://trace.cjlogistics.com/web/detail.jsp?slipno=${no}`,
+  "SLX": (no) => `https://www.slx.co.kr/delivery/delivery_number.php?no=${no}`,
+};
+
+export function getTrackingUrl(courier: string | null, trackingNo: string): string | null {
+  if (!courier) return null;
+  const urlFn = COURIER_TRACKING_URLS[courier];
+  return urlFn ? urlFn(trackingNo) : null;
+}
+
+export function formatCell(key: string, val: unknown, order?: { courier?: string | null }): React.ReactNode {
   if (val == null || val === "") return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
   if (key === "delivery_status") {
     const color = DELIVERY_STATUS_COLORS[String(val)] || "bg-gray-500/20 text-gray-400";
@@ -133,6 +155,18 @@ export function formatCell(key: string, val: unknown): React.ReactNode {
   if (key === "marketplace") {
     const mp = MARKETPLACES[String(val)];
     if (mp) return React.createElement("span", { className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${mp.color}` }, mp.label);
+  }
+  if (key === "tracking_no" && order) {
+    const trackingNo = String(val);
+    const url = getTrackingUrl(order.courier ?? null, trackingNo);
+    if (url) {
+      return React.createElement("a", {
+        href: url, target: "_blank", rel: "noopener noreferrer",
+        className: "text-blue-400 text-xs truncate block max-w-full hover:underline cursor-pointer",
+        title: `${order.courier} 배송조회: ${trackingNo}`,
+        onClick: (e: React.MouseEvent) => e.stopPropagation()
+      }, trackingNo);
+    }
   }
   if (key === "purchase_url") {
     const url = String(val);

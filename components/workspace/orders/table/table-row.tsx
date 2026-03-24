@@ -140,7 +140,7 @@ const MemoRow = memo(function Row({
               <div className={`text-xs truncate min-h-[22px] leading-[22px] px-1 ${
                 isSelected ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""
               }`}>
-                {formatCell(col.key, val)}
+                {formatCell(col.key, val, col.key === "tracking_no" ? order : undefined)}
               </div>
             )}
             {!isMobile && showFillHandle && ci === fillHandleCol && isEditable && (
