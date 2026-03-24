@@ -1,26 +1,15 @@
 import { type BrowserContext, type Cookie } from "playwright";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ScrapeResult } from "./types";
-import { readFile, writeFile, mkdir } from "fs/promises";
-import path from "path";
-import crypto from "crypto";
 import { launchBrowser, createStealthContext } from "./browser";
 import { normalizeCourier } from "./constants";
-import { loadSession, saveSession } from "./session-manager";
+import { loadSession, saveSession, loadFileSession, saveFileSession } from "./session-manager";
 
 const LOGIN_URL = "https://ohou.se/users/sign_in";
 const ORDER_LIST_API = "/order/v1/front/orders/list";
 const DELIVERY_BASE_URL = "https://store.ohou.se/deliveries";
-const SESSION_DIR = path.join(process.cwd(), ".sessions");
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// 계정별 쿠키 파일 경로 생성
-function getCookiePath(loginId: string): string {
-  const hash = crypto.createHash("md5").update(loginId).digest("hex").substring(0, 8);
-  return path.join(SESSION_DIR, `ohouse-${hash}.json`);
 }
 
 interface OhouseOrder {
@@ -37,37 +26,6 @@ interface OhouseOrder {
 interface OhouseOrderListResponse {
   nextCursor: number | null;
   orderList: OhouseOrder[];
-}
-
-interface SavedSession {
-  loginId: string;
-  cookies: Cookie[];
-  savedAt: number;
-}
-
-async function loadCookies(loginId: string): Promise<Cookie[] | null> {
-  try {
-    const cookiePath = getCookiePath(loginId);
-    const data = await readFile(cookiePath, "utf-8");
-    const session: SavedSession = JSON.parse(data);
-    if (session.loginId !== loginId) return null;
-    const hoursSaved = (Date.now() - session.savedAt) / (1000 * 60 * 60);
-    if (hoursSaved > 24) return null;
-    return session.cookies;
-  } catch {
-    return null;
-  }
-}
-
-async function saveCookies(loginId: string, cookies: Cookie[]): Promise<void> {
-  try {
-    await mkdir(SESSION_DIR, { recursive: true });
-    const session: SavedSession = { loginId, cookies, savedAt: Date.now() };
-    const cookiePath = getCookiePath(loginId);
-    await writeFile(cookiePath, JSON.stringify(session), "utf-8");
-  } catch {
-    // 쿠키 저장 실패는 무시
-  }
 }
 
 async function isSessionValid(context: BrowserContext): Promise<boolean> {
@@ -120,7 +78,7 @@ export async function collectOhouseTracking(
   // 1. 계정별 쿠키 복원 시도 (DB 우선, fallback: 파일)
   const savedCookies = supabase
     ? await loadSession(supabase, "ohouse", loginId)
-    : await loadCookies(loginId);
+    : await loadFileSession("ohouse", loginId);
   if (savedCookies) {
     console.log("[ohouse] 저장된 세션으로 복원 시도...");
     context = await createStealthContext(browser);
@@ -175,7 +133,7 @@ export async function collectOhouseTracking(
       if (supabase) {
         await saveSession(supabase, "ohouse", loginId, cookies);
       } else {
-        await saveCookies(loginId, cookies);
+        await saveFileSession("ohouse", loginId, cookies);
       }
     } finally {
       await page.close();
@@ -338,7 +296,11 @@ export async function collectOhouseTracking(
 
     // 수집 완료 후 쿠키 갱신 저장
     const updatedCookies = await activeContext.cookies();
-    await saveCookies(loginId, updatedCookies);
+    if (supabase) {
+      await saveSession(supabase, "ohouse", loginId, updatedCookies);
+    } else {
+      await saveFileSession("ohouse", loginId, updatedCookies);
+    }
 
     console.log("[ohouse] 수집 완료:", `성공=${result.success.length}, 실패=${result.failed.length}, 미발견=${result.notFound.length}`);
   } catch (err) {

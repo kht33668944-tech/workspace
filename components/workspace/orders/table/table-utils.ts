@@ -2,6 +2,48 @@ import React from "react";
 import { MARKETPLACES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
 import type { Order } from "@/types/database";
 
+// 안전한 사칙연산 파서 (Function/eval 대체)
+function safeMathEval(expr: string): number {
+  const tokens: string[] = [];
+  const re = /(\d+(?:\.\d+)?)|([+\-*/()])/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(expr)) !== null) tokens.push(m[0]);
+
+  let pos = 0;
+  function parseExpr(): number {
+    let left = parseTerm();
+    while (pos < tokens.length && (tokens[pos] === "+" || tokens[pos] === "-")) {
+      const op = tokens[pos++];
+      const right = parseTerm();
+      left = op === "+" ? left + right : left - right;
+    }
+    return left;
+  }
+  function parseTerm(): number {
+    let left = parseFactor();
+    while (pos < tokens.length && (tokens[pos] === "*" || tokens[pos] === "/")) {
+      const op = tokens[pos++];
+      const right = parseFactor();
+      left = op === "*" ? left * right : left / right;
+    }
+    return left;
+  }
+  function parseFactor(): number {
+    if (tokens[pos] === "(") {
+      pos++;
+      const val = parseExpr();
+      if (tokens[pos] === ")") pos++;
+      return val;
+    }
+    if (tokens[pos] === "-") {
+      pos++;
+      return -parseFactor();
+    }
+    return parseFloat(tokens[pos++]) || 0;
+  }
+  return parseExpr();
+}
+
 // margin 제외 모든 컬럼 편집 가능 (address 포함)
 export const EDITABLE_KEYS = new Set([
   "bundle_no", "order_date", "marketplace", "recipient_name", "product_name",
@@ -64,7 +106,7 @@ export function processValue(colKey: string, raw: string, revenue?: number): unk
     if (FORMULA_KEYS.has(colKey) && t.startsWith("=") && revenue !== undefined) {
       const expr = t.slice(1).replace(/매출/g, String(revenue)).replace(/revenue/gi, String(revenue));
       if (/^[\d+\-*/().%\s]+$/.test(expr)) {
-        try { const r = Math.round(Function(`"use strict"; return (${expr})`)()); if (!isNaN(r)) return r; } catch { /* */ }
+        try { const r = Math.round(safeMathEval(expr)); if (!isNaN(r)) return r; } catch { /* */ }
       }
       return 0;
     }

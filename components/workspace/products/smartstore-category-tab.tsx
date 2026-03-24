@@ -33,7 +33,8 @@ export default function SmartStoreCategoryTab() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const userId = session?.user?.id;
-  const authHeader = { "x-user-id": userId ?? "" };
+  const accessToken = session?.access_token;
+  const authHeader = { Authorization: `Bearer ${accessToken ?? ""}` };
 
   // 초기 로드
   useEffect(() => {

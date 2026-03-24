@@ -32,12 +32,13 @@ export default function CommissionTab() {
   const [mappingSaving, setMappingSaving] = useState(false);
 
   const userId = session?.user?.id;
+  const accessToken = session?.access_token;
 
   // 매핑 로드
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !accessToken) return;
     fetch("/api/products/playauto-mappings", {
-      headers: { "x-user-id": userId },
+      headers: { Authorization: `Bearer ${accessToken}` },
     })
       .then((r) => r.json())
       .then((d: { mappings?: Array<{ user_category: string; playauto_code: string }> }) => {
@@ -58,7 +59,7 @@ export default function CommissionTab() {
     try {
       const res = await fetch("/api/products/playauto-mappings", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ categories }),
       });
       const d = await res.json() as { suggestions?: Array<{ user_category: string; playauto_code: string }> };
@@ -80,7 +81,7 @@ export default function CommissionTab() {
       }));
       await fetch("/api/products/playauto-mappings", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-user-id": userId },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ mappings: rows }),
       });
     } catch { /* ignore */ } finally {

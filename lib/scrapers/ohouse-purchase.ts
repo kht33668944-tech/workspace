@@ -1,64 +1,19 @@
 import { chromium, type Page, type BrowserContext, type Cookie } from "playwright";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
-import { readFile, writeFile, mkdir } from "fs/promises";
-import path from "path";
-import crypto from "crypto";
-import { loadSession, saveSession } from "./session-manager";
+import { loadSession, saveSession, loadFileSession, saveFileSession } from "./session-manager";
 
 const LOGIN_URL = "https://ohou.se/users/sign_in";
-const SESSION_DIR = path.join(process.cwd(), ".sessions");
 
-// 고정값
-const FIXED_PHONE_SUFFIX = "6564-4459"; // 배송지 전화번호 (뒷자리)
-const KAKAO_PHONE = "01033668944";       // 카카오페이 결제 전화번호 (하이픈 없이)
-const KAKAO_BIRTHDAY = "980309";        // 카카오페이 생년월일
+// 환경변수에서 읽기 (.env.local)
+const FIXED_PHONE_SUFFIX = process.env.OHOUSE_PHONE_SUFFIX ?? "";
+const KAKAO_PHONE = process.env.OHOUSE_KAKAO_PHONE ?? "";
+const KAKAO_BIRTHDAY = process.env.OHOUSE_KAKAO_BIRTHDAY ?? "";
 const PAYMENT_WAIT_MS = 60000;          // 결제 승인 대기 시간 (60초)
 
 interface ProgressCallback {
   (orderId: string, status: "processing" | "success" | "failed" | "waiting_payment", message: string, purchaseOrderNo?: string): void;
 }
-
-// ═══════════════════════════════════
-// 세션 관리 (ohouse.ts와 동일 구조)
-// ═══════════════════════════════════
-
-interface SavedSession {
-  loginId: string;
-  cookies: Cookie[];
-  savedAt: number;
-}
-
-function getCookiePath(loginId: string): string {
-  const hash = crypto.createHash("md5").update(loginId).digest("hex").substring(0, 8);
-  return path.join(SESSION_DIR, `ohouse-${hash}.json`);
-}
-
-async function loadCookies(loginId: string): Promise<Cookie[] | null> {
-  try {
-    const cookiePath = getCookiePath(loginId);
-    const data = await readFile(cookiePath, "utf-8");
-    const session: SavedSession = JSON.parse(data);
-    if (session.loginId !== loginId) return null;
-    const hoursSaved = (Date.now() - session.savedAt) / (1000 * 60 * 60);
-    if (hoursSaved > 24) return null;
-    return session.cookies;
-  } catch {
-    return null;
-  }
-}
-
-async function saveCookies(loginId: string, cookies: Cookie[]): Promise<void> {
-  try {
-    await mkdir(SESSION_DIR, { recursive: true });
-    const session: SavedSession = { loginId, cookies, savedAt: Date.now() };
-    await writeFile(getCookiePath(loginId), JSON.stringify(session), "utf-8");
-  } catch {
-    // 무시
-  }
-}
-
-// ═══════════════════════════════════
 // 메인 함수
 // ═══════════════════════════════════
 
@@ -101,7 +56,7 @@ export async function purchaseOhouse(
   // 1. 세션 복원 시도 (DB 우선, fallback: 파일)
   const savedCookies = supabase
     ? await loadSession(supabase, "ohouse", loginId)
-    : await loadCookies(loginId);
+    : await loadFileSession("ohouse", loginId);
   if (savedCookies) {
     console.log("[ohouse-purchase] 저장된 세션으로 복원 시도...");
     context = await browser.newContext();
@@ -146,7 +101,7 @@ export async function purchaseOhouse(
       if (supabase) {
         await saveSession(supabase, "ohouse", loginId, cookies);
       } else {
-        await saveCookies(loginId, cookies);
+        await saveFileSession("ohouse", loginId, cookies);
       }
     } catch (err) {
       await browser.close();
@@ -232,7 +187,11 @@ export async function purchaseOhouse(
 
     // 세션 갱신
     const updatedCookies = await activeContext.cookies();
-    await saveCookies(loginId, updatedCookies);
+    if (supabase) {
+      await saveSession(supabase, "ohouse", loginId, updatedCookies);
+    } else {
+      await saveFileSession("ohouse", loginId, updatedCookies);
+    }
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     for (const order of orders) {
@@ -422,7 +381,7 @@ async function changeDeliveryAddress(page: Page, order: PurchaseOrderInfo) {
 
       // 전화번호 (010 뒤 뒷자리)
       await modalInputs.nth(2).fill(FIXED_PHONE_SUFFIX, { force: true });
-      console.log(`[ohouse-purchase] 배송지 전화번호 입력: ${FIXED_PHONE_SUFFIX}`);
+      console.log(`[ohouse-purchase] 배송지 전화번호 입력 완료`);
     } else {
       // fallback: 라벨 기반 (모달 스코프 실패 시)
       console.log("[ohouse-purchase] 모달 input 감지 실패, 라벨 기반 fallback");
@@ -712,7 +671,7 @@ async function switchToKakaoPayAndRequest(page: Page, popup: Page | null) {
         continue; // 아직 로딩 중
       }
 
-      // 전화번호 입력 (하이픈 없이 01033668944) - 다양한 셀렉터 fallback
+      // 전화번호 입력 - 다양한 셀렉터 fallback
       const phoneSelectors = [
         'input[placeholder*="휴대폰"]',
         'input[placeholder*="번호"]',
@@ -725,7 +684,7 @@ async function switchToKakaoPayAndRequest(page: Page, popup: Page | null) {
         if (await phoneInput.isVisible({ timeout: 1500 }).catch(() => false)) {
           await phoneInput.click({ force: true });
           await phoneInput.fill(KAKAO_PHONE);
-          console.log(`[ohouse-purchase] 전화번호 입력: ${KAKAO_PHONE}`);
+          console.log(`[ohouse-purchase] 카카오페이 전화번호 입력 완료`);
           phoneFilled = true;
           break;
         }
@@ -743,7 +702,7 @@ async function switchToKakaoPayAndRequest(page: Page, popup: Page | null) {
         if (await bdayInput.isVisible({ timeout: 1500 }).catch(() => false)) {
           await bdayInput.click({ force: true });
           await bdayInput.fill(KAKAO_BIRTHDAY);
-          console.log(`[ohouse-purchase] 생년월일 입력: ${KAKAO_BIRTHDAY}`);
+          console.log(`[ohouse-purchase] 카카오페이 생년월일 입력 완료`);
           bdayFilled = true;
           break;
         }
@@ -754,7 +713,7 @@ async function switchToKakaoPayAndRequest(page: Page, popup: Page | null) {
         if (await secondInput.isVisible({ timeout: 1500 }).catch(() => false)) {
           await secondInput.click({ force: true });
           await secondInput.fill(KAKAO_BIRTHDAY);
-          console.log(`[ohouse-purchase] 생년월일 입력 (fallback): ${KAKAO_BIRTHDAY}`);
+          console.log(`[ohouse-purchase] 카카오페이 생년월일 입력 완료 (fallback)`);
         } else {
           console.log("[ohouse-purchase] 생년월일 input 못 찾음");
         }

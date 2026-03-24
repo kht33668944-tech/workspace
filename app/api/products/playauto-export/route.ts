@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { extractProductMetadataBatch, suggestSmartStoreCategoryCodes } from "@/lib/gemini";
 import { generatePlayAutoProductExcel, arrayBufferToBase64 } from "@/lib/excel-export";
 
 export async function POST(req: NextRequest) {
   try {
+    const token = getAccessToken(req);
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const supabase = getSupabaseClient(token);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
     const { productIds, platform } = (await req.json()) as {
       productIds: string[];
       platform: "smartstore";
@@ -14,12 +21,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "상품 ID가 없습니다." }, { status: 400 });
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // 상품 조회
+    // 상품 조회 (RLS로 본인 소유만 반환)
     const { data: products, error: productsError } = await supabase
       .from("products")
       .select("*")
@@ -34,8 +36,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "조회된 상품이 없습니다." }, { status: 404 });
     }
 
-    // 수수료 + 플레이오토 매핑 + 카테고리코드 동시 조회
-    const userId = products[0].user_id as string;
+    const userId = user.id;
 
     // 카테고리코드는 1000개 이상일 수 있으므로 페이지네이션
     async function fetchAllCategoryCodes() {
