@@ -244,7 +244,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
       setThumbSummary(product.id, data.summary ?? "완료");
       setThumbStatus(product.id, "done");
     } catch (e) {
-      console.error(e);
+      console.error("[image-tab] 썸네일 생성 실패:", e instanceof Error ? e.message : String(e));
       setThumbStatus(product.id, "error");
     }
   };
@@ -268,7 +268,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
         onUpdate(product.id, { detail_html: data.detailHtml ?? null, detail_image_url: data.detailImageUrl ?? null }, true);
       setDetailStatus(product.id, "done");
     } catch (e) {
-      console.error(e);
+      console.error("[image-tab] 상세페이지 생성 실패:", e instanceof Error ? e.message : String(e));
       setDetailStatus(product.id, "error");
     }
   };
@@ -409,7 +409,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
       const { error } = await supabase.storage
         .from("product-images")
         .upload(path, file, { contentType: file.type, upsert: true });
-      if (error) { console.error("업로드 실패:", error); return; }
+      if (error) { console.error("[image-tab] 업로드 실패:", error.message); return; }
       const { data } = supabase.storage.from("product-images").getPublicUrl(path);
       const newUrls = [...(product.image_urls || []), data.publicUrl];
       const newThumb = product.thumbnail_url ?? data.publicUrl;

@@ -51,7 +51,7 @@ async function getGmarketCredential(): Promise<{ id: string; pw: string } | null
     const pw = decrypt(data.login_pw_encrypted);
     return { id: data.login_id, pw };
   } catch (e) {
-    console.warn("[gmarket-login] 계정 조회 실패:", e);
+    console.warn("[gmarket-login] 계정 조회 실패:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }
@@ -96,7 +96,7 @@ async function loginToGmarket(context: BrowserContext): Promise<boolean> {
     console.log(`[gmarket-login] ${success ? "성공" : "실패"} — URL: ${finalUrl}`);
     return success;
   } catch (e) {
-    console.error("[gmarket-login] 오류:", e);
+    console.error("[gmarket-login] 오류:", e instanceof Error ? e.message : String(e));
     return false;
   } finally {
     await page.close();
@@ -170,7 +170,7 @@ async function ensureGmarketLogin(
     console.log(`[gmarket-login] L3 재로그인 완료 ✅ (쿠키 ${cookies.length}개)`);
     if (loginId) {
       saveSession(supabase, "gmarket", loginId, cookies).catch((e) =>
-        console.warn("[gmarket-login] DB 세션 저장 실패:", e)
+        console.warn("[gmarket-login] DB 세션 저장 실패:", e instanceof Error ? e.message : String(e))
       );
     }
   } else {
@@ -265,7 +265,7 @@ async function uploadImageToStorage(
     const { data } = serviceClient.storage.from("product-images").getPublicUrl(storagePath);
     return data.publicUrl;
   } catch (e) {
-    console.error("[gmarket-product] Image upload failed:", e);
+    console.error("[gmarket-product] Image upload failed:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }

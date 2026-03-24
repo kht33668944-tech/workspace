@@ -102,7 +102,7 @@ export async function generateText(
     const result = await model.generateContent(prompt);
     return parseResponse(result).text || null;
   } catch (e) {
-    console.warn("[gemini] generateText 실패:", e);
+    console.warn("[gemini] generateText 실패:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }
@@ -121,7 +121,7 @@ export async function generateContent(
     const result = await model.generateContent(prompt);
     return parseResponse(result);
   } catch (e) {
-    console.warn("[gemini] generateContent 실패:", e);
+    console.warn("[gemini] generateContent 실패:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }
@@ -186,7 +186,7 @@ export async function analyzeImageFromUrl(
     ]);
     return parseResponse(result).text || null;
   } catch (e) {
-    console.warn("[gemini] analyzeImageFromUrl 실패:", e);
+    console.warn("[gemini] analyzeImageFromUrl 실패:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }
@@ -222,7 +222,7 @@ export async function generateImageFromPrompt(
     const parsed = parseResponse(result);
     return parsed.images[0] ?? null;
   } catch (e) {
-    console.warn("[gemini] generateImageFromPrompt 실패:", e);
+    console.warn("[gemini] generateImageFromPrompt 실패:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }
@@ -245,7 +245,7 @@ export async function groundedSearch(prompt: string): Promise<string | null> {
     const result = await model.generateContent(prompt);
     return parseResponse(result).text || null;
   } catch (e) {
-    console.warn("[gemini] groundedSearch 실패:", e);
+    console.warn("[gemini] groundedSearch 실패:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }

@@ -302,7 +302,7 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
       detailImageUrl = publicUrl;
     }
   } catch (e) {
-    console.error("[detail] Playwright 스크린샷 실패:", e);
+    console.error("[detail] Playwright 스크린샷 실패:", e instanceof Error ? e.message : String(e));
   } finally {
     if (browser) await browser.close().catch(() => {});
     browserPool.release();

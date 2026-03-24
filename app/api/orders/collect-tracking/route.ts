@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
       // 운송장 로그 저장 (백그라운드, 실패 시 콘솔 경고)
       if (supabase) {
         saveTrackingLogs(supabase, result, platform, loginId, body.orderNos).catch((e) => {
-          console.warn("[collect-tracking] 운송장 로그 저장 실패:", e);
+          console.warn("[collect-tracking] 운송장 로그 저장 실패:", e instanceof Error ? e.message : String(e));
         });
       }
 

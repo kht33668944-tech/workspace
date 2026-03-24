@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
     const base64 = arrayBufferToBase64(buffer);
     return NextResponse.json({ base64, filename });
   } catch (e) {
-    console.error("[playauto-export]", e);
+    console.error("[playauto-export]", e instanceof Error ? e.message : String(e));
     return NextResponse.json({ error: "서버 오류" }, { status: 500 });
   }
 }
