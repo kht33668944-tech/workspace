@@ -88,7 +88,7 @@ export function useProducts(options: UseProductsOptions = {}) {
 
     setProducts(allData);
     fetchGenRef.current++;
-    nextSortOrderRef.current = allData.length;
+    nextSortOrderRef.current = allData.reduce((max, p) => Math.max(max, p.sort_order ?? 0), -1) + 1;
     setLoading(false);
   }, [userId, options.search]);
 
@@ -162,7 +162,8 @@ export function useProducts(options: UseProductsOptions = {}) {
 
   const insertProducts = async (rows: Omit<Product, "id" | "created_at" | "updated_at">[]) => {
     if (!user) return { error: "Not authenticated" };
-    const withUserId = rows.map((row) => ({ ...row, user_id: user.id }));
+    const startSort = nextSortOrderRef.current;
+    const withUserId = rows.map((row, i) => ({ ...row, user_id: user.id, sort_order: startSort + i }));
 
     const inserted: Product[] = [];
     const BATCH_SIZE = 500;
@@ -173,8 +174,9 @@ export function useProducts(options: UseProductsOptions = {}) {
       if (data) inserted.push(...(data as Product[]));
     }
 
+    inserted.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     setProducts((prev) => [...prev, ...inserted]);
-    nextSortOrderRef.current += inserted.length;
+    nextSortOrderRef.current = startSort + inserted.length;
     fetchGenRef.current++;
     return { error: null };
   };

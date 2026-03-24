@@ -11,7 +11,6 @@ const MAX_URLS = 20;
 interface Props {
   onClose: () => void;
   onImport: (rows: Omit<ProductInsert, "user_id">[]) => Promise<{ error: string | null }>;
-  productCount: number;
   categories: string[];
 }
 
@@ -22,7 +21,7 @@ interface PreviewItem extends GmarketProductResult {
   selectedCategory: string;
 }
 
-export default function GmarketImportModal({ onClose, onImport, productCount, categories }: Props) {
+export default function GmarketImportModal({ onClose, onImport, categories }: Props) {
   const { session } = useAuth();
   const [stage, setStage] = useState<Stage>("input");
   const [urlFields, setUrlFields] = useState<string[]>([""]);
@@ -307,13 +306,13 @@ export default function GmarketImportModal({ onClose, onImport, productCount, ca
       source_category: item.category,
       purchase_url: item.url,
       memo: "",
-      sort_order: productCount + idx,
+      sort_order: 0,
       thumbnail_url: item.thumbnail_url,
       image_urls: item.image_urls,
       source_platform: "gmarket",
       detail_html: null,
       detail_image_url: null,
-      registration_status: "미등록",
+      registration_status: "등록전",
     }));
 
     const { error: importError } = await onImport(rows);

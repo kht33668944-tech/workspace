@@ -539,7 +539,6 @@ export default function ProductsPage() {
         <GmarketImportModal
           onClose={() => setImportModalOpen(false)}
           onImport={handleImport}
-          productCount={allProducts.length}
           categories={categories}
         />
       )}

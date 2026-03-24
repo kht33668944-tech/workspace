@@ -454,10 +454,16 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
   // 마크다운 볼드(**) 제거
   cleaned = cleaned.replace(/\*\*/g, "").trim();
   // 특수문자 최종 정리 (허용: 한글, 숫자, 공백, 용량 단위 ml/L/g/kg)
+  // 용량 단위 보호 후 영문 제거
+  const unitMap: string[] = [];
+  cleaned = cleaned.replace(/(\d)\s*(ml|mL|ML|[Ll]|[Gg]|[Kk][Gg])\b/g, (_, num, unit) => {
+    const idx = unitMap.length;
+    unitMap.push(unit);
+    return `${num}〈${idx}〉`;
+  });
+  cleaned = cleaned.replace(/[a-zA-Z]+/g, "");  // 영문 제거
+  cleaned = cleaned.replace(/〈(\d+)〉/g, (_, idx) => unitMap[Number(idx)] ?? "");  // 용량 단위 복원
   cleaned = cleaned
-    .replace(/(\d)\s*(ml|mL|ML|[Ll]|[Gg]|[Kk][Gg])\b/g, "$1__UNIT_$2__")  // 용량 단위 보호
-    .replace(/[a-zA-Z]+/g, "")  // 영문 제거
-    .replace(/__UNIT_(.+?)__/g, "$1")  // 용량 단위 복원
     .replace(/[^\uAC00-\uD7A3\u3130-\u318Fa-zA-Z0-9\s]/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
