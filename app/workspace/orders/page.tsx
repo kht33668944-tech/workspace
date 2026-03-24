@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar, Truck, ChevronDown, ShoppingCart, History } from "lucide-react";
@@ -69,6 +69,14 @@ function getCurrentMonth(): string {
 }
 
 export default function OrdersPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-[50vh] text-[var(--text-secondary)]">로딩 중...</div>}>
+      <OrdersPageInner />
+    </Suspense>
+  );
+}
+
+function OrdersPageInner() {
   usePreventBrowserSave();
   const { session } = useAuth();
   const { showToast } = useToast();

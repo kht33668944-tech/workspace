@@ -96,13 +96,19 @@ export async function createStealthContext(browser: Browser): Promise<BrowserCon
       get: () => ["ko-KR", "ko", "en-US", "en"],
     });
 
-    // WebGL vendor 위장
-    const getParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function (parameter: number) {
-      if (parameter === 37445) return "Google Inc. (NVIDIA)";
-      if (parameter === 37446) return "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650)";
-      return getParameter.call(this, parameter);
-    };
+    // WebGL vendor 위장 (WebGL1 + WebGL2)
+    function patchWebGL(proto: { getParameter: (p: number) => unknown }) {
+      const orig = proto.getParameter;
+      proto.getParameter = function (parameter: number) {
+        if (parameter === 37445) return "Google Inc. (NVIDIA)";
+        if (parameter === 37446) return "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650)";
+        return orig.call(this, parameter);
+      };
+    }
+    patchWebGL(WebGLRenderingContext.prototype);
+    if (typeof WebGL2RenderingContext !== "undefined") {
+      patchWebGL(WebGL2RenderingContext.prototype);
+    }
   });
 
   return context;

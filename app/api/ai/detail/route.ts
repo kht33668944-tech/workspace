@@ -19,16 +19,26 @@ interface ProductSpecs {
   [key: string]: SpecValue;
 }
 
-/** 어떤 타입의 값이든 표시용 문자열로 변환 */
+/** HTML 특수문자 이스케이프 (XSS 방지) */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** 어떤 타입의 값이든 표시용 문자열로 변환 (XSS 방지 적용) */
 function specValueToString(key: string, value: SpecValue): string {
   if (!value) return "";
-  if (Array.isArray(value)) return value.map((v) => `• ${v}`).join("<br>");
+  if (Array.isArray(value)) return value.map((v) => `• ${escapeHtml(String(v))}`).join("<br>");
   if (typeof value === "object") {
     return Object.entries(value)
-      .map(([k, v]) => `${k}: ${v}`)
+      .map(([k, v]) => `${escapeHtml(String(k))}: ${escapeHtml(String(v))}`)
       .join("<br>");
   }
-  const str = String(value);
+  const str = escapeHtml(String(value));
   if (key === "영양성분") {
     return str.replace(/,\s*/g, "<br>").replace(/;\s*/g, "<br>");
   }
@@ -105,21 +115,22 @@ function buildDetailHtml(productName: string, thumbnailUrl: string | null, specs
     .map((key) => {
       const displayValue = specValueToString(key, specs[key]);
       return `<tr>
-      <td style="padding:10px 16px;background:#f8f8f8;font-weight:bold;border:1px solid #e0e0e0;width:140px;vertical-align:top;white-space:nowrap;word-break:keep-all;">${key}</td>
+      <td style="padding:10px 16px;background:#f8f8f8;font-weight:bold;border:1px solid #e0e0e0;width:140px;vertical-align:top;white-space:nowrap;word-break:keep-all;">${escapeHtml(key)}</td>
       <td style="padding:10px 16px;border:1px solid #e0e0e0;vertical-align:top;line-height:1.8;">${displayValue}</td>
     </tr>`;
     })
     .join("\n");
 
+  const safeProductName = escapeHtml(productName);
   const thumbHtml = thumbnailUrl
     ? `<div style="text-align:center;padding:20px 0;">
-    <img src="${thumbnailUrl}" alt="${productName}" style="max-width:800px;width:100%;height:auto;display:block;margin:0 auto;">
+    <img src="${escapeHtml(thumbnailUrl)}" alt="${safeProductName}" style="max-width:800px;width:100%;height:auto;display:block;margin:0 auto;">
   </div>`
     : "";
 
   return `<div style="max-width:1000px;margin:0 auto;font-family:'맑은 고딕',sans-serif;font-size:14px;color:#333;background:#fff;">
   <div style="background:#222;color:#fff;padding:16px 20px;text-align:center;">
-    <h2 style="margin:0;font-size:18px;font-weight:bold;">${productName}</h2>
+    <h2 style="margin:0;font-size:18px;font-weight:bold;">${safeProductName}</h2>
   </div>
   ${thumbHtml}
   <div style="padding:20px;">

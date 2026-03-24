@@ -129,12 +129,13 @@ function isHeaderRow(row: unknown[]): boolean {
     const normalized = normalizeHeader(String(cell));
     if (KNOWN_HEADERS.some((kh) => normalizeHeader(kh) === normalized)) {
       matchCount++;
-    }
-    // 별칭도 체크
-    for (const aliases of Object.values(ALIASES)) {
-      if (aliases.some((alias) => normalizeHeader(alias) === normalized)) {
-        matchCount++;
-        break;
+    } else {
+      // KNOWN_HEADERS에 없을 때만 별칭 체크 (이중 카운트 방지)
+      for (const aliases of Object.values(ALIASES)) {
+        if (aliases.some((alias) => normalizeHeader(alias) === normalized)) {
+          matchCount++;
+          break;
+        }
       }
     }
   }

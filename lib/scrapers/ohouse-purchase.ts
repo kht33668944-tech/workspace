@@ -1,4 +1,5 @@
-import { chromium, type Page, type BrowserContext, type Cookie } from "playwright";
+import { type Page, type BrowserContext, type Cookie } from "playwright";
+import { launchBrowser } from "./browser";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
 import { loadSession, saveSession, loadFileSession, saveFileSession } from "./session-manager";
@@ -41,14 +42,7 @@ export async function purchaseOhouse(
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
-  const browser = await chromium.launch({
-    channel: "chrome",
-    headless: false,
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      "--no-sandbox",
-    ],
-  });
+  const browser = await launchBrowser();
 
   let context: BrowserContext;
   let needsLogin = true;

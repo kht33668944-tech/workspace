@@ -1,4 +1,5 @@
-import { chromium, type Page, type Frame, type BrowserContext } from "playwright";
+import { type Page, type Frame, type BrowserContext } from "playwright";
+import { launchBrowser } from "./browser";
 import sharp from "sharp";
 import type TesseractType from "tesseract.js";
 import path from "path";
@@ -30,14 +31,7 @@ export async function purchaseGmarket(
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
-  const browser = await chromium.launch({
-    channel: "chrome",
-    headless: false,
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      "--no-sandbox",
-    ],
-  });
+  const browser = await launchBrowser();
   const context = await browser.newContext();
   await context.addInitScript(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => false });

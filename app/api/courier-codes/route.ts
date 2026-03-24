@@ -32,17 +32,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "유효하지 않은 데이터" }, { status: 400 });
   }
 
-  // 기존 데이터 삭제
-  await supabase.from("courier_codes").delete().eq("user_id", user.id);
+  const rows = codes.map((c) => ({
+    user_id: user.id,
+    courier_name: c.courier_name,
+    courier_code: c.courier_code,
+  }));
 
-  // 새 데이터 삽입
-  if (codes.length > 0) {
-    const rows = codes.map((c) => ({
-      user_id: user.id,
-      courier_name: c.courier_name,
-      courier_code: c.courier_code,
-    }));
-    const { error } = await supabase.from("courier_codes").insert(rows);
+  if (rows.length > 0) {
+    // upsert로 원자적 저장 (user_id + courier_code 기준)
+    const { error: upsertError } = await supabase
+      .from("courier_codes")
+      .upsert(rows, { onConflict: "user_id,courier_code" });
+    if (upsertError) return NextResponse.json({ error: upsertError.message }, { status: 500 });
+
+    // upsert에 포함되지 않은 기존 코드 삭제
+    const submittedCodes = codes.map((c) => c.courier_code);
+    const { error: deleteError } = await supabase
+      .from("courier_codes")
+      .delete()
+      .eq("user_id", user.id)
+      .not("courier_code", "in", `(${submittedCodes.join(",")})`);
+    if (deleteError) return NextResponse.json({ error: deleteError.message }, { status: 500 });
+  } else {
+    // 빈 배열이면 전체 삭제
+    const { error } = await supabase.from("courier_codes").delete().eq("user_id", user.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

@@ -36,12 +36,13 @@ export async function POST(request: NextRequest) {
     let loginPw: string;
     let supabase: SupabaseClient | null = null;
 
+    // 인증 필수 (자동/수동 모드 공통)
+    const token = getAccessToken(request);
+    if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+    supabase = getSupabaseClient(token);
+
     if (body.credentialId) {
       // 자동 모드: DB에서 자격증명 조회
-      const token = getAccessToken(request);
-      if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
-
-      supabase = getSupabaseClient(token);
       const { data: cred, error } = await supabase
         .from("purchase_credentials")
         .select("platform, login_id, login_pw_encrypted")
@@ -63,9 +64,6 @@ export async function POST(request: NextRequest) {
       platform = body.platform;
       loginId = body.loginId;
       loginPw = body.loginPw;
-      // 수동 모드에서도 토큰이 있으면 로그 저장
-      const token = getAccessToken(request);
-      if (token) supabase = getSupabaseClient(token);
     }
 
     // 클라이언트 연결 끊김 감지 → 스크래퍼 중단
