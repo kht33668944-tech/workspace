@@ -213,15 +213,20 @@ export function useOrders(options: UseOrdersOptions = {}) {
     if (!user) return { error: "Not authenticated" };
     const withUserId = rows.map((row) => ({ ...row, user_id: user.id }));
 
+    const inserted: Order[] = [];
     // 배치 삽입 (한번에 최대 500행)
     const BATCH_SIZE = 500;
     for (let i = 0; i < withUserId.length; i += BATCH_SIZE) {
       const batch = withUserId.slice(i, i + BATCH_SIZE);
-      const { error } = await supabase.from("orders").insert(batch);
+      const { data, error } = await supabase.from("orders").insert(batch).select();
       if (error) return { error: error.message };
+      if (data) inserted.push(...(data as Order[]));
     }
 
-    await Promise.all([fetchOrders(), fetchMonths()]);
+    setOrders((prev) => [...prev, ...inserted]);
+    fetchGenRef.current++;
+    // 새 월이 추가되었을 수 있으므로 months는 갱신
+    fetchMonths();
     return { error: null };
   };
 
@@ -330,7 +335,11 @@ export function useOrders(options: UseOrdersOptions = {}) {
       const { error } = await supabase.from("orders").delete().in("id", batch);
       if (error) return { error: error.message };
     }
-    await Promise.all([fetchOrders(), fetchMonths()]);
+
+    const idSet = new Set(ids);
+    setOrders((prev) => prev.filter((o) => !idSet.has(o.id)));
+    fetchGenRef.current++;
+    fetchMonths();
     return { error: null };
   };
 
