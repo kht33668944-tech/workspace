@@ -77,8 +77,49 @@ export function generatePlayAutoTrackingExcel(
   return { buffer, filename };
 }
 
+/** 플레이오토 내보내기 지원 플랫폼 */
+export type PlayAutoExportPlatform = "smartstore" | "gmarket_auction" | "coupang" | "myeolchi";
+
+/** 플랫폼별 고정값 설정 */
+const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
+  shopAccount: string;
+  templateCode: string;
+  headerFooterTemplateCode: string;
+  rateKey: string;   // commissionRates에서 사용할 키
+  filenameLabel: string;
+}> = {
+  smartstore: {
+    shopAccount: "스마트스토어=redgoom",
+    templateCode: "2200901",
+    headerFooterTemplateCode: "14672",
+    rateKey: "smartstore",
+    filenameLabel: "스마트스토어",
+  },
+  gmarket_auction: {
+    shopAccount: "옥션=redgoom00\n지마켓=redgoom00",
+    templateCode: "2201548\n2201554",
+    headerFooterTemplateCode: "14672\n14672",
+    rateKey: "esm",
+    filenameLabel: "지마켓옥션",
+  },
+  coupang: {
+    shopAccount: "",
+    templateCode: "",
+    headerFooterTemplateCode: "",
+    rateKey: "coupang",
+    filenameLabel: "쿠팡",
+  },
+  myeolchi: {
+    shopAccount: "",
+    templateCode: "",
+    headerFooterTemplateCode: "",
+    rateKey: "myeolchi",
+    filenameLabel: "멸치쇼핑",
+  },
+};
+
 /**
- * 플레이오토 상품 대량등록 엑셀 생성 (스마트스토어 양식)
+ * 플레이오토 상품 대량등록 엑셀 생성
  * categoryMappings: 내 카테고리 → 플레이오토 코드 매핑 (없으면 기타재화 35)
  */
 export function generatePlayAutoProductExcel(
@@ -86,7 +127,8 @@ export function generatePlayAutoProductExcel(
   metadataList: Array<{ model: string; brand: string; manufacturer: string }>,
   commissionRates: CommissionRate[],
   categoryMappings: Record<string, string> = {},
-  smartstoreCategoryCodes: string[] = []  // 상품별 스마트스토어 카테고리코드 (인덱스 순서 일치)
+  smartstoreCategoryCodes: string[] = [],  // 상품별 플토 카테고리코드 (인덱스 순서 일치)
+  platform: PlayAutoExportPlatform = "smartstore"
 ): { buffer: ArrayBuffer; filename: string } {
   const now = new Date();
   const yy = String(now.getFullYear()).slice(2);
@@ -94,6 +136,7 @@ export function generatePlayAutoProductExcel(
   const dd = String(now.getDate()).padStart(2, "0");
   const dateStr = `${yy}${mm}${dd}`;
 
+  const config = PLATFORM_CONFIGS[platform];
   const rateMap = buildRateMap(commissionRates);
 
   // 이 배치에서 사용되는 최대 고시 개수를 계산 (컬럼 수 통일)
@@ -106,9 +149,9 @@ export function generatePlayAutoProductExcel(
   const data = products.map((p, i) => {
     const settlementPrice = calcSettlementPrice(p.lowest_price, p.margin_rate);
     const categoryRates = rateMap[p.category] ?? {};
-    const smartstoreRate = categoryRates.smartstore ?? 0;
-    const salePrice = smartstoreRate > 0
-      ? calcPlatformPrice(settlementPrice, smartstoreRate)
+    const platformRate = (categoryRates as Record<string, number>)[config.rateKey] ?? 0;
+    const salePrice = platformRate > 0
+      ? calcPlatformPrice(settlementPrice, platformRate)
       : p.lowest_price;
 
     const meta = metadataList[i] ?? { model: "", brand: "", manufacturer: "" };
@@ -120,8 +163,8 @@ export function generatePlayAutoProductExcel(
     const row: Record<string, string | number> = {
       판매자관리코드: sellerCode,
       카테고리코드: smartstoreCategoryCodes[i] ?? "",
-      "쇼핑몰(계정)": "스마트스토어=redgoom",
-      템플릿코드: "2200901",
+      "쇼핑몰(계정)": config.shopAccount,
+      템플릿코드: config.templateCode,
       "온라인 상품명": p.product_name,
       판매수량: 2000,
       판매가: salePrice,
@@ -136,7 +179,7 @@ export function generatePlayAutoProductExcel(
       배송비: 0,
       기본이미지: p.thumbnail_url ?? "",
       상세설명: p.detail_html ?? "",
-      "머리말/꼬리말템플릿코드": 14672,
+      "머리말/꼬리말템플릿코드": config.headerFooterTemplateCode,
       모델명: meta.model,
       브랜드: meta.brand,
       제조사: meta.manufacturer,
@@ -155,7 +198,7 @@ export function generatePlayAutoProductExcel(
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "대량등록");
   const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-  const filename = `플레이오토_스마트스토어_${dateStr}.xlsx`;
+  const filename = `플레이오토_${config.filenameLabel}_${dateStr}.xlsx`;
 
   return { buffer, filename };
 }

@@ -16,7 +16,7 @@ import GmarketImportModal from "@/components/workspace/products/gmarket-import-m
 import BatchDetailModal from "@/components/workspace/products/batch-detail-modal";
 import dynamic from "next/dynamic";
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
-import { downloadExcelFromBase64 } from "@/lib/excel-export";
+import { downloadExcelFromBase64, type PlayAutoExportPlatform } from "@/lib/excel-export";
 
 const PriceHistoryTab = dynamic(() => import("@/components/workspace/products/price-history-tab"), { ssr: false });
 
@@ -43,6 +43,7 @@ export default function ProductsPage() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [scrapingPrices, setScrapingPrices] = useState(false);
   const [scrapeProgress, setScrapeProgress] = useState("");
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
   const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, refetchPriceChanges } = useProducts({
@@ -213,9 +214,10 @@ export default function ProductsPage() {
     }
   };
 
-  const handlePlayAutoExport = async () => {
+  const handlePlayAutoExport = async (platform: PlayAutoExportPlatform) => {
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) return;
+    setExportModalOpen(false);
     setExporting(true);
     setExportStep("상품 데이터 조회 중...");
 
@@ -234,8 +236,8 @@ export default function ProductsPage() {
     try {
       const res = await fetch("/api/products/playauto-export", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productIds: ids, platform: "smartstore" }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ productIds: ids, platform }),
       });
       const json = await res.json() as { base64?: string; filename?: string; error?: string };
       if (!res.ok || !json.base64 || !json.filename) {
@@ -247,6 +249,38 @@ export default function ProductsPage() {
       alert("내보내기 중 오류가 발생했습니다.");
     } finally {
       timers.forEach(clearTimeout);
+      setExporting(false);
+      setExportStep("");
+    }
+  };
+
+  const handleExportAll = async () => {
+    const platforms: PlayAutoExportPlatform[] = ["smartstore", "gmarket_auction"];
+    setExportModalOpen(false);
+    setExporting(true);
+    setExportStep("전체 플랫폼 내보내기 중...");
+
+    const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
+    if (ids.length === 0) { setExporting(false); setExportStep(""); return; }
+
+    try {
+      for (const platform of platforms) {
+        setExportStep(`${platform === "smartstore" ? "스마트스토어" : "지마켓·옥션"} 엑셀 생성 중...`);
+        const res = await fetch("/api/products/playauto-export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+          body: JSON.stringify({ productIds: ids, platform }),
+        });
+        const json = await res.json() as { base64?: string; filename?: string; error?: string };
+        if (!res.ok || !json.base64 || !json.filename) {
+          alert(`${platform} 내보내기 실패: ${json.error ?? "알 수 없는 오류"}`);
+          continue;
+        }
+        downloadExcelFromBase64(json.base64, json.filename);
+      }
+    } catch {
+      alert("내보내기 중 오류가 발생했습니다.");
+    } finally {
       setExporting(false);
       setExportStep("");
     }
@@ -346,14 +380,65 @@ export default function ProductsPage() {
                 <RefreshCw className={`w-4 h-4 ${scrapingPrices ? "animate-spin" : ""}`} />
                 {scrapingPrices ? "수집 중..." : `최저가 갱신${selectedIds.size > 0 ? ` ${selectedIds.size}개` : ""}`}
               </button>
-              <button
-                onClick={handlePlayAutoExport}
-                disabled={exporting}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm bg-violet-600/20 text-violet-400 hover:bg-violet-600/30 rounded-lg transition-colors disabled:opacity-50"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                {exporting ? "생성 중..." : `플레이오토${selectedIds.size > 0 ? ` ${selectedIds.size}개` : ""} 내보내기`}
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => !exporting && setExportModalOpen(true)}
+                  disabled={exporting}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm bg-violet-600/20 text-violet-400 hover:bg-violet-600/30 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  {exporting ? exportStep || "생성 중..." : `플레이오토${selectedIds.size > 0 ? ` ${selectedIds.size}개` : ""} 내보내기`}
+                </button>
+                {exportModalOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setExportModalOpen(false)} />
+                    <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-xl overflow-hidden">
+                      <div className="px-3 py-2 border-b border-[var(--border)]">
+                        <span className="text-xs font-medium text-[var(--text-muted)]">플랫폼 선택</span>
+                      </div>
+                      <button
+                        onClick={() => handlePlayAutoExport("smartstore")}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-green-400" />
+                        스마트스토어
+                      </button>
+                      <button
+                        onClick={() => handlePlayAutoExport("gmarket_auction")}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-yellow-400" />
+                        지마켓·옥션
+                      </button>
+                      <button
+                        disabled
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-disabled)] cursor-not-allowed"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-red-400/40" />
+                        쿠팡
+                        <span className="ml-auto text-[10px] bg-[var(--bg-tertiary)] text-[var(--text-muted)] px-1.5 py-0.5 rounded">준비중</span>
+                      </button>
+                      <button
+                        disabled
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-disabled)] cursor-not-allowed"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-blue-400/40" />
+                        멸치쇼핑
+                        <span className="ml-auto text-[10px] bg-[var(--bg-tertiary)] text-[var(--text-muted)] px-1.5 py-0.5 rounded">준비중</span>
+                      </button>
+                      <div className="border-t border-[var(--border)]">
+                        <button
+                          onClick={handleExportAll}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-violet-400 hover:bg-violet-600/10 transition-colors font-medium"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                          전체 다운로드
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
               <button
                 onClick={() => setImportModalOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"

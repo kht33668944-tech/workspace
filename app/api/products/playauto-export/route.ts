@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { extractProductMetadataBatch, suggestSmartStoreCategoryCodes } from "@/lib/gemini";
-import { generatePlayAutoProductExcel, arrayBufferToBase64 } from "@/lib/excel-export";
+import { generatePlayAutoProductExcel, arrayBufferToBase64, type PlayAutoExportPlatform } from "@/lib/excel-export";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,9 +12,9 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { productIds, platform } = (await req.json()) as {
+    const { productIds, platform = "smartstore" } = (await req.json()) as {
       productIds: string[];
-      platform: "smartstore";
+      platform?: PlayAutoExportPlatform;
     };
 
     if (!productIds || productIds.length === 0) {
@@ -97,7 +97,8 @@ export async function POST(req: NextRequest) {
       metadataList,
       ratesResult.data ?? [],
       categoryMappings,
-      smartstoreCategoryCodes
+      smartstoreCategoryCodes,
+      platform
     );
 
     const base64 = arrayBufferToBase64(buffer);
