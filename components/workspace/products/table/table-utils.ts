@@ -11,6 +11,7 @@ export const NUMERIC_KEYS = new Set(["lowest_price", "margin_rate"]);
 export const COMPUTED_KEYS = new Set([
   "name_length", "net_margin", "settlement_price",
   "price_smartstore", "price_esm", "price_coupang", "price_myeolchi",
+  "price_change",
 ]);
 
 export interface Col { key: string; label: string; minWidth: number; align?: "right"; }
@@ -18,6 +19,7 @@ export const COLUMNS: Col[] = [
   { key: "product_name", label: "상품명", minWidth: 250 },
   { key: "name_length", label: "글자수", minWidth: 55, align: "right" },
   { key: "lowest_price", label: "최저가(원)", minWidth: 90, align: "right" },
+  { key: "price_change", label: "전일 대비", minWidth: 80, align: "right" },
   { key: "margin_rate", label: "순마진율(%)", minWidth: 85, align: "right" },
   { key: "net_margin", label: "순마진(원)", minWidth: 85, align: "right" },
   { key: "settlement_price", label: "정산가(원)", minWidth: 90, align: "right" },
@@ -90,8 +92,10 @@ function getComputedAll(
 export function getComputedValue(
   product: Product,
   key: string,
-  rateMap: Record<string, Record<CommissionPlatform, number>>
+  rateMap: Record<string, Record<CommissionPlatform, number>>,
+  priceChanges?: Record<string, number>
 ): number {
+  if (key === "price_change") return priceChanges?.[product.id] ?? 0;
   return getComputedAll(product, rateMap)[key] ?? 0;
 }
 
@@ -99,11 +103,26 @@ export function formatCell(
   key: string,
   val: unknown,
   product?: Product,
-  rateMap?: Record<string, Record<CommissionPlatform, number>>
+  rateMap?: Record<string, Record<CommissionPlatform, number>>,
+  priceChanges?: Record<string, number>
 ): React.ReactNode {
   // 계산 필드
   if (COMPUTED_KEYS.has(key) && product && rateMap) {
-    const computed = getComputedValue(product, key, rateMap);
+    const computed = getComputedValue(product, key, rateMap, priceChanges);
+    if (key === "price_change") {
+      if (computed === 0) {
+        return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
+      }
+      const isUp = computed > 0;
+      const isAlert = Math.abs(computed) >= 10;
+      const colorClass = isAlert
+        ? (isUp ? "text-red-500 font-bold" : "text-blue-500 font-bold")
+        : (isUp ? "text-red-400" : "text-blue-400");
+      const bgClass = isAlert ? (isUp ? "bg-red-500/10" : "bg-blue-500/10") : "";
+      return React.createElement("span", {
+        className: `text-xs font-medium px-1.5 py-0.5 rounded ${colorClass} ${bgClass}`,
+      }, `${isUp ? "▲" : "▼"} ${Math.abs(computed)}%`);
+    }
     if (key === "net_margin") {
       return React.createElement("span", {
         className: `text-xs font-medium ${computed > 0 ? "text-green-400" : computed < 0 ? "text-red-400" : "text-[var(--text-secondary)]"}`,
@@ -197,4 +216,5 @@ export interface ProductTableProps {
   onColumnFilterChange: (key: string, values: string[]) => void;
   rateMap: Record<string, Record<CommissionPlatform, number>>;
   categories: string[];
+  priceChanges?: Record<string, number>;
 }

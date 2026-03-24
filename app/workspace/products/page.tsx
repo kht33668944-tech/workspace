@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Plus, Trash2, Search, Settings2, Package, Download, Images, Play, FileSpreadsheet, LayoutList } from "lucide-react";
+import { Plus, Trash2, Search, Settings2, Package, Download, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
@@ -14,10 +14,13 @@ import ImageTab from "@/components/workspace/products/image-tab";
 import SmartStoreCategoryTab from "@/components/workspace/products/smartstore-category-tab";
 import GmarketImportModal from "@/components/workspace/products/gmarket-import-modal";
 import BatchDetailModal from "@/components/workspace/products/batch-detail-modal";
+import dynamic from "next/dynamic";
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
 import { downloadExcelFromBase64 } from "@/lib/excel-export";
 
-type ActiveTab = "products" | "images" | "commission" | "smartstore-category";
+const PriceHistoryTab = dynamic(() => import("@/components/workspace/products/price-history-tab"), { ssr: false });
+
+type ActiveTab = "products" | "images" | "commission" | "smartstore-category" | "price-history";
 
 export default function ProductsPage() {
   usePreventBrowserSave();
@@ -38,9 +41,11 @@ export default function ProductsPage() {
   const [exporting, setExporting] = useState(false);
   const [exportStep, setExportStep] = useState("");
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [scrapingPrices, setScrapingPrices] = useState(false);
+  const [scrapeProgress, setScrapeProgress] = useState("");
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
-  const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo } = useProducts({
+  const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges } = useProducts({
     search: activeSearch,
     columnFilters,
   });
@@ -119,6 +124,74 @@ export default function ProductsPage() {
     return insertProducts(rows as ProductInsert[]);
   };
 
+  const handleScrapePrices = async () => {
+    const ids = selectedIds.size > 0 ? [...selectedIds] : products.filter(p => p.purchase_url).map(p => p.id);
+    if (ids.length === 0) return;
+    if (!confirm(`${selectedIds.size > 0 ? `선택한 ${ids.length}개` : `전체 ${ids.length}개`} 상품의 최저가를 갱신하시겠습니까?`)) return;
+
+    setScrapingPrices(true);
+    setScrapeProgress("최저가 수집 준비 중...");
+
+    try {
+      const res = await fetch("/api/products/scrape-prices", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({ productIds: ids }),
+      });
+
+      if (!res.ok || !res.body) {
+        alert("최저가 수집 실패");
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const data = line.replace(/^data: /, "").trim();
+          if (!data) continue;
+          try {
+            const event = JSON.parse(data);
+            if (event.type === "progress") {
+              const priceText = event.price > 0
+                ? event.price !== event.previous_price
+                  ? `${event.previous_price.toLocaleString()}→${event.price.toLocaleString()}원`
+                  : `${event.price.toLocaleString()}원 (변동없음)`
+                : "실패";
+              setScrapeProgress(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
+              if (event.price > 0) {
+                updateProduct(event.id, { lowest_price: event.price });
+              }
+            } else if (event.type === "done") {
+              setScrapeProgress(`완료: ${event.updated}개 갱신, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패`);
+            } else if (event.type === "error") {
+              setScrapeProgress(`오류: ${event.message}`);
+            }
+          } catch {}
+        }
+      }
+    } catch {
+      setScrapeProgress("최저가 수집 중 오류 발생");
+    } finally {
+      setTimeout(() => {
+        setScrapingPrices(false);
+        setScrapeProgress("");
+      }, 3000);
+    }
+  };
+
   const handlePlayAutoExport = async () => {
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) return;
@@ -185,11 +258,17 @@ export default function ProductsPage() {
           <LayoutList className="w-4 h-4" />
           플토 카테고리
         </button>
+        <button onClick={() => setActiveTab("price-history")} className={TAB_CLASSES("price-history")}>
+          <TrendingUp className="w-4 h-4" />
+          가격 추이
+        </button>
       </div>
 
       {activeTab === "commission" && <CommissionTab />}
 
       {activeTab === "smartstore-category" && <SmartStoreCategoryTab />}
+
+      {activeTab === "price-history" && <PriceHistoryTab />}
 
       {activeTab === "images" && (
         <ImageTab products={allProducts} onUpdate={updateProduct} onDelete={deleteProducts} />
@@ -239,6 +318,14 @@ export default function ProductsPage() {
                 </>
               )}
               <button
+                onClick={handleScrapePrices}
+                disabled={scrapingPrices}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${scrapingPrices ? "animate-spin" : ""}`} />
+                {scrapingPrices ? "수집 중..." : `최저가 갱신${selectedIds.size > 0 ? ` ${selectedIds.size}개` : ""}`}
+              </button>
+              <button
                 onClick={handlePlayAutoExport}
                 disabled={exporting}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-violet-600/20 text-violet-400 hover:bg-violet-600/30 rounded-lg transition-colors disabled:opacity-50"
@@ -286,6 +373,7 @@ export default function ProductsPage() {
             onColumnFilterChange={handleColumnFilterChange}
             rateMap={rateMap as Record<string, Record<CommissionPlatform, number>>}
             categories={categories}
+            priceChanges={priceChanges}
           />
         </>
       )}
@@ -303,6 +391,14 @@ export default function ProductsPage() {
       {/* 상세페이지 일괄 생성 모달 */}
       {batchVisible && (
         <BatchDetailModal items={batchItems} onClose={dismissBatch} onClear={clearBatch} />
+      )}
+
+      {/* 최저가 수집 진행 상태 바 */}
+      {scrapingPrices && scrapeProgress && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-lg">
+          <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />
+          <span className="text-sm text-[var(--text-primary)]">{scrapeProgress}</span>
+        </div>
       )}
 
       {/* 플레이오토 내보내기 진행 상태 바 */}

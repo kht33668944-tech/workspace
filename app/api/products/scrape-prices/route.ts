@@ -153,23 +153,29 @@ async function extractOhousePrice(ctx: BrowserContext, url: string): Promise<num
 
 // ── SSE API ──────────────────────────────────
 type SSEEvent =
-  | { type: "progress"; id: string; name: string; price: number; index: number; total: number }
-  | { type: "done"; updated: number; failed: number }
+  | { type: "progress"; id: string; name: string; price: number; previous_price: number; index: number; total: number }
+  | { type: "done"; updated: number; failed: number; unchanged: number }
   | { type: "error"; message: string };
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const body = await request.json().catch(() => ({})) as { productIds?: string[] };
   const sb = getServiceSupabaseClient();
 
-  // 가격이 0인 상품 중 URL이 있는 것만 조회
-  const { data: products, error } = await sb
+  let query = sb
     .from("products")
     .select("id, product_name, purchase_url, lowest_price")
     .gt("purchase_url", "")
-    .eq("lowest_price", 0)
     .order("sort_order", { ascending: true });
+
+  // productIds가 있으면 해당 상품만, 없으면 전체
+  if (body.productIds?.length) {
+    query = query.in("id", body.productIds);
+  }
+
+  const { data: products, error } = await query;
 
   if (error || !products?.length) {
     return NextResponse.json({ error: "가격 추출할 상품이 없습니다." }, { status: 400 });
@@ -188,6 +194,7 @@ export async function POST(request: NextRequest) {
 
       let updated = 0;
       let failed = 0;
+      let unchanged = 0;
 
       await browserPool.acquire();
       const browser = await launchBrowser();
@@ -216,24 +223,42 @@ export async function POST(request: NextRequest) {
           );
 
           for (const r of results) {
-            if (r.price > 0) {
-              await sb.from("products").update({ lowest_price: r.price }).eq("id", r.id);
+            const previousPrice = r.lowest_price;
+
+            if (r.price > 0 && r.price !== previousPrice) {
+              await Promise.all([
+                sb.from("products").update({ lowest_price: r.price }).eq("id", r.id),
+                sb.from("price_history").insert({
+                  product_id: r.id,
+                  previous_price: previousPrice,
+                  new_price: r.price,
+                  change_amount: r.price - previousPrice,
+                  change_rate: previousPrice > 0
+                    ? Math.round(((r.price - previousPrice) / previousPrice) * 10000) / 100
+                    : 0,
+                  source: "scrape",
+                }),
+              ]);
               updated++;
+            } else if (r.price > 0) {
+              unchanged++;
             } else {
               failed++;
             }
+
             send({
               type: "progress",
               id: r.id,
               name: r.product_name,
               price: r.price,
-              index: updated + failed,
+              previous_price: previousPrice,
+              index: updated + failed + unchanged,
               total: allTargets.length,
             });
           }
         }
 
-        send({ type: "done", updated, failed });
+        send({ type: "done", updated, failed, unchanged });
       } catch (e) {
         send({ type: "error", message: e instanceof Error ? e.message : String(e) });
       } finally {

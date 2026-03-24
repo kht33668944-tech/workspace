@@ -32,10 +32,11 @@ interface UndoGroup {
 const MAX_UNDO = 20;
 
 export function useProducts(options: UseProductsOptions = {}) {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { showToast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [priceChanges, setPriceChanges] = useState<Record<string, number>>({});
   const undoStackRef = useRef<UndoGroup[]>([]);
   const batchUndoRef = useRef<UndoEntry[] | null>(null);
   const pinnedIdsRef = useRef<Set<string> | null>(null);
@@ -94,6 +95,28 @@ export function useProducts(options: UseProductsOptions = {}) {
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
+
+  const priceChangesFetchedRef = useRef(false);
+  useEffect(() => {
+    if (!session?.access_token || loading || priceChangesFetchedRef.current) return;
+    priceChangesFetchedRef.current = true;
+    const today = new Date().toISOString().slice(0, 10);
+    fetch(`/api/products/price-history?from=${today}&to=${today}`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+      .then(r => r.json())
+      .then((json: { history?: Array<{ product_id: string; change_rate: number }> }) => {
+        const map: Record<string, number> = {};
+        (json.history ?? []).forEach(h => {
+          if (!(h.product_id in map)) map[h.product_id] = h.change_rate;
+        });
+        setPriceChanges(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(map)) return prev;
+          return map;
+        });
+      })
+      .catch(() => {});
+  }, [session?.access_token, loading]);
 
   // 클라이언트 측 컬럼 필터링
   const filtersKey = JSON.stringify(options.columnFilters || {});
@@ -297,6 +320,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     undo,
     startBatchUndo,
     endBatchUndo,
+    priceChanges,
   };
 }
 

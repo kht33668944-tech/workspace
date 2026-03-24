@@ -24,13 +24,14 @@ interface RowProps {
   visibleColumns?: Col[];
   rateMap: Record<string, Record<CommissionPlatform, number>>;
   categories: string[];
+  priceChanges?: Record<string, number>;
 }
 
 const MemoRow = memo(function Row({
   product, rowIdx, colWidths, isChecked, activeCol, editingCol, initialChar,
   selMinC, selMaxC, showFillHandle, fillHandleCol, fillHighlightCol,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onCommit, onBlurSave, onEditValueChange, onSelectToggle, onFillStart,
-  onStatusChange, isMobile, visibleColumns, rateMap, categories,
+  onStatusChange, isMobile, visibleColumns, rateMap, categories, priceChanges,
 }: RowProps) {
   const [editValue, setEditValue] = useState("");
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
@@ -209,13 +210,13 @@ const MemoRow = memo(function Row({
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); handleCopyCell(col.key, String(val)); }}
               >
-                {copiedKey === col.key ? "✓ 복사됨" : formatCell(col.key, val, product, rateMap)}
+                {copiedKey === col.key ? "✓ 복사됨" : formatCell(col.key, val, product, rateMap, priceChanges)}
               </div>
             ) : (
               <div className={`text-xs truncate min-h-[22px] leading-[22px] px-1 ${
                 isSelected ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""
               }`}>
-                {formatCell(col.key, val, product, rateMap)}
+                {formatCell(col.key, val, product, rateMap, priceChanges)}
               </div>
             )}
             {!isMobile && showFillHandle && ci === fillHandleCol && isEditable && (
@@ -245,6 +246,7 @@ const MemoRow = memo(function Row({
   prev.visibleColumns === next.visibleColumns &&
   prev.rateMap === next.rateMap &&
   prev.categories === next.categories &&
+  prev.priceChanges === next.priceChanges &&
   prev.onStatusChange === next.onStatusChange
 );
 

@@ -16,7 +16,7 @@ const PAGE_SIZE = 100;
 function ProductTable({
   products: rawProducts, allProducts, loading, selectedIds, onSelectToggle, onSelectAll, onUpdate,
   onUndo, onStartBatchUndo, onEndBatchUndo, columnFilters, onColumnFilterChange,
-  rateMap, categories,
+  rateMap, categories, priceChanges,
 }: ProductTableProps) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const o: Record<string, number> = {};
@@ -490,6 +490,7 @@ function ProductTable({
                   visibleColumns={visibleColumns}
                   rateMap={rateMap}
                   categories={categories}
+                  priceChanges={priceChanges}
                 />
               );
             })}

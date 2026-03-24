@@ -181,3 +181,15 @@ export interface SmartStoreCategoryCode {
 }
 
 export type SmartStoreCategoryCodeInsert = Pick<SmartStoreCategoryCode, "category_code" | "category_type" | "category_name">;
+
+// ─── 가격 이력 ───
+export interface PriceHistory {
+  id: string;
+  product_id: string;
+  previous_price: number;
+  new_price: number;
+  change_amount: number;  // new_price - previous_price
+  change_rate: number;    // 변동률 (%)
+  source: "scrape" | "manual";
+  scraped_at: string;
+}
