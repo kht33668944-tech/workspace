@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback, memo } from "react";
+import { createPortal } from "react-dom";
 import type { Product, CommissionPlatform } from "@/types/database";
 import { COLUMNS, EDITABLE_KEYS, COMPUTED_KEYS, formatCell, type Col } from "./table-utils";
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
@@ -44,6 +45,9 @@ const MemoRow = memo(function Row({
     });
   }, []);
   const statusDropdownRef = useRef<HTMLDivElement>(null);
+  const statusBtnRef = useRef<HTMLButtonElement>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectRef = useRef<HTMLSelectElement>(null);
   const editRef = useRef("");
@@ -103,13 +107,16 @@ const MemoRow = memo(function Row({
 
   useEffect(() => {
     if (!statusDropdownOpen) return;
-    const h = (e: MouseEvent) => {
-      if (statusDropdownRef.current && !statusDropdownRef.current.contains(e.target as Node)) {
+    const timer = setTimeout(() => {
+      const h = (e: MouseEvent) => {
+        const target = e.target as Node;
+        if (statusBtnRef.current?.contains(target)) return;
         setStatusDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
+      };
+      document.addEventListener("mousedown", h);
+      cleanupRef.current = () => document.removeEventListener("mousedown", h);
+    }, 0);
+    return () => { clearTimeout(timer); cleanupRef.current?.(); };
   }, [statusDropdownOpen]);
 
   return (
@@ -126,25 +133,40 @@ const MemoRow = memo(function Row({
       <td className={`relative px-1.5 ${isMobile ? "py-2" : "py-1.5"} border-r border-(--border-subtle) sticky left-[40px] bg-[var(--cell-sticky-bg)] z-10`} style={isMobile ? undefined : { width: 72, minWidth: 72, maxWidth: 72 }}>
         <div ref={statusDropdownRef} className="relative">
           <button
+            ref={statusBtnRef}
             onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); setStatusDropdownOpen(o => !o); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!statusDropdownOpen && statusBtnRef.current) {
+                const rect = statusBtnRef.current.getBoundingClientRect();
+                setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+              }
+              setStatusDropdownOpen(o => !o);
+            }}
             className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity whitespace-nowrap ${REGISTRATION_STATUS_COLORS[product.registration_status] || "bg-gray-500/20 text-gray-400"}`}
           >
             {product.registration_status || "등록전"}
           </button>
-          {statusDropdownOpen && (
-            <div className="absolute left-0 top-full mt-1 z-50 bg-(--bg-card) border border-(--border) rounded-lg shadow-xl min-w-[90px]" onClick={e => e.stopPropagation()}>
+          {statusDropdownOpen && dropdownPos && createPortal(
+            <div
+              data-status-dropdown
+              className="fixed z-[9999] bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl min-w-[90px]"
+              style={{ top: dropdownPos.top, left: dropdownPos.left }}
+              onMouseDown={e => e.stopPropagation()}
+              onClick={e => e.stopPropagation()}
+            >
               {REGISTRATION_STATUSES.map(s => (
                 <button
                   key={s}
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => { e.stopPropagation(); onStatusChange(product.id, s); setStatusDropdownOpen(false); }}
-                  className={`w-full text-left px-2.5 py-1.5 text-xs hover:bg-(--bg-hover) transition-colors flex items-center gap-1.5 ${product.registration_status === s ? "font-medium" : ""}`}
+                  className={`w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--bg-hover)] transition-colors flex items-center gap-1.5 ${product.registration_status === s ? "font-medium" : ""}`}
                 >
                   <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${REGISTRATION_STATUS_COLORS[s]}`}>{s}</span>
                 </button>
               ))}
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       </td>

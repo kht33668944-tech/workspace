@@ -153,17 +153,20 @@ function ProductTable({
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (tableRef.current && !tableRef.current.contains(e.target as Node)) {
-        if (pendingEditRef.current) {
-          const { row, col, value } = pendingEditRef.current;
-          saveValue(row, col, value);
-          pendingEditRef.current = null;
-        }
-        setActiveCell(null);
-        setEditing(false);
-        setInitialChar(null);
-        setSelection(null);
+      const target = e.target as Node;
+      // 테이블 내부 클릭이면 무시
+      if (tableRef.current && tableRef.current.contains(target)) return;
+      // fixed 드롭다운(등록상태 등) 클릭이면 무시
+      if ((target as HTMLElement).closest?.("[data-status-dropdown]")) return;
+      if (pendingEditRef.current) {
+        const { row, col, value } = pendingEditRef.current;
+        saveValue(row, col, value);
+        pendingEditRef.current = null;
       }
+      setActiveCell(null);
+      setEditing(false);
+      setInitialChar(null);
+      setSelection(null);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
