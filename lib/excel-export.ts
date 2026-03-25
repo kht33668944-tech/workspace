@@ -198,7 +198,7 @@ export function generatePlayAutoProductExcel(
       배송비: 0,
       기본이미지: p.thumbnail_url ?? "",
       상세설명: p.detail_html ?? "",
-      "머리말/꼬리말템플릿코드": config.headerFooterTemplateCode,
+      "머리말/꼬리말 템플릿코드": config.headerFooterTemplateCode,
       모델명: meta.model,
       브랜드: meta.brand,
       제조사: meta.manufacturer,
