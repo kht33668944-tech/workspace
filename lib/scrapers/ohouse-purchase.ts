@@ -439,8 +439,9 @@ async function changeDeliveryAddress(page: Page, order: PurchaseOrderInfo) {
 
     console.log(`[ohouse-purchase] 배송지 변경 완료: ${order.recipientName}`);
   } catch (err) {
-    console.error("[ohouse-purchase] 배송지 변경 오류:", err);
-    throw new Error(`배송지 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[ohouse-purchase] 배송지 변경 오류:", msg);
+    throw new Error(`배송지 변경 실패: ${msg}`);
   }
 }
 
@@ -486,7 +487,7 @@ async function fillDeliveryMemo(page: Page, memo: string) {
       console.log("[ohouse-purchase] 배송메모 입력란을 찾을 수 없음");
     }
   } catch (err) {
-    console.log("[ohouse-purchase] 배송메모 입력 오류 (계속 진행):", err);
+    console.log("[ohouse-purchase] 배송메모 입력 오류 (계속 진행):", err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -567,7 +568,7 @@ async function fillOrdererInfo(page: Page, recipientName: string) {
 
     console.log("[ohouse-purchase] 주문자 전화번호: 기존 유지 (변경 안 함)");
   } catch (err) {
-    console.log("[ohouse-purchase] 주문자 정보 입력 오류 (계속 진행):", err);
+    console.log("[ohouse-purchase] 주문자 정보 입력 오류 (계속 진행):", err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -587,16 +588,20 @@ function generateRandomEmail(): string {
 
 /** 간편결제 옵션 */
 interface EasyPayOption {
-  name: string;       // 카카오페이, 토스페이, 네이버페이, 페이코
-  discount: number;   // 즉시할인 금액 (원), 0이면 할인 없음
+  name: string;            // 카카오페이, 토스페이, 네이버페이, 페이코
+  discountPercent: number; // 최대 할인율 (%), 0이면 할인 없음
 }
 
 async function parseEasyPayOptions(page: Page): Promise<EasyPayOption[]> {
-  // evaluate로 페이지 내 결제 옵션을 직접 탐색 + 클릭도 evaluate로 처리
+  // evaluate로 페이지 내 결제 옵션을 직접 탐색
   // (Playwright locator.click()은 다른 요소가 가로막으면 실패하므로 JS 직접 클릭 사용)
+  //
+  // 할인 판단 기준: "최대 N% 할인" 의 % 값
+  // ※ "N원 즉시할인"은 오늘의집 낚시쿠폰으로 실제 적용 안 됨 → 무시
+  // ※ "적립"은 할인이 아님 → 무시
   const rawOptions = await page.evaluate(() => {
     const paymentNames = ["카카오페이", "토스페이", "네이버페이", "페이코"];
-    const results: { name: string; discount: number }[] = [];
+    const results: { name: string; discountPercent: number }[] = [];
 
     const candidates = document.querySelectorAll("label, button, div, li, a, span, [role='radio'], [role='button']");
 
@@ -611,16 +616,16 @@ async function parseEasyPayOptions(page: Page): Promise<EasyPayOption[]> {
         // 이미 찾은 이름이면 스킵
         if (results.some(r => r.name === name)) break;
 
-        // 할인 금액 파싱
-        let discount = 0;
-        const discountMatch = text.match(/([0-9,]+)\s*원\s*즉시\s*할인/);
-        if (discountMatch) {
-          discount = parseInt(discountMatch[1].replace(/,/g, ""));
+        // % 할인율 파싱 (예: "최대 15% 할인", "최대15%할인")
+        let discountPercent = 0;
+        const percentMatch = text.match(/최대\s*(\d+)\s*%\s*할인/);
+        if (percentMatch) {
+          discountPercent = parseInt(percentMatch[1]);
         }
 
         const rect = el.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
-          results.push({ name, discount });
+          results.push({ name, discountPercent });
           break;
         }
       }
@@ -630,8 +635,8 @@ async function parseEasyPayOptions(page: Page): Promise<EasyPayOption[]> {
   }).catch(() => []);
 
   const options: EasyPayOption[] = rawOptions.map(raw => {
-    console.log(`[ohouse-purchase] 간편결제 옵션: ${raw.name} (할인: ${raw.discount}원)`);
-    return { name: raw.name, discount: raw.discount };
+    console.log(`[ohouse-purchase] 간편결제 옵션: ${raw.name} (할인: ${raw.discountPercent}%)`);
+    return { name: raw.name, discountPercent: raw.discountPercent };
   });
   return options;
 }
@@ -706,37 +711,35 @@ async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLog
 
     await page.waitForTimeout(1500);
 
-    // 2. 간편결제 옵션 할인 비교
-    //    네이버페이만 PIN으로 완전 자동화 가능하므로 네이버페이 우선
-    //    다른 수단이 네이버페이보다 할인이 더 클 때만 해당 수단 선택
+    // 2. 간편결제 옵션 % 할인 비교
+    //    "최대 N% 할인"이 가장 높은 수단을 선택 (리셀 원가 최소화)
+    //    % 할인이 모두 0이면 네이버페이 선택 (PIN 자동결제)
     const options = await parseEasyPayOptions(page);
     console.log(`[ohouse-purchase] 감지된 간편결제 옵션: ${options.length}개`);
 
     let selectedOption: EasyPayOption | undefined;
 
-    const naverOption = options.find(o => o.name === "네이버페이");
-    const naverDiscount = naverOption?.discount ?? 0;
+    // % 할인이 있는 옵션 중 최대 할인율 선택
+    const discountOptions = options.filter(o => o.discountPercent > 0);
 
-    // 네이버페이보다 할인이 더 큰 수단이 있는지 확인
-    const betterOptions = options.filter(o => o.name !== "네이버페이" && o.discount > naverDiscount);
-
-    if (betterOptions.length > 0) {
-      // 네이버페이보다 할인이 큰 수단 선택 (수동 승인 필요)
-      selectedOption = betterOptions.reduce((best, cur) => cur.discount > best.discount ? cur : best);
-      console.log(`[ohouse-purchase] 네이버페이(${naverDiscount}원)보다 할인 큰 수단: ${selectedOption.name} (${selectedOption.discount}원)`);
-      console.log("[ohouse-purchase] ※ 이 수단은 수동 승인이 필요합니다");
+    if (discountOptions.length > 0) {
+      selectedOption = discountOptions.reduce((best, cur) => cur.discountPercent > best.discountPercent ? cur : best);
+      console.log(`[ohouse-purchase] 최대 할인 수단: ${selectedOption.name} (${selectedOption.discountPercent}%)`);
+      if (selectedOption.name !== "네이버페이") {
+        console.log("[ohouse-purchase] ※ 이 수단은 수동 앱 승인이 필요합니다");
+      }
     } else {
-      // 네이버페이 선택 (동일 할인이거나 할인 없음 → 자동화 가능)
-      selectedOption = naverOption;
+      // % 할인 없음 → 네이버페이 (자동 결제)
+      selectedOption = options.find(o => o.name === "네이버페이");
       if (selectedOption) {
-        console.log(`[ohouse-purchase] 네이버페이 선택 (할인: ${naverDiscount}원, 자동 결제)`);
+        console.log("[ohouse-purchase] % 할인 없음 → 네이버페이 선택 (자동 결제)");
       }
     }
 
     // 옵션 탐색 실패 시 네이버페이를 기본으로
     if (!selectedOption) {
       console.log("[ohouse-purchase] 옵션 파싱 실패, 네이버페이를 기본 선택");
-      selectedOption = { name: "네이버페이", discount: 0 };
+      selectedOption = { name: "네이버페이", discountPercent: 0 };
     }
 
     // 결제수단 선택: Playwright click(force:true) 사용 (React 상태 업데이트 보장)
@@ -801,7 +804,7 @@ async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLog
 
     if (selectedOption.name === "네이버페이") {
       // 네이버페이: 팝업/새 창/리다이렉트 대기를 먼저 등록한 뒤 클릭
-      const popupPromise = page.context().waitForEvent("page", { timeout: 30000 });
+      const popupPromise = page.context().waitForEvent("page", { timeout: 30000 }).catch(() => null);
       const pagePopupPromise = page.waitForEvent("popup", { timeout: 30000 }).catch(() => null);
       await payBtn.click({ force: true });
       console.log("[ohouse-purchase] 결제하기 버튼 클릭 (네이버페이)");
@@ -813,8 +816,9 @@ async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLog
       console.log(`[ohouse-purchase] ${selectedOption.name} 결제 - 사용자 승인 대기`);
     }
   } catch (err) {
-    console.error("[ohouse-purchase] 결제 처리 오류:", err);
-    throw new Error(`결제 처리 실패: ${err instanceof Error ? err.message : String(err)}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[ohouse-purchase] 결제 처리 오류:", msg);
+    throw new Error(`결제 처리 실패: ${msg}`);
   }
 }
 
@@ -825,7 +829,7 @@ async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLog
 /** 네이버페이 결제 처리: 새 창 감지 → 로그인(필요시) → 동의하고 결제하기 → 키패드 비밀번호 입력 */
 async function handleNaverPayFlow(
   page: Page,
-  popupPromise: Promise<Page>,
+  popupPromise: Promise<Page | null>,
   pagePopupPromise: Promise<Page | null>,
   paymentPin?: string,
   naverLoginId?: string,
@@ -847,12 +851,14 @@ async function handleNaverPayFlow(
   // 2. 팝업 대기 (context 이벤트 + page popup 이벤트 동시 대기)
   if (!payPopup) {
     try {
-      // 두 Promise 중 먼저 resolve 되는 것 사용
-      payPopup = await Promise.race([
-        popupPromise,
-        pagePopupPromise.then(p => p || Promise.reject(new Error("no popup"))),
-      ]);
-      console.log(`[ohouse-purchase] 네이버페이 팝업 감지: ${payPopup.url()}`);
+      // 두 Promise 중 먼저 resolve 되는 것 사용 (null은 필터)
+      const results = await Promise.all([popupPromise, pagePopupPromise]);
+      payPopup = results[0] || results[1];
+      if (payPopup) {
+        console.log(`[ohouse-purchase] 네이버페이 팝업 감지: ${payPopup.url()}`);
+      } else {
+        throw new Error("no popup");
+      }
     } catch {
       // 팝업 미감지 → 리다이렉트/새 탭/iframe 탐색
       console.log("[ohouse-purchase] 팝업 미감지, 대안 탐색...");
@@ -1207,7 +1213,7 @@ async function extractOrderInfo(page: Page): Promise<SingleOrderResult> {
     }
 
     // 2. 결제 완료 페이지에서 결제 금액 추출
-    let cost: number | null = null;
+    let cost: number | undefined;
     const pageText = await page.locator("body").textContent().catch(() => "") || "";
     const payMatch = pageText.match(/결제\s*금액\s*([0-9,]+)\s*원/);
     if (payMatch) cost = parseInt(payMatch[1].replace(/,/g, ""));
@@ -1231,7 +1237,7 @@ async function extractOrderInfo(page: Page): Promise<SingleOrderResult> {
       const orderNoMatch = detailText.match(/주문번호\s*(\d+)/);
       const costMatch = detailText.match(/주문금액\s*([0-9,]+)\s*원/);
       orderNo = orderNoMatch?.[1] ?? null;
-      if (!cost && costMatch) cost = parseInt(costMatch[1].replace(/,/g, ""));
+      if (cost === undefined && costMatch) cost = parseInt(costMatch[1].replace(/,/g, ""));
 
       // URL fallback
       if (!orderNo) {
@@ -1249,10 +1255,11 @@ async function extractOrderInfo(page: Page): Promise<SingleOrderResult> {
 
     return {
       purchaseOrderNo: orderNo,
-      cost: cost ?? undefined,
+      cost,
     };
   } catch (err) {
-    console.error("[ohouse-purchase] 주문 정보 추출 오류:", err);
-    throw new Error(`주문 정보 추출 실패: ${err instanceof Error ? err.message : String(err)}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[ohouse-purchase] 주문 정보 추출 오류:", msg);
+    throw new Error(`주문 정보 추출 실패: ${msg}`);
   }
 }

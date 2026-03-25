@@ -51,9 +51,10 @@ export async function POST(request: NextRequest) {
     let loginId: string;
     let loginPw: string;
 
+    const userSupabaseForCred = getSupabaseClient(token);
+
     if (body.credentialId) {
-      const supabase = getSupabaseClient(token);
-      const { data: cred, error } = await supabase
+      const { data: cred, error } = await userSupabaseForCred
         .from("purchase_credentials")
         .select("platform, login_id, login_pw_encrypted")
         .eq("id", body.credentialId)
@@ -86,9 +87,8 @@ export async function POST(request: NextRequest) {
     let naverLoginId: string | undefined;
     let naverLoginPw: string | undefined;
     if (platform === "ohouse") {
-      const supabaseForCred = getSupabaseClient(token);
       // smartstore 플랫폼으로 등록된 계정 중 첫 번째 사용
-      const { data: naverCred } = await supabaseForCred
+      const { data: naverCred } = await userSupabaseForCred
         .from("purchase_credentials")
         .select("login_id, login_pw_encrypted")
         .eq("platform", "smartstore")
@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
           cost?: number,
           paymentMethod?: string
         ) => {
-          allSuccess!.push({ orderId, purchaseOrderNo, cost, paymentMethod });
+          allSuccess.push({ orderId, purchaseOrderNo, cost, paymentMethod });
 
           // 즉시 DB 업데이트
           const updateData: Record<string, unknown> = {
@@ -211,32 +211,32 @@ export async function POST(request: NextRequest) {
 
           // 성공한 주문 즉시 DB 업데이트 (스크래퍼에서 콜백 안 탄 경우 대비)
           for (const s of result.success) {
-            if (!allSuccess!.some(a => a!.orderId === s.orderId)) {
+            if (!allSuccess.some(a => a.orderId === s.orderId)) {
               await onOrderComplete(s.orderId, s.purchaseOrderNo, s.cost, s.paymentMethod);
             }
           }
 
           for (const f of result.failed) {
-            if (!allFailed!.some(a => a!.orderId === f.orderId)) {
-              allFailed!.push(f);
+            if (!allFailed.some(a => a.orderId === f.orderId)) {
+              allFailed.push(f);
             }
           }
 
           // 실패/취소 건 구매 로그 기록
-          for (const f of allFailed!) {
-            const orderInfo = body.orders.find(o => o.orderId === f!.orderId);
+          for (const f of allFailed) {
+            const orderInfo = body.orders.find(o => o.orderId === f.orderId);
             await supabase.from("purchase_logs").insert({
               user_id: userId,
               batch_id: batchId,
-              order_id: f!.orderId,
+              order_id: f.orderId,
               platform,
               login_id: loginId,
               status: signal.aborted ? "cancelled" : "failed",
-              error_message: f!.reason,
+              error_message: f.reason,
               product_name: orderInfo?.productName ?? null,
               recipient_name: orderInfo?.recipientName ?? null,
             }).then(({ error: logErr }) => {
-              if (logErr) console.error(`[auto-purchase] 실패 로그 기록 실패 (${f!.orderId}):`, logErr.message);
+              if (logErr) console.error(`[auto-purchase] 실패 로그 기록 실패 (${f.orderId}):`, logErr.message);
             });
           }
 
@@ -245,8 +245,8 @@ export async function POST(request: NextRequest) {
             type: isCancelled ? "cancelled" : "done",
             success: allSuccess,
             failed: allFailed,
-            successCount: allSuccess!.length,
-            failCount: allFailed!.length,
+            successCount: allSuccess.length,
+            failCount: allFailed.length,
             message: isCancelled ? "사용자가 작업을 중단했습니다." : undefined,
           });
         } catch (err) {
@@ -257,8 +257,8 @@ export async function POST(request: NextRequest) {
               type: "cancelled",
               success: allSuccess,
               failed: allFailed,
-              successCount: allSuccess!.length,
-              failCount: allFailed!.length,
+              successCount: allSuccess.length,
+              failCount: allFailed.length,
               message: "사용자가 작업을 중단했습니다.",
             });
           } else {
