@@ -48,7 +48,7 @@ function detectPlatform(order: Order): PurchasePlatform | null {
 const SUPPORTED_PLATFORMS = new Set<PurchasePlatform>(["gmarket", "ohouse"]);
 
 // 결제 비밀번호가 필요한 플랫폼
-const PIN_REQUIRED_PLATFORMS = new Set<PurchasePlatform>(["gmarket"]);
+const PIN_REQUIRED_PLATFORMS = new Set<PurchasePlatform>(["gmarket", "ohouse"]);
 
 // 구매 계정별 그룹
 interface OrderGroup {
@@ -570,7 +570,12 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                       {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  <p className="text-xs text-[var(--text-muted)]">스마일페이 결제 비밀번호를 입력하세요.</p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {matchedGroups.some(g => g.platform === "gmarket") && "스마일페이"}
+                    {matchedGroups.some(g => g.platform === "gmarket") && matchedGroups.some(g => g.platform === "ohouse") && " / "}
+                    {matchedGroups.some(g => g.platform === "ohouse") && "네이버페이"}
+                    {" "}결제 비밀번호를 입력하세요.
+                  </p>
                 </div>
               )}
 
@@ -579,7 +584,8 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-400">
                   <p className="font-medium">오늘의집 주문 안내</p>
                   <p className="mt-1 text-blue-400/70">
-                    카카오페이 카톡결제로 진행됩니다. 결제요청 후 휴대폰에서 직접 결제를 승인해주세요. (약 30초 대기)
+                    간편결제 중 할인이 있으면 최대 할인 수단을, 없으면 네이버페이로 결제합니다.
+                    네이버페이 결제 시 스마트스토어 계정으로 자동 로그인됩니다.
                   </p>
                 </div>
               )}

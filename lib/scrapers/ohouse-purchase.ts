@@ -8,8 +8,6 @@ const LOGIN_URL = "https://ohou.se/users/sign_in";
 
 // 환경변수에서 읽기 (.env.local)
 const FIXED_PHONE_SUFFIX = process.env.OHOUSE_PHONE_SUFFIX ?? "";
-const KAKAO_PHONE = process.env.OHOUSE_KAKAO_PHONE ?? "";
-const KAKAO_BIRTHDAY = process.env.OHOUSE_KAKAO_BIRTHDAY ?? "";
 const PAYMENT_WAIT_MS = 60000;          // 결제 승인 대기 시간 (60초)
 
 interface ProgressCallback {
@@ -28,8 +26,8 @@ interface ProgressCallback {
  *    b. 바로구매 클릭
  *    c. 배송지 변경 (수취인명, 고정 전화번호, 주소)
  *    d. 주문자 정보 입력
- *    e. 카카오페이 카톡결제 선택 → 결제요청
- *    f. 사용자 결제 승인 대기 (20-30초)
+ *    e. 간편결제 할인 비교 → 최대할인 or 네이버페이 선택 → 결제
+ *    f. 네이버페이 키패드 비밀번호 입력
  *    g. 주문완료 → 주문번호 + 원가 추출
  */
 export async function purchaseOhouse(
@@ -38,7 +36,10 @@ export async function purchaseOhouse(
   orders: PurchaseOrderInfo[],
   onProgress?: ProgressCallback,
   supabase?: SupabaseClient,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  paymentPin?: string,
+  naverLoginId?: string,
+  naverLoginPw?: string
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
@@ -145,7 +146,7 @@ export async function purchaseOhouse(
 
           const singleOrder = { ...order, quantity: 1 };
           const { purchaseOrderNo, cost } = await processSingleOrder(
-            page, activeContext, singleOrder, q > 1, onProgress
+            page, activeContext, singleOrder, q > 1, onProgress, paymentPin, naverLoginId, naverLoginPw
           );
 
           lastOrderNo = purchaseOrderNo;
@@ -247,7 +248,10 @@ async function processSingleOrder(
   _context: BrowserContext,
   order: PurchaseOrderInfo,
   isRepeat: boolean,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  paymentPin?: string,
+  naverLoginId?: string,
+  naverLoginPw?: string
 ): Promise<SingleOrderResult> {
   // 1. 상품 페이지 이동
   console.log(`[ohouse-purchase] 상품 페이지 이동: ${order.productUrl}${isRepeat ? " (반복구매)" : ""}`);
@@ -269,12 +273,12 @@ async function processSingleOrder(
   // 5. 주문자 정보 입력
   await fillOrdererInfo(page, order.recipientName);
 
-  // 6. 결제수단 선택 (카카오페이) + 결제요청
-  onProgress?.(order.orderId, "waiting_payment", "카카오페이 결제 승인 대기 중...");
-  await selectPaymentAndRequest(page);
+  // 6. 결제수단 선택 (간편결제 할인 비교 → 네이버페이 fallback) + 결제
+  onProgress?.(order.orderId, "waiting_payment", "결제 처리 중...");
+  await selectPaymentAndRequest(page, paymentPin, naverLoginId, naverLoginPw);
 
-  // 7. 사용자 결제 승인 대기
-  console.log(`[ohouse-purchase] 결제 승인 대기 중... (${PAYMENT_WAIT_MS / 1000}초)`);
+  // 7. 결제 완료 대기
+  console.log(`[ohouse-purchase] 결제 완료 대기 중... (${PAYMENT_WAIT_MS / 1000}초)`);
   await waitForPaymentCompletion(page);
 
   // 8. 주문 완료 후 주문번호 + 원가 추출
@@ -580,155 +584,564 @@ function generateRandomEmail(): string {
 // ═══════════════════════════════════
 // 결제수단 선택 + 결제요청
 // ═══════════════════════════════════
-async function selectPaymentAndRequest(page: Page) {
+
+/** 간편결제 옵션 */
+interface EasyPayOption {
+  name: string;       // 카카오페이, 토스페이, 네이버페이, 페이코
+  discount: number;   // 즉시할인 금액 (원), 0이면 할인 없음
+}
+
+async function parseEasyPayOptions(page: Page): Promise<EasyPayOption[]> {
+  // evaluate로 페이지 내 결제 옵션을 직접 탐색 + 클릭도 evaluate로 처리
+  // (Playwright locator.click()은 다른 요소가 가로막으면 실패하므로 JS 직접 클릭 사용)
+  const rawOptions = await page.evaluate(() => {
+    const paymentNames = ["카카오페이", "토스페이", "네이버페이", "페이코"];
+    const results: { name: string; discount: number }[] = [];
+
+    const candidates = document.querySelectorAll("label, button, div, li, a, span, [role='radio'], [role='button']");
+
+    for (const name of paymentNames) {
+      for (let i = 0; i < candidates.length; i++) {
+        const el = candidates[i] as HTMLElement;
+        const text = el.textContent?.trim() || "";
+
+        // 결제수단 이름 포함 + 텍스트 길이 제한 (너무 큰 컨테이너 제외)
+        if (!text.includes(name) || text.length > 100) continue;
+
+        // 이미 찾은 이름이면 스킵
+        if (results.some(r => r.name === name)) break;
+
+        // 할인 금액 파싱
+        let discount = 0;
+        const discountMatch = text.match(/([0-9,]+)\s*원\s*즉시\s*할인/);
+        if (discountMatch) {
+          discount = parseInt(discountMatch[1].replace(/,/g, ""));
+        }
+
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          results.push({ name, discount });
+          break;
+        }
+      }
+    }
+
+    return results;
+  }).catch(() => []);
+
+  const options: EasyPayOption[] = rawOptions.map(raw => {
+    console.log(`[ohouse-purchase] 간편결제 옵션: ${raw.name} (할인: ${raw.discount}원)`);
+    return { name: raw.name, discount: raw.discount };
+  });
+  return options;
+}
+
+/** evaluate를 사용하여 결제수단을 JS로 직접 클릭 (pointer event interception 우회) */
+async function clickPaymentOptionByName(page: Page, name: string): Promise<boolean> {
+  return page.evaluate((targetName) => {
+    const candidates = document.querySelectorAll("label, button, div, li, a, span, [role='radio'], [role='button']");
+    for (const el of candidates) {
+      const text = el.textContent?.trim() || "";
+      if (text.includes(targetName) && text.length < 100 && el instanceof HTMLElement) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          el.click();
+          return true;
+        }
+      }
+    }
+    return false;
+  }, name).catch(() => false);
+}
+
+async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLoginId?: string, naverLoginPw?: string) {
   try {
     // 결제 영역으로 스크롤
     await page.keyboard.press("End");
     await page.waitForTimeout(1000);
 
-    // 1. 간편결제 선택 (카카오페이)
-    const easyPayBtn = page.locator('label:has-text("간편결제"), button:has-text("간편결제"), [class*="간편결제"]').first();
-    if (await easyPayBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await easyPayBtn.click();
-      await page.waitForTimeout(1000);
+    // 1. "간편결제" 라디오 선택 (주의: "계좌 간편결제"와 구분해야 함)
+    //    "계좌 간편결제"는 오늘의집페이, "간편결제"는 카카오/토스/네이버/페이코
+    //    text-is를 사용하여 정확히 "간편결제"만 매칭
+    let easyPayClicked = false;
+
+    // 방법 1: 정확히 "간편결제" 텍스트만 가진 라벨/라디오 (계좌 간편결제 제외)
+    const allLabels = page.locator('label, [role="radio"], input[type="radio"] + span, input[type="radio"] + label');
+    const labelCount = await allLabels.count();
+    for (let i = 0; i < labelCount; i++) {
+      const label = allLabels.nth(i);
+      const text = await label.textContent().catch(() => "") || "";
+      const trimmed = text.trim();
+      // "간편결제"를 포함하되 "계좌"는 포함하지 않는 것
+      if (trimmed.includes("간편결제") && !trimmed.includes("계좌")) {
+        await label.click();
+        easyPayClicked = true;
+        console.log(`[ohouse-purchase] '간편결제' 선택 완료 (텍스트: ${trimmed.substring(0, 30)})`);
+        break;
+      }
     }
 
-    // "카카오페이" 선택
-    const kakaoPayBtn = page.locator('label:has-text("카카오페이"), button:has-text("카카오페이"), [class*="kakao"]').first();
-    if (await kakaoPayBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await kakaoPayBtn.click();
-      await page.waitForTimeout(1000);
-      console.log("[ohouse-purchase] 카카오페이 선택 완료");
+    // 방법 2: evaluate fallback
+    if (!easyPayClicked) {
+      easyPayClicked = await page.evaluate(() => {
+        const allEls = document.querySelectorAll("label, span, div, input");
+        for (const el of allEls) {
+          const text = el.textContent?.trim() || "";
+          // "간편결제"를 포함하고 "계좌"는 포함하지 않으며, 텍스트가 너무 길지 않은 것
+          if (text.includes("간편결제") && !text.includes("계좌") && text.length < 20) {
+            if (el instanceof HTMLElement) {
+              el.click();
+              return true;
+            }
+          }
+        }
+        return false;
+      }).catch(() => false);
+      if (easyPayClicked) console.log("[ohouse-purchase] '간편결제' 선택 완료 (evaluate fallback)");
     }
 
-    // 2. 결제하기 버튼 클릭 + 팝업 감지
+    if (!easyPayClicked) {
+      console.log("[ohouse-purchase] '간편결제' 라디오를 찾지 못함, 네이버페이 직접 탐색");
+    }
+
+    await page.waitForTimeout(1500);
+
+    // 2. 간편결제 옵션 할인 비교
+    //    네이버페이만 PIN으로 완전 자동화 가능하므로 네이버페이 우선
+    //    다른 수단이 네이버페이보다 할인이 더 클 때만 해당 수단 선택
+    const options = await parseEasyPayOptions(page);
+    console.log(`[ohouse-purchase] 감지된 간편결제 옵션: ${options.length}개`);
+
+    let selectedOption: EasyPayOption | undefined;
+
+    const naverOption = options.find(o => o.name === "네이버페이");
+    const naverDiscount = naverOption?.discount ?? 0;
+
+    // 네이버페이보다 할인이 더 큰 수단이 있는지 확인
+    const betterOptions = options.filter(o => o.name !== "네이버페이" && o.discount > naverDiscount);
+
+    if (betterOptions.length > 0) {
+      // 네이버페이보다 할인이 큰 수단 선택 (수동 승인 필요)
+      selectedOption = betterOptions.reduce((best, cur) => cur.discount > best.discount ? cur : best);
+      console.log(`[ohouse-purchase] 네이버페이(${naverDiscount}원)보다 할인 큰 수단: ${selectedOption.name} (${selectedOption.discount}원)`);
+      console.log("[ohouse-purchase] ※ 이 수단은 수동 승인이 필요합니다");
+    } else {
+      // 네이버페이 선택 (동일 할인이거나 할인 없음 → 자동화 가능)
+      selectedOption = naverOption;
+      if (selectedOption) {
+        console.log(`[ohouse-purchase] 네이버페이 선택 (할인: ${naverDiscount}원, 자동 결제)`);
+      }
+    }
+
+    // 옵션 탐색 실패 시 네이버페이를 기본으로
+    if (!selectedOption) {
+      console.log("[ohouse-purchase] 옵션 파싱 실패, 네이버페이를 기본 선택");
+      selectedOption = { name: "네이버페이", discount: 0 };
+    }
+
+    // 결제수단 선택: Playwright click(force:true) 사용 (React 상태 업데이트 보장)
+    // evaluate JS 클릭은 React synthetic event를 트리거하지 않을 수 있음
+    let paymentClicked = false;
+
+    // 방법 1: Playwright locator로 직접 클릭 (force:true로 pointer interception 우회)
+    const paymentLocators = [
+      page.locator(`label:has-text("${selectedOption.name}")`).first(),
+      page.locator(`button:has-text("${selectedOption.name}")`).first(),
+      page.locator(`li:has-text("${selectedOption.name}")`).first(),
+      page.locator(`div:has-text("${selectedOption.name}")`).first(),
+    ];
+
+    for (const loc of paymentLocators) {
+      if (await loc.isVisible({ timeout: 500 }).catch(() => false)) {
+        try {
+          await loc.click({ force: true, timeout: 3000 });
+          paymentClicked = true;
+          console.log(`[ohouse-purchase] ${selectedOption.name} Playwright 클릭 성공`);
+          break;
+        } catch {
+          // 다음 locator 시도
+        }
+      }
+    }
+
+    // 방법 2: evaluate fallback (Playwright 클릭 실패 시)
+    if (!paymentClicked) {
+      paymentClicked = await clickPaymentOptionByName(page, selectedOption.name);
+      if (paymentClicked) {
+        console.log(`[ohouse-purchase] ${selectedOption.name} evaluate 클릭 성공`);
+      }
+    }
+
+    if (!paymentClicked) {
+      throw new Error(`결제수단 '${selectedOption.name}'을 찾을 수 없습니다`);
+    }
+
+    await page.waitForTimeout(1500);
+
+    // 선택 검증: 결제수단이 실제로 선택되었는지 확인
+    const isSelected = await page.evaluate((name) => {
+      // 선택된 상태의 시각적 표시 확인 (활성화된 라디오, 체크된 input 등)
+      const allEls = document.querySelectorAll("input[type='radio']:checked, [aria-checked='true'], .selected, [class*='active'], [class*='checked']");
+      for (const el of allEls) {
+        const parent = el.closest("label, li, div");
+        if (parent?.textContent?.includes(name)) return true;
+      }
+      return false;
+    }, selectedOption.name).catch(() => false);
+    console.log(`[ohouse-purchase] ${selectedOption.name} 선택 상태 확인: ${isSelected}`);
+
+    // 3. 결제하기 버튼 클릭 (팝업 대기를 먼저 등록)
     await page.keyboard.press("End");
     await page.waitForTimeout(1000);
 
+    // 결제하기 버튼은 반드시 Playwright click (force:true) 사용
+    // JS evaluate 클릭은 "사용자 제스처"로 인식되지 않아 팝업이 차단됨
     const payBtn = page.locator('button:has-text("결제하기")').first();
     await payBtn.waitFor({ state: "visible", timeout: 10000 });
 
-    // 팝업 대기를 먼저 등록한 뒤 클릭 (타이밍 이슈 방지)
-    // timeout을 2초로 짧게: ohouse는 iframe 방식이므로 팝업 미감지 시 빠르게 fallback
-    const popupPromise = page.context().waitForEvent("page", { timeout: 2000 });
-    await payBtn.click();
-    console.log("[ohouse-purchase] 결제하기 버튼 클릭");
+    if (selectedOption.name === "네이버페이") {
+      // 네이버페이: 팝업/새 창/리다이렉트 대기를 먼저 등록한 뒤 클릭
+      const popupPromise = page.context().waitForEvent("page", { timeout: 30000 });
+      const pagePopupPromise = page.waitForEvent("popup", { timeout: 30000 }).catch(() => null);
+      await payBtn.click({ force: true });
+      console.log("[ohouse-purchase] 결제하기 버튼 클릭 (네이버페이)");
 
-    let popup: Page | null = null;
-    try {
-      popup = await popupPromise;
-      console.log(`[ohouse-purchase] 카카오페이 팝업 창 감지: ${popup.url()}`);
-    } catch {
-      // 팝업 없이 iframe으로 처리되는 경우 (ohouse 기본)
-      console.log("[ohouse-purchase] 팝업 없음, iframe 방식으로 시도");
+      await handleNaverPayFlow(page, popupPromise, pagePopupPromise, paymentPin, naverLoginId, naverLoginPw);
+    } else {
+      await payBtn.click({ force: true });
+      console.log("[ohouse-purchase] 결제하기 버튼 클릭");
+      console.log(`[ohouse-purchase] ${selectedOption.name} 결제 - 사용자 승인 대기`);
     }
-
-    // 3. 카카오페이 팝업 또는 iframe에서 카톡결제 선택
-    await switchToKakaoPayAndRequest(page, popup);
   } catch (err) {
     console.error("[ohouse-purchase] 결제 처리 오류:", err);
     throw new Error(`결제 처리 실패: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
-/** 카카오페이 팝업 창 또는 중첩 iframe에서 카톡결제 선택 및 결제요청
- *
- * - 팝업 방식: 결제하기 클릭 시 새 창(popup)이 열리는 경우 → popup.frames() 탐색
- * - iframe 방식: 기존처럼 메인페이지 내 중첩 iframe으로 열리는 경우 → page.frames() 탐색
- */
-async function switchToKakaoPayAndRequest(page: Page, popup: Page | null) {
-  // 팝업이 있으면 팝업에서, 없으면 원래 페이지에서 탐색
-  const targetPage = popup ?? page;
+// ═══════════════════════════════════
+// 네이버페이 결제 플로우
+// ═══════════════════════════════════
 
-  // 팝업 방식: 이미 카카오 페이지에 있으므로 첫 시도 전 대기 짧게
-  // iframe 방식: 페이지 내 iframe 렌더링 대기 필요
-  const initWait = popup ? 800 : 2000;
-  await targetPage.waitForTimeout(initWait);
+/** 네이버페이 결제 처리: 새 창 감지 → 로그인(필요시) → 동의하고 결제하기 → 키패드 비밀번호 입력 */
+async function handleNaverPayFlow(
+  page: Page,
+  popupPromise: Promise<Page>,
+  pagePopupPromise: Promise<Page | null>,
+  paymentPin?: string,
+  naverLoginId?: string,
+  naverLoginPw?: string
+) {
+  let payPopup: Page | null = null;
 
-  for (let attempt = 0; attempt < 15; attempt++) {
-    if (attempt > 0) await targetPage.waitForTimeout(1500);
+  // 1. 이미 열린 네이버페이 창 확인
+  const existingPages = page.context().pages();
+  for (const p of existingPages) {
+    const url = p.url();
+    if (url.includes("pay.naver.com") || url.includes("nid.naver.com") || url.includes("m.pay.naver.com")) {
+      payPopup = p;
+      console.log(`[ohouse-purchase] 네이버페이 팝업 이미 열림: ${url}`);
+      break;
+    }
+  }
 
-    // targetPage.frames()로 모든 중첩 iframe 탐색 (카카오페이 프레임 찾기)
-    for (const frame of targetPage.frames()) {
-      const url = frame.url();
-      if (!url.includes("kakaopay") && !url.includes("kakao")) continue;
+  // 2. 팝업 대기 (context 이벤트 + page popup 이벤트 동시 대기)
+  if (!payPopup) {
+    try {
+      // 두 Promise 중 먼저 resolve 되는 것 사용
+      payPopup = await Promise.race([
+        popupPromise,
+        pagePopupPromise.then(p => p || Promise.reject(new Error("no popup"))),
+      ]);
+      console.log(`[ohouse-purchase] 네이버페이 팝업 감지: ${payPopup.url()}`);
+    } catch {
+      // 팝업 미감지 → 리다이렉트/새 탭/iframe 탐색
+      console.log("[ohouse-purchase] 팝업 미감지, 대안 탐색...");
+      await page.waitForTimeout(5000);
 
-      console.log(`[ohouse-purchase] 카카오페이 프레임 발견: ${url}`);
-
-      // 카톡결제 탭 클릭 (기본은 QR결제 탭)
-      const kakaoTalkTab = frame.locator('[role="tab"]:has-text("카톡결제")').first();
-      if (await kakaoTalkTab.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await kakaoTalkTab.click();
-        await targetPage.waitForTimeout(1000);
-        console.log("[ohouse-purchase] 카톡결제 탭 선택");
+      const currentUrl = page.url();
+      if (currentUrl.includes("pay.naver.com") || currentUrl.includes("nid.naver.com")) {
+        payPopup = page;
       } else {
-        continue; // 아직 로딩 중
-      }
-
-      // 전화번호 입력 - 다양한 셀렉터 fallback
-      const phoneSelectors = [
-        'input[placeholder*="휴대폰"]',
-        'input[placeholder*="번호"]',
-        'input[type="tel"]',
-        'input:not([disabled]):not([readonly])',
-      ];
-      let phoneFilled = false;
-      for (const sel of phoneSelectors) {
-        const phoneInput = frame.locator(sel).first();
-        if (await phoneInput.isVisible({ timeout: 1500 }).catch(() => false)) {
-          await phoneInput.click({ force: true });
-          await phoneInput.fill(KAKAO_PHONE);
-          console.log(`[ohouse-purchase] 카카오페이 전화번호 입력 완료`);
-          phoneFilled = true;
-          break;
+        // 새 탭 확인
+        for (const p of page.context().pages()) {
+          if (p !== page) {
+            const url = p.url();
+            if (url.includes("pay.naver.com") || url.includes("nid.naver.com")) {
+              payPopup = p;
+              break;
+            }
+          }
         }
-      }
-      if (!phoneFilled) console.log("[ohouse-purchase] 전화번호 input 못 찾음");
-
-      // 생년월일 입력 - 다양한 셀렉터 fallback
-      const bdaySelectors = [
-        'input[placeholder*="생년월일"]',
-        'input[placeholder*="생년"]',
-      ];
-      let bdayFilled = false;
-      for (const sel of bdaySelectors) {
-        const bdayInput = frame.locator(sel).first();
-        if (await bdayInput.isVisible({ timeout: 1500 }).catch(() => false)) {
-          await bdayInput.click({ force: true });
-          await bdayInput.fill(KAKAO_BIRTHDAY);
-          console.log(`[ohouse-purchase] 카카오페이 생년월일 입력 완료`);
-          bdayFilled = true;
-          break;
+        // iframe 확인
+        if (!payPopup) {
+          for (const frame of page.frames()) {
+            if (frame.url().includes("pay.naver.com") || frame.url().includes("nid.naver.com")) {
+              payPopup = page;
+              break;
+            }
+          }
         }
-      }
-      if (!bdayFilled) {
-        // 두 번째 input으로 fallback (전화번호가 첫 번째)
-        const secondInput = frame.locator('input:not([disabled]):not([readonly])').nth(1);
-        if (await secondInput.isVisible({ timeout: 1500 }).catch(() => false)) {
-          await secondInput.click({ force: true });
-          await secondInput.fill(KAKAO_BIRTHDAY);
-          console.log(`[ohouse-purchase] 카카오페이 생년월일 입력 완료 (fallback)`);
-        } else {
-          console.log("[ohouse-purchase] 생년월일 input 못 찾음");
-        }
-      }
-
-      // 결제요청 버튼 클릭 (입력 후 활성화됨)
-      await targetPage.waitForTimeout(700);
-      const requestBtn = frame.locator('button:has-text("결제요청")').first();
-      if (await requestBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-        try {
-          await requestBtn.click({ force: true, timeout: 5000 });
-          console.log("[ohouse-purchase] 결제요청 클릭 완료");
-          return;
-        } catch {
-          console.log("[ohouse-purchase] 결제요청 버튼 클릭 실패, 재시도...");
+        if (!payPopup) {
+          throw new Error("네이버페이 결제 창이 열리지 않았습니다");
         }
       }
     }
   }
 
-  throw new Error("카카오페이 결제 화면을 찾을 수 없습니다");
+  await payPopup.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => null);
+
+  await payPopup.waitForTimeout(2000);
+
+  // 네이버 로그인 페이지인지 확인 (nid.naver.com)
+  const popupUrl = payPopup.url();
+  if (popupUrl.includes("nid.naver.com") || popupUrl.includes("login")) {
+    console.log("[ohouse-purchase] 네이버 로그인 필요");
+    if (!naverLoginId || !naverLoginPw) {
+      throw new Error("네이버 로그인이 필요하지만 스마트스토어 계정 정보가 없습니다. 설정 > 구매처 계정관리에서 스마트스토어 계정을 등록해주세요.");
+    }
+    await naverLogin(payPopup, naverLoginId, naverLoginPw);
+  }
+
+  // 네이버페이 결제 페이지 대기 (m.pay.naver.com 또는 pay.naver.com)
+  await payPopup.waitForTimeout(2000);
+
+  // "동의하고 결제하기" 버튼 대기 및 클릭
+  await clickAgreeAndPay(payPopup);
+
+  // 비밀번호 키패드 입력
+  if (!paymentPin || paymentPin.length !== 6) {
+    throw new Error("네이버페이 결제 비밀번호 6자리가 필요합니다.");
+  }
+  await enterNaverPayPassword(payPopup, paymentPin);
+
+  console.log("[ohouse-purchase] 네이버페이 결제 완료 처리 대기");
+}
+
+/** 네이버 로그인 (nid.naver.com) */
+async function naverLogin(popup: Page, loginId: string, loginPw: string) {
+  console.log("[ohouse-purchase] 네이버 로그인 중...");
+
+  // 아이디 입력
+  const idInput = popup.locator('input#id, input[name="id"], input[placeholder*="아이디"]').first();
+  await idInput.waitFor({ state: "visible", timeout: 10000 });
+  await idInput.click();
+  // Playwright fill 대신 keyboard로 입력 (봇 감지 우회)
+  await idInput.fill("");
+  await popup.keyboard.type(loginId, { delay: 50 });
+
+  // 비밀번호 입력
+  const pwInput = popup.locator('input#pw, input[name="pw"], input[type="password"]').first();
+  await pwInput.click();
+  await pwInput.fill("");
+  await popup.keyboard.type(loginPw, { delay: 50 });
+
+  // 로그인 버튼 클릭
+  const loginBtn = popup.locator('button:has-text("로그인"), button.btn_login, #log\\.login').first();
+  await loginBtn.click();
+
+  // 로그인 완료 대기 (URL 변경)
+  await popup.waitForTimeout(3000);
+
+  // 로그인 상태 유지 체크박스가 뜨면 스킵
+  const keepLoginBtn = popup.locator('button:has-text("유지"), button:has-text("확인")').first();
+  if (await keepLoginBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await keepLoginBtn.click();
+    await popup.waitForTimeout(1000);
+  }
+
+  // 2차 인증 페이지 체크
+  const currentUrl = popup.url();
+  if (currentUrl.includes("nid.naver.com") && (currentUrl.includes("login") || currentUrl.includes("sign"))) {
+    // 여전히 로그인 페이지면 실패
+    const hasError = await popup.locator('.error_message, .err_common, #err_common').isVisible({ timeout: 2000 }).catch(() => false);
+    if (hasError) {
+      throw new Error("네이버 로그인 실패: 아이디/비밀번호를 확인해주세요");
+    }
+    // 2차 인증 등 추가 검증이 필요할 수 있음
+    console.log("[ohouse-purchase] 네이버 로그인 후 추가 인증 대기 중...");
+    await popup.waitForURL((url) => !url.toString().includes("nid.naver.com"), { timeout: 30000 }).catch(() => {
+      throw new Error("네이버 로그인 추가 인증 시간 초과");
+    });
+  }
+
+  console.log("[ohouse-purchase] 네이버 로그인 성공");
+}
+
+/** "동의하고 결제하기" 버튼 클릭 */
+async function clickAgreeAndPay(popup: Page) {
+  console.log("[ohouse-purchase] '동의하고 결제하기' 버튼 대기 중...");
+
+  // 네이버페이 결제 페이지 로딩 대기
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const url = popup.url();
+
+    // 결제 페이지 확인 (m.pay.naver.com 또는 pay.naver.com)
+    if (url.includes("pay.naver.com")) {
+      // "동의하고 결제하기" 버튼 찾기
+      const agreeBtn = popup.locator('button:has-text("동의하고 결제하기")').first();
+      if (await agreeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        // 스크롤 다운하여 버튼이 보이게
+        await popup.keyboard.press("End");
+        await popup.waitForTimeout(500);
+        await agreeBtn.click({ force: true });
+        console.log("[ohouse-purchase] '동의하고 결제하기' 클릭 완료");
+        return;
+      }
+    }
+
+    await popup.waitForTimeout(1500);
+  }
+
+  throw new Error("네이버페이 '동의하고 결제하기' 버튼을 찾을 수 없습니다");
+}
+
+/** 네이버페이 비밀번호 키패드 입력 (랜덤 배치)
+ *
+ * 키패드는 pay.naver.com/authentication/pw/check 페이지에서 나타남
+ * 숫자 0-9가 랜덤 배치된 HTML 버튼으로 구성됨
+ */
+async function enterNaverPayPassword(popup: Page, pin: string) {
+  console.log("[ohouse-purchase] 네이버페이 비밀번호 키패드 입력 중...");
+
+  // 키패드 페이지 로딩 대기
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const url = popup.url();
+    if (url.includes("authentication") || url.includes("pw/check")) break;
+    await popup.waitForTimeout(1500);
+  }
+  await popup.waitForTimeout(3000);
+  console.log(`[ohouse-purchase] 키패드 URL: ${popup.url()}`);
+
+  // Gemini Vision으로 키패드 숫자 배치 분석 (보안 키패드 → DOM 접근 불가)
+  const { GoogleGenerativeAI } = await import("@google/generative-ai");
+  const sharp = (await import("sharp")).default;
+
+  // 키패드가 보이도록 스크롤 후 뷰포트 스크린샷 (fullPage가 아닌 뷰포트 기준)
+  // 뷰포트 스크린샷 좌표 = mouse.click() 좌표 (정확히 일치)
+  await popup.keyboard.press("End");
+  await popup.waitForTimeout(1000);
+  const screenshotBuf = await popup.screenshot();
+  const base64 = Buffer.from(screenshotBuf).toString("base64");
+  console.log("[ohouse-purchase] 키패드 스크린샷 캡처 완료");
+
+  // Gemini API로 키패드 분석
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY 환경변수 필요");
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const geminiModel = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash" });
+
+  const geminiResult = await geminiModel.generateContent([
+    { inlineData: { data: base64, mimeType: "image/png" } },
+    { text: `이 이미지는 네이버페이 비밀번호 키패드입니다.
+녹색 배경의 4행×3열 숫자 키패드를 읽어주세요.
+
+출력 형식 (4줄, 쉼표 구분, 숫자 아닌 칸은 X):
+예시:
+7,8,9
+1,5,3
+6,0,4
+X,2,X
+
+규칙:
+- 반드시 4줄, 각 줄 3개 값
+- 0~9 각각 정확히 1번
+- 마지막 행 좌측=전체삭제(X), 우측=삭제(X)
+- 숫자와 쉼표만 출력, 설명 없이` },
+  ]);
+
+  const geminiText = geminiResult.response.text?.() ?? "";
+  console.log(`[ohouse-purchase] Gemini 응답: ${geminiText.replace(/\n/g, " | ")}`);
+
+  // 그리드 크기 계산 — 녹색 영역의 실제 경계를 감지
+  const imgMeta = await sharp(screenshotBuf).metadata();
+  const fullW = imgMeta.width || 750;
+  const fullH = imgMeta.height || 800;
+
+  let keypadTop = Math.round(fullH * 0.64);
+  let keypadLeft = 0;
+  let keypadRight = fullW;
+
+  try {
+    const rawPixels = await sharp(screenshotBuf).removeAlpha().raw().toBuffer();
+
+    // 녹색 영역 상단(Y) 감지
+    const cx = Math.round(fullW / 2);
+    for (let y = Math.round(fullH * 0.5); y < fullH; y++) {
+      const idx = (y * fullW + cx) * 3;
+      if (rawPixels[idx] < 100 && rawPixels[idx + 1] > 120 && rawPixels[idx + 2] < 100) {
+        keypadTop = y;
+        break;
+      }
+    }
+
+    // 녹색 영역 좌우(X) 경계 감지 (키패드 중간 높이에서 수평 스캔)
+    const midY = keypadTop + Math.round((fullH - keypadTop) / 2);
+    for (let x = 0; x < fullW; x++) {
+      const idx = (midY * fullW + x) * 3;
+      if (rawPixels[idx] < 100 && rawPixels[idx + 1] > 120 && rawPixels[idx + 2] < 100) {
+        keypadLeft = x;
+        break;
+      }
+    }
+    for (let x = fullW - 1; x >= 0; x--) {
+      const idx = (midY * fullW + x) * 3;
+      if (rawPixels[idx] < 100 && rawPixels[idx + 1] > 120 && rawPixels[idx + 2] < 100) {
+        keypadRight = x;
+        break;
+      }
+    }
+  } catch { /* 기본값 */ }
+
+  const keypadW = keypadRight - keypadLeft;
+  const keypadH = fullH - keypadTop;
+  const rowH = Math.round(keypadH / 4);
+  const colW = Math.round(keypadW / 3);
+  console.log(`[ohouse-purchase] 키패드 영역: left=${keypadLeft} right=${keypadRight} top=${keypadTop} w=${keypadW} rowH=${rowH} colW=${colW}`);
+
+  // Gemini 응답 파싱
+  const digitMap = new Map<string, { x: number; y: number }>();
+  const lines = geminiText.trim().split("\n").filter(l => l.includes(","));
+
+  for (let row = 0; row < Math.min(lines.length, 4); row++) {
+    const cells = lines[row].split(",").map(s => s.trim());
+    for (let col = 0; col < Math.min(cells.length, 3); col++) {
+      const cell = cells[col];
+      if (/^[0-9]$/.test(cell)) {
+        const centerX = keypadLeft + col * colW + Math.round(colW / 2);
+        const centerY = keypadTop + row * rowH + Math.round(rowH / 2);
+        digitMap.set(cell, { x: centerX, y: centerY });
+        console.log(`[ohouse-purchase] '${cell}' → [${row},${col}] (${centerX},${centerY})`);
+      }
+    }
+  }
+
+  console.log(`[ohouse-purchase] 인식 완료: ${digitMap.size}개 (${Array.from(digitMap.keys()).sort().join(",")})`);
+
+  // 비밀번호 6자리 좌표 클릭
+  // 뷰포트 스크린샷 좌표 = mouse.click() 좌표 (직접 대응)
+  for (const digit of pin) {
+    const pos = digitMap.get(digit);
+    if (!pos) {
+      await popup.screenshot({ path: ".sessions/naverpay-keypad-error.png" }).catch(() => null);
+      const recognized = Array.from(digitMap.keys()).sort().join(",");
+      throw new Error(`키패드 숫자 '${digit}' 미인식 (인식됨: ${recognized})`);
+    }
+
+    await popup.mouse.click(pos.x, pos.y);
+    console.log(`[ohouse-purchase] 키패드 '${digit}' 클릭 (${pos.x},${pos.y})`);
+    await popup.waitForTimeout(300 + Math.random() * 200);
+  }
+
+  console.log("[ohouse-purchase] 네이버페이 비밀번호 입력 완료");
+
+  // 결제 완료 시 팝업이 자동으로 닫힘 → 정상 처리
+  try {
+    await popup.waitForTimeout(3000);
+  } catch {
+    // "Target page, context or browser has been closed" = 결제 성공으로 팝업 닫힘
+    console.log("[ohouse-purchase] 네이버페이 팝업 닫힘 (결제 처리 완료)");
+  }
 }
 
 // ═══════════════════════════════════
@@ -749,6 +1162,22 @@ async function waitForPaymentCompletion(page: Page) {
       return;
     }
 
+    // 네이버페이 팝업이 닫혔는지 확인 (결제 완료 시 팝업 자동 닫힘)
+    const openPages = page.context().pages();
+    const hasPayPopup = openPages.some(p => {
+      const u = p.url();
+      return u.includes("pay.naver.com") || u.includes("nid.naver.com");
+    });
+    if (!hasPayPopup && Date.now() - startTime > 5000) {
+      // 팝업이 닫혔으면 메인 페이지 URL 재확인
+      const mainUrl = page.url();
+      if (mainUrl.includes("order_result")) {
+        console.log("[ohouse-purchase] 네이버페이 팝업 닫힘 + 주문 완료 URL 감지");
+        await page.waitForTimeout(2000);
+        return;
+      }
+    }
+
     // 페이지 텍스트로도 확인 (fallback)
     const bodyText = await page.locator("body").textContent().catch(() => "");
     if (bodyText && (bodyText.includes("주문이 완료") || bodyText.includes("결제가 완료"))) {
@@ -760,7 +1189,7 @@ async function waitForPaymentCompletion(page: Page) {
     await page.waitForTimeout(3000);
   }
 
-  throw new Error("결제 승인 시간 초과 (휴대폰에서 결제를 승인했는지 확인해주세요)");
+  throw new Error("결제 승인 시간 초과");
 }
 
 // ═══════════════════════════════════

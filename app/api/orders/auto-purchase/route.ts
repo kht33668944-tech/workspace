@@ -75,11 +75,33 @@ export async function POST(request: NextRequest) {
       loginPw = body.loginPw;
     }
 
-    if (platform === "gmarket" && (!body.paymentPin || body.paymentPin.length !== 6)) {
+    if ((platform === "gmarket" || platform === "ohouse") && (!body.paymentPin || body.paymentPin.length !== 6)) {
       return NextResponse.json({ error: "결제 비밀번호 6자리가 필요합니다." }, { status: 400 });
     }
     if (platform !== "gmarket" && platform !== "ohouse") {
       return NextResponse.json({ error: `${platform}은(는) 아직 자동구매를 지원하지 않습니다.` }, { status: 400 });
+    }
+
+    // 오늘의집: 네이버페이 결제를 위한 스마트스토어(네이버) 계정 조회
+    let naverLoginId: string | undefined;
+    let naverLoginPw: string | undefined;
+    if (platform === "ohouse") {
+      const supabaseForCred = getSupabaseClient(token);
+      // smartstore 플랫폼으로 등록된 계정 중 첫 번째 사용
+      const { data: naverCred } = await supabaseForCred
+        .from("purchase_credentials")
+        .select("login_id, login_pw_encrypted")
+        .eq("platform", "smartstore")
+        .limit(1)
+        .single();
+
+      if (naverCred) {
+        naverLoginId = naverCred.login_id;
+        naverLoginPw = decrypt(naverCred.login_pw_encrypted);
+        console.log(`[auto-purchase] 네이버 계정 로드: ${naverLoginId}`);
+      } else {
+        console.log("[auto-purchase] 스마트스토어(네이버) 계정 미등록 — 로그인 필요 시 실패할 수 있음");
+      }
     }
 
     // SSE 스트림 생성
@@ -181,7 +203,7 @@ export async function POST(request: NextRequest) {
             if (platform === "gmarket") {
               result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, body.orders, onProgress, signal);
             } else {
-              result = await purchaseOhouse(loginId, loginPw, body.orders, onProgress, supabase, signal);
+              result = await purchaseOhouse(loginId, loginPw, body.orders, onProgress, supabase, signal, body.paymentPin, naverLoginId, naverLoginPw);
             }
           } finally {
             browserPool.release();
