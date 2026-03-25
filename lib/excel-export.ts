@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import XLSX from "xlsx-js-style";
 import type { Order, Product, CommissionRate } from "@/types/database";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { calcPlatformPrice, calcSettlementPrice, buildRateMap } from "@/lib/product-calculations";
@@ -217,6 +217,19 @@ export function generatePlayAutoProductExcel(
   });
 
   const ws = XLSX.utils.json_to_sheet(data);
+
+  // 줄바꿈(\n) 포함 셀에 wrapText 스타일 적용 (플토 업로드 시 멀티라인 인식 필수)
+  const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const addr = XLSX.utils.encode_cell({ r: R, c: C });
+      const cell = ws[addr];
+      if (cell && typeof cell.v === "string" && cell.v.includes("\n")) {
+        cell.s = { alignment: { wrapText: true, vertical: "top" } };
+      }
+    }
+  }
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "대량등록");
   const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;

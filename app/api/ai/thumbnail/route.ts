@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import { analyzeImageFromUrl } from "@/lib/gemini";
+import sharp from "sharp";
 
 export const maxDuration = 120;
 
@@ -78,11 +79,39 @@ export async function POST(request: NextRequest) {
   // 최고 점수 이미지 선택
   const best = scores.reduce((a, b) => (a.score >= b.score ? a : b));
 
-  // DB 업데이트
+  // 이미지 다운로드 → 1000x1000 리사이즈 → Storage 업로드
   const serviceClient = getServiceSupabaseClient();
+  let finalUrl = best.url;
+  try {
+    const imgRes = await fetch(best.url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (imgRes.ok) {
+      const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+      const resized = await sharp(imgBuf)
+        .resize(1000, 1000, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 1 } })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+      const storagePath = `products/${user.id}/thumb_${productId}_${Date.now()}.jpg`;
+      const { error: uploadError } = await serviceClient.storage
+        .from("product-images")
+        .upload(storagePath, resized, { contentType: "image/jpeg", upsert: true });
+
+      if (!uploadError) {
+        const { data: { publicUrl } } = serviceClient.storage
+          .from("product-images")
+          .getPublicUrl(storagePath);
+        finalUrl = publicUrl;
+      }
+    }
+  } catch (e) {
+    console.error("[thumbnail]", e instanceof Error ? e.message : String(e));
+    // 리사이즈 실패 시 원본 URL 사용
+  }
+
+  // DB 업데이트
   const { error: updateError } = await serviceClient
     .from("products")
-    .update({ thumbnail_url: best.url })
+    .update({ thumbnail_url: finalUrl })
     .eq("id", productId)
     .eq("user_id", user.id);
 
@@ -91,10 +120,10 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({
-    thumbnailUrl: best.url,
+    thumbnailUrl: finalUrl,
     score: best.score,
     reason: best.reason,
     allScores: scores,
-    summary: `${urlsToAnalyze.length}장 중 점수 ${best.score}/8 이미지로 썸네일 변경`,
+    summary: `${urlsToAnalyze.length}장 중 점수 ${best.score}/8 이미지로 썸네일 변경 (1000x1000)`,
   });
 }

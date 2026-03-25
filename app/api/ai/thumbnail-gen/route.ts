@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import { generateImageFromPrompt } from "@/lib/gemini";
+import sharp from "sharp";
 
 export const maxDuration = 120;
 
@@ -64,16 +65,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // base64 → Buffer → Supabase Storage 업로드
-  const imageBuffer = Buffer.from(generated.base64Data, "base64");
-  const ext = generated.mimeType.includes("png") ? "png" : "jpg";
+  // base64 → Buffer → 1000x1000 리사이즈 → Supabase Storage 업로드
+  const rawBuffer = Buffer.from(generated.base64Data, "base64");
+  const imageBuffer = await sharp(rawBuffer)
+    .resize(1000, 1000, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 1 } })
+    .jpeg({ quality: 90 })
+    .toBuffer();
+  const ext = "jpg";
   const storagePath = `products/${user.id}/ai_thumb_${Date.now()}.${ext}`;
 
   const serviceClient = getServiceSupabaseClient();
   const { error: uploadError } = await serviceClient.storage
     .from("product-images")
     .upload(storagePath, imageBuffer, {
-      contentType: generated.mimeType,
+      contentType: "image/jpeg",
       upsert: true,
     });
 
