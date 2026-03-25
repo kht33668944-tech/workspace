@@ -122,13 +122,24 @@ export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
  * 플레이오토 상품 대량등록 엑셀 생성
  * categoryMappings: 내 카테고리 → 플레이오토 코드 매핑 (없으면 기타재화 35)
  */
+/** 사용자 커스텀 내보내기 설정 (DB 저장값) */
+export interface ExportConfigOverride {
+  shopAccount: string;
+  templateCode: string;
+  headerFooterTemplateCode: string;
+  saleQuantity: number;
+  productInfoNotice: string;
+}
+
 export function generatePlayAutoProductExcel(
   products: Product[],
   metadataList: Array<{ model: string; brand: string; manufacturer: string }>,
   commissionRates: CommissionRate[],
   categoryMappings: Record<string, string> = {},
-  smartstoreCategoryCodes: string[] = [],  // 상품별 플토 카테고리코드 (인덱스 순서 일치)
-  platform: PlayAutoExportPlatform = "smartstore"
+  smartstoreCategoryCodes: string[] = [],
+  platform: PlayAutoExportPlatform = "smartstore",
+  userConfig?: ExportConfigOverride,
+  noticeMap?: Record<string, string[]>
 ): { buffer: ArrayBuffer; filename: string } {
   const now = new Date();
   const yy = String(now.getFullYear()).slice(2);
@@ -136,7 +147,15 @@ export function generatePlayAutoProductExcel(
   const dd = String(now.getDate()).padStart(2, "0");
   const dateStr = `${yy}${mm}${dd}`;
 
-  const config = PLATFORM_CONFIGS[platform];
+  const defaults = PLATFORM_CONFIGS[platform];
+  const config = {
+    ...defaults,
+    shopAccount: userConfig?.shopAccount || defaults.shopAccount,
+    templateCode: userConfig?.templateCode || defaults.templateCode,
+    headerFooterTemplateCode: userConfig?.headerFooterTemplateCode || defaults.headerFooterTemplateCode,
+  };
+  const saleQuantity = userConfig?.saleQuantity ?? 2000;
+  const productInfoNotice = userConfig?.productInfoNotice || "상세페이지 참조";
   const rateMap = buildRateMap(commissionRates);
 
   // 이 배치에서 사용되는 최대 고시 개수를 계산 (컬럼 수 통일)
@@ -166,7 +185,7 @@ export function generatePlayAutoProductExcel(
       "쇼핑몰(계정)": config.shopAccount,
       템플릿코드: config.templateCode,
       "온라인 상품명": p.product_name,
-      판매수량: 2000,
+      판매수량: saleQuantity,
       판매가: salePrice,
       공급가: 0,
       원가: 0,
@@ -188,7 +207,10 @@ export function generatePlayAutoProductExcel(
 
     // 이 상품의 고시 항목 채우기 (해당 카테고리 개수만큼 "상세페이지 참조", 나머지 빈칸)
     for (let n = 1; n <= maxFields; n++) {
-      row[`상품정보제공고시${n}`] = n <= schema.fields.length ? "상세페이지 참조" : "";
+      const customValues = noticeMap?.[playautoCode];
+      row[`상품정보제공고시${n}`] = n <= schema.fields.length
+        ? (customValues?.[n - 1] || productInfoNotice)
+        : "";
     }
 
     return row;

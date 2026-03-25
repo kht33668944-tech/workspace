@@ -20,8 +20,9 @@ import { downloadExcelFromBase64, type PlayAutoExportPlatform, PLATFORM_CONFIGS 
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
 
 const PriceHistoryTab = dynamic(() => import("@/components/workspace/products/price-history-tab"), { ssr: false });
+const ExportConfigTab = dynamic(() => import("@/components/workspace/products/export-config-tab"), { ssr: false });
 
-type ActiveTab = "products" | "images" | "commission" | "smartstore-category" | "price-history";
+type ActiveTab = "products" | "images" | "commission" | "smartstore-category" | "price-history" | "export-config";
 
 export default function ProductsPage() {
   usePreventBrowserSave();
@@ -343,6 +344,10 @@ export default function ProductsPage() {
           <TrendingUp className="w-4 h-4" />
           가격 추이
         </button>
+        <button onClick={() => setActiveTab("export-config")} className={TAB_CLASSES("export-config")}>
+          <FileSpreadsheet className="w-4 h-4" />
+          플토 양식
+        </button>
       </div>
 
       {activeTab === "commission" && <CommissionTab />}
@@ -350,6 +355,8 @@ export default function ProductsPage() {
       {activeTab === "smartstore-category" && <SmartStoreCategoryTab />}
 
       {activeTab === "price-history" && <PriceHistoryTab />}
+
+      {activeTab === "export-config" && <ExportConfigTab />}
 
       {activeTab === "images" && (
         <ImageTab products={allProducts} onUpdate={updateProduct} onDelete={deleteProducts} />
@@ -508,6 +515,7 @@ export default function ProductsPage() {
 
           {/* 통계 */}
           <div className="flex items-center gap-4 text-xs text-[var(--text-muted)]">
+            {selectedIds.size > 0 && <span>선택 <strong className="text-yellow-400">{selectedIds.size}</strong>건</span>}
             <span>등록 <strong className="text-[var(--text-primary)]">{stats.count}</strong><span className="text-[var(--text-disabled)]">/{stats.total}</span>건</span>
             <span>평균 마진율 <strong className="text-blue-400">{stats.avgMargin}%</strong></span>
             <span>카테고리 설정 <strong className="text-purple-400">{stats.withCategory}</strong>건</span>

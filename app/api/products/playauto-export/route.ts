@@ -57,10 +57,12 @@ export async function POST(req: NextRequest) {
       return all;
     }
 
-    const [ratesResult, mappingsResult, allCategoryCodes] = await Promise.all([
+    const [ratesResult, mappingsResult, allCategoryCodes, exportConfigResult, noticeConfigsResult] = await Promise.all([
       supabase.from("commission_rates").select("*").eq("user_id", userId),
       supabase.from("playauto_category_mappings").select("user_category, playauto_code").eq("user_id", userId),
       fetchAllCategoryCodes(),
+      supabase.from("playauto_export_configs").select("*").eq("user_id", userId).eq("platform", platform).maybeSingle(),
+      supabase.from("playauto_notice_configs").select("schema_code, field_values").eq("user_id", userId),
     ]);
 
     if (ratesResult.error) {
@@ -91,6 +93,15 @@ export async function POST(req: NextRequest) {
         : Promise.resolve(products.map(() => "")),
     ]);
 
+    // 사용자 커스텀 설정 (DB에 저장된 값 우선)
+    const userConfig = exportConfigResult.data ?? undefined;
+
+    // 상품정보제공고시 커스텀 값 (schema_code → field_values 맵)
+    const noticeMap: Record<string, string[]> = {};
+    (noticeConfigsResult.data ?? []).forEach((n: { schema_code: string; field_values: string[] }) => {
+      noticeMap[n.schema_code] = n.field_values;
+    });
+
     // 엑셀 생성
     const { buffer, filename } = generatePlayAutoProductExcel(
       products,
@@ -98,7 +109,15 @@ export async function POST(req: NextRequest) {
       ratesResult.data ?? [],
       categoryMappings,
       smartstoreCategoryCodes,
-      platform
+      platform,
+      userConfig ? {
+        shopAccount: userConfig.shop_account,
+        templateCode: userConfig.template_code,
+        headerFooterTemplateCode: userConfig.header_footer_template_code,
+        saleQuantity: userConfig.sale_quantity,
+        productInfoNotice: "상세페이지 참조",
+      } : undefined,
+      Object.keys(noticeMap).length > 0 ? noticeMap : undefined
     );
 
     const base64 = arrayBufferToBase64(buffer);

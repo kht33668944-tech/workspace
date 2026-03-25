@@ -67,6 +67,28 @@ export interface ExcelArchive {
   expires_at: string;
 }
 
+export interface PlayAutoExportConfig {
+  id: string;
+  user_id: string;
+  platform: string;
+  shop_account: string;
+  template_code: string;
+  header_footer_template_code: string;
+  sale_quantity: number;
+  product_info_notice: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlayAutoNoticeConfig {
+  id: string;
+  user_id: string;
+  schema_code: string;
+  field_values: string[];  // 항목별 값 배열 (스키마 fields와 인덱스 매칭)
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PurchaseLog {
   id: string;
   user_id: string;
