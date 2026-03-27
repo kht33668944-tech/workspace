@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
-import { FileSpreadsheet, Plus, Trash2, Download, Search, Calendar, Truck, ChevronDown, ShoppingCart, History } from "lucide-react";
+import { FileSpreadsheet, Trash2, Download, Search, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
 import { useOrders } from "@/hooks/use-orders";
@@ -98,8 +98,10 @@ function OrdersPageInner() {
   const [showTrackingCollect, setShowTrackingCollect] = useState(false);
   const [showAutoPurchase, setShowAutoPurchase] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showAutoMenu, setShowAutoMenu] = useState(false);
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const autoMenuRef = useRef<HTMLDivElement>(null);
   const urlTab = searchParams.get("tab") as "logs" | "tracking-logs" | null;
   const activeBatchId = searchParams.get("batch");
   const [activeTab, setActiveTab] = useState<"orders" | "logs" | "tracking-logs">(
@@ -138,16 +140,19 @@ function OrdersPageInner() {
       .catch(() => {});
   }, [session?.access_token]);
 
-  // 내보내기 메뉴 외부 클릭 닫기
+  // 드롭다운 메뉴 외부 클릭 닫기
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
         setShowExportMenu(false);
       }
+      if (autoMenuRef.current && !autoMenuRef.current.contains(e.target as Node)) {
+        setShowAutoMenu(false);
+      }
     };
-    if (showExportMenu) document.addEventListener("mousedown", handleClick);
+    if (showExportMenu || showAutoMenu) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [showExportMenu]);
+  }, [showExportMenu, showAutoMenu]);
 
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") setActiveSearch(search);
@@ -513,7 +518,7 @@ function OrdersPageInner() {
         </div>
 
         {/* 줄 2: 액션 버튼들 */}
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+        <div className="flex items-center gap-2 flex-wrap">
           {selectedIds.size > 0 && (
             <button
               onClick={handleBulkDelete}
@@ -524,15 +529,35 @@ function OrdersPageInner() {
               {deleting ? "삭제 중..." : `${selectedIds.size}건 삭제`}
             </button>
           )}
-          <button
-            onClick={() => setShowAutoPurchase(true)}
-            disabled={selectedIds.size === 0}
-            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-orange-500 text-white border border-orange-600 hover:bg-orange-600 dark:bg-orange-600 dark:text-white dark:border-orange-700 dark:hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
-          >
-            <ShoppingCart className="w-4 h-4" />
-            <span className="hidden sm:inline">구매 자동화{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}</span>
-            <span className="sm:hidden">구매{selectedIds.size > 0 ? ` ${selectedIds.size}` : ""}</span>
-          </button>
+          <div className="relative" ref={autoMenuRef}>
+            <button
+              onClick={() => setShowAutoMenu(!showAutoMenu)}
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-orange-500 text-white border border-orange-600 hover:bg-orange-600 dark:bg-orange-600 dark:text-white dark:border-orange-700 dark:hover:bg-orange-700 text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Zap className="w-4 h-4" />
+              <span className="hidden sm:inline">자동화</span>
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+            {showAutoMenu && (
+              <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl py-1 min-w-44">
+                <button
+                  onClick={() => { setShowAutoMenu(false); setShowAutoPurchase(true); }}
+                  disabled={selectedIds.size === 0}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ShoppingCart className="w-4 h-4 text-orange-400" />
+                  구매 자동화{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
+                </button>
+                <button
+                  onClick={() => { setShowAutoMenu(false); setShowTrackingCollect(true); }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Truck className="w-4 h-4 text-purple-400" />
+                  배송조회 수집
+                </button>
+              </div>
+            )}
+          </div>
           <div className="relative" ref={exportMenuRef}>
             <button
               onClick={() => setShowExportMenu(!showExportMenu)}
@@ -562,26 +587,11 @@ function OrdersPageInner() {
             )}
           </div>
           <button
-            onClick={() => setShowTrackingCollect(true)}
-            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200 dark:bg-purple-600/20 dark:text-purple-400 dark:border-transparent dark:hover:bg-purple-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
-          >
-            <Truck className="w-4 h-4" />
-            <span className="hidden sm:inline">배송조회 수집</span>
-            <span className="sm:hidden">배송</span>
-          </button>
-          <button
             onClick={() => setShowImport(true)}
             className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-green-100 text-green-700 border border-green-200 hover:bg-green-200 dark:bg-green-600/20 dark:text-green-400 dark:border-transparent dark:hover:bg-green-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span className="hidden md:inline">엑셀 가져오기</span>
-          </button>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden md:inline">수동 추가</span>
           </button>
         </div>
       </div>
