@@ -673,20 +673,24 @@ function OrdersPageInner() {
           courierCodeMap={courierCodeMap}
           onClose={() => setShowTrackingCollect(false)}
           onApply={async (updates) => {
-            const { data: { session } } = await supabase.auth.getSession();
-            const res = await fetch("/api/orders/bulk-update-tracking", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-              },
-              body: JSON.stringify({ updates }),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-              alert(`업데이트 실패: ${data.error}`);
-            } else if (data.failCount > 0) {
-              alert(`업데이트: 성공 ${data.successCount}건, 실패 ${data.failCount}건\n${data.errors?.slice(0, 5).join("\n")}`);
+            // 서버에서 이미 발주서 반영 완료 — 클라이언트는 UI 갱신만
+            if (updates.length > 0) {
+              // 레거시 호환: 혹시 updates가 넘어오면 기존 로직 실행
+              const { data: { session } } = await supabase.auth.getSession();
+              const res = await fetch("/api/orders/bulk-update-tracking", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+                },
+                body: JSON.stringify({ updates }),
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                alert(`업데이트 실패: ${data.error}`);
+              } else if (data.failCount > 0) {
+                alert(`업데이트: 성공 ${data.successCount}건, 실패 ${data.failCount}건\n${data.errors?.slice(0, 5).join("\n")}`);
+              }
             }
             await refetch();
           }}

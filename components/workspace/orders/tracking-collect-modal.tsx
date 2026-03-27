@@ -364,20 +364,18 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     if (!mergedResult?.success.length) return;
     setApplying(true);
 
-    const updates = mergedResult.success
-      .filter((t: TrackingInfo) => t.trackingNo)
-      .map((t: TrackingInfo) => ({
-        purchase_order_no: t.orderNo,
-        courier: t.courier,
-        tracking_no: t.trackingNo,
-      }));
+    try {
+      // 엑셀 내보내기 (서버에서 이미 발주서 반영 완료)
+      await autoExportAll(collectedOrders);
 
-    // 자동 내보내기 (적용 전에 실행 - collectedOrders에 이미 운송장 반영됨)
-    await autoExportAll(collectedOrders);
-
-    await onApply(updates);
-    setApplying(false);
-    onClose();
+      // refetch로 UI 갱신
+      await onApply([]);
+    } catch (err) {
+      console.error("[tracking-collect] 적용 중 오류:", err instanceof Error ? err.message : String(err));
+    } finally {
+      setApplying(false);
+      onClose();
+    }
   };
 
   return (
@@ -749,7 +747,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                     disabled={applying}
                     className="flex-1 px-4 py-2 rounded-lg text-sm font-medium bg-green-600 text-[var(--text-primary)] hover:bg-green-700 disabled:opacity-50 transition-colors"
                   >
-                    {applying ? "적용 중..." : `발주서에 적용 (${mergedResult.success.length}건)`}
+                    {applying ? "처리 중..." : `엑셀 내보내기 (${mergedResult.success.length}건 적용됨)`}
                   </button>
                 )}
               </>

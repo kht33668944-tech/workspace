@@ -88,6 +88,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: `${platform}은(는) 아직 지원되지 않습니다.` }, { status: 400 });
       }
 
+      // 성공한 운송장을 발주서(orders)에 즉시 반영
+      let appliedCount = 0;
+      if (supabase && result.success.length > 0) {
+        const applyResult = await applyTrackingToOrders(supabase, result.success);
+        appliedCount = applyResult.successCount;
+        if (applyResult.failCount > 0) {
+          console.warn("[collect-tracking] 발주서 반영 일부 실패:", applyResult.errors.slice(0, 5));
+        }
+      }
+
       // 운송장 로그 저장 (백그라운드, 실패 시 콘솔 경고)
       if (supabase) {
         saveTrackingLogs(supabase, result, platform, loginId, body.orderNos).catch((e) => {
@@ -95,7 +105,7 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      return NextResponse.json(result);
+      return NextResponse.json({ ...result, appliedCount });
     } finally {
       browserPool.release();
     }
@@ -105,6 +115,42 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+async function applyTrackingToOrders(
+  supabase: SupabaseClient,
+  successItems: ScrapeResult["success"],
+) {
+  let successCount = 0;
+  let failCount = 0;
+  const errors: string[] = [];
+
+  for (const item of successItems) {
+    if (!item.trackingNo) continue;
+
+    const { data, error } = await supabase
+      .from("orders")
+      .update({
+        courier: item.courier,
+        tracking_no: item.trackingNo,
+        delivery_status: "배송완료",
+      })
+      .eq("purchase_order_no", item.orderNo)
+      .select("id");
+
+    if (error) {
+      failCount++;
+      errors.push(`${item.orderNo}: ${error.message}`);
+    } else if (!data || data.length === 0) {
+      failCount++;
+      errors.push(`${item.orderNo}: DB에서 주문번호를 찾을 수 없음`);
+    } else {
+      successCount++;
+    }
+  }
+
+  console.log("[collect-tracking] 발주서 반영:", { successCount, failCount });
+  return { successCount, failCount, errors };
 }
 
 async function saveTrackingLogs(
