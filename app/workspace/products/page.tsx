@@ -450,7 +450,7 @@ export default function ProductsPage() {
                 {exportModalOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setExportModalOpen(false)} />
-                    <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
+                    <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl overflow-hidden">
                       <div className="px-3 py-2 border-b border-[var(--border)]">
                         <span className="text-xs font-medium text-[var(--text-muted)]">플랫폼 선택</span>
                       </div>
