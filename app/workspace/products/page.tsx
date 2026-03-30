@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Plus, Trash2, Search, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts } from "@/hooks/use-products";
@@ -48,7 +48,11 @@ export default function ProductsPage() {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const [importingCodes, setImportingCodes] = useState(false);
+  const [platformCodeModalOpen, setPlatformCodeModalOpen] = useState(false);
+  const [platformCodeDragOver, setPlatformCodeDragOver] = useState(false);
+  const [platformCodeResult, setPlatformCodeResult] = useState<{ matched: number; unmatched: string[]; total: number } | null>(null);
   const [priceUpdateExporting, setPriceUpdateExporting] = useState(false);
+  const platformCodeFileRef = useRef<HTMLInputElement>(null);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
   const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, refetchPriceChanges } = useProducts({
@@ -315,38 +319,35 @@ export default function ProductsPage() {
     }
   };
 
-  const handleImportPlatformCodes = async () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".xlsx,.xls";
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      setImportingCodes(true);
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-        const res = await fetch("/api/products/import-platform-codes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-          body: JSON.stringify({ excelBase64: base64 }),
-        });
-        const json = await res.json() as { matched?: number; unmatched?: string[]; total?: number; error?: string };
-        if (!res.ok) {
-          alert(json.error ?? "가져오기 실패");
-          return;
-        }
-        const unmatchedMsg = json.unmatched && json.unmatched.length > 0
-          ? `\n\n미매칭 상품 (${json.unmatched.length}개):\n${json.unmatched.slice(0, 10).join("\n")}${json.unmatched.length > 10 ? "\n..." : ""}`
-          : "";
-        alert(`플랫폼 코드 가져오기 완료!\n\n전체 ${json.total}행 중 ${json.matched}개 상품 매칭 성공${unmatchedMsg}`);
-      } catch {
-        alert("플랫폼 코드 가져오기 중 오류가 발생했습니다.");
-      } finally {
-        setImportingCodes(false);
+  const handlePlatformCodeFile = async (file: File) => {
+    setImportingCodes(true);
+    setPlatformCodeResult(null);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      const res = await fetch("/api/products/import-platform-codes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ excelBase64: base64 }),
+      });
+      const json = await res.json() as { matched?: number; unmatched?: string[]; total?: number; error?: string };
+      if (!res.ok) {
+        alert(json.error ?? "가져오기 실패");
+        return;
       }
-    };
-    input.click();
+      setPlatformCodeResult({ matched: json.matched ?? 0, unmatched: json.unmatched ?? [], total: json.total ?? 0 });
+    } catch {
+      alert("플랫폼 코드 가져오기 중 오류가 발생했습니다.");
+    } finally {
+      setImportingCodes(false);
+    }
+  };
+
+  const handlePlatformCodeDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setPlatformCodeDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handlePlatformCodeFile(file);
   };
 
   const handlePriceUpdateExport = async () => {
@@ -568,7 +569,7 @@ export default function ProductsPage() {
                 )}
               </div>
               <button
-                onClick={handleImportPlatformCodes}
+                onClick={() => { setPlatformCodeModalOpen(true); setPlatformCodeResult(null); }}
                 disabled={importingCodes}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 rounded-lg transition-colors disabled:opacity-50"
               >
@@ -619,6 +620,77 @@ export default function ProductsPage() {
             priceChanges={priceChanges}
           />
         </>
+      )}
+
+      {/* 플랫폼 코드 가져오기 모달 */}
+      {platformCodeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !importingCodes && setPlatformCodeModalOpen(false)} />
+          <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">플랫폼 코드 가져오기</h3>
+
+            {platformCodeResult ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-green-400">
+                  <FileSpreadsheet className="w-5 h-5" />
+                  <span className="text-sm font-medium">가져오기 완료</span>
+                </div>
+                <div className="text-sm text-[var(--text-secondary)] space-y-1">
+                  <p>전체 <strong>{platformCodeResult.total}</strong>행 중 <strong className="text-green-400">{platformCodeResult.matched}</strong>개 상품 매칭 성공</p>
+                  {platformCodeResult.unmatched.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-orange-400 text-xs mb-1">미매칭 상품 ({platformCodeResult.unmatched.length}개):</p>
+                      <div className="max-h-32 overflow-y-auto text-xs text-[var(--text-muted)] bg-[var(--bg-tertiary)] rounded-lg p-2 space-y-0.5">
+                        {platformCodeResult.unmatched.slice(0, 20).map((name, i) => (
+                          <p key={i}>{name}</p>
+                        ))}
+                        {platformCodeResult.unmatched.length > 20 && <p>... 외 {platformCodeResult.unmatched.length - 20}개</p>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => setPlatformCodeModalOpen(false)}
+                  className="w-full mt-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  확인
+                </button>
+              </div>
+            ) : importingCodes ? (
+              <div className="flex flex-col items-center py-12">
+                <div className="w-8 h-8 border-2 border-orange-400 border-t-transparent rounded-full animate-spin mb-3" />
+                <p className="text-sm text-[var(--text-secondary)]">플랫폼 코드 가져오는 중...</p>
+              </div>
+            ) : (
+              <>
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setPlatformCodeDragOver(true); }}
+                  onDragLeave={() => setPlatformCodeDragOver(false)}
+                  onDrop={handlePlatformCodeDrop}
+                  onClick={() => platformCodeFileRef.current?.click()}
+                  className={`
+                    flex flex-col items-center justify-center py-16 border-2 border-dashed rounded-xl cursor-pointer transition-colors
+                    ${platformCodeDragOver ? "border-orange-400 bg-orange-500/10" : "border-[var(--border-strong)] hover:border-[var(--border-strong)] bg-[var(--bg-hover)]"}
+                  `}
+                >
+                  <Upload className="w-10 h-10 text-[var(--text-muted)] mb-3" />
+                  <p className="text-[var(--text-tertiary)] text-sm">엑셀 파일을 드래그하거나 클릭해서 선택</p>
+                  <p className="text-[var(--text-muted)] text-xs mt-1">플레이오토 상품 엑셀 (.xlsx, .xls)</p>
+                </div>
+                <input
+                  ref={platformCodeFileRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handlePlatformCodeFile(file);
+                  }}
+                />
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* 지마켓 가져오기 모달 */}

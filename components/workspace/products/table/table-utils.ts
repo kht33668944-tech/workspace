@@ -11,7 +11,7 @@ export const NUMERIC_KEYS = new Set(["lowest_price", "margin_rate"]);
 export const COMPUTED_KEYS = new Set([
   "name_length", "net_margin", "settlement_price",
   "price_smartstore", "price_esm", "price_coupang", "price_myeolchi",
-  "price_change",
+  "price_change", "platform_codes",
 ]);
 
 export interface Col { key: string; label: string; minWidth: number; align?: "right"; }
@@ -28,6 +28,7 @@ export const COLUMNS: Col[] = [
   { key: "price_esm", label: "ESM 11번가", minWidth: 90, align: "right" },
   { key: "price_coupang", label: "쿠팡", minWidth: 80, align: "right" },
   { key: "price_myeolchi", label: "멸치쇼핑", minWidth: 80, align: "right" },
+  { key: "platform_codes", label: "플랫폼 코드", minWidth: 90 },
   { key: "purchase_url", label: "상품 구매 URL", minWidth: 150 },
   { key: "thumbnail_url", label: "썸네일 URL", minWidth: 80 },
   { key: "detail_html", label: "상세페이지", minWidth: 80 },
@@ -106,6 +107,20 @@ export function formatCell(
   rateMap?: Record<string, Record<CommissionPlatform, number>>,
   priceChanges?: Record<string, number>
 ): React.ReactNode {
+  // 플랫폼 코드 (별도 처리)
+  if (key === "platform_codes" && product) {
+    const codes = product.platform_codes;
+    if (!codes || Object.keys(codes).length === 0) {
+      return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
+    }
+    const count = Object.keys(codes).length;
+    const tooltip = Object.entries(codes).map(([k, v]) => `${k}: ${v}`).join("\n");
+    return React.createElement("span", {
+      title: tooltip,
+      className: "inline-block px-2 py-0.5 rounded text-xs font-medium bg-orange-500/20 text-orange-400 cursor-help",
+    }, `${count}개 등록`);
+  }
+
   // 계산 필드
   if (COMPUTED_KEYS.has(key) && product && rateMap) {
     const computed = getComputedValue(product, key, rateMap, priceChanges);
