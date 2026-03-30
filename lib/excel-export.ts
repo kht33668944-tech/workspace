@@ -78,7 +78,7 @@ export function generatePlayAutoTrackingExcel(
 }
 
 /** 플레이오토 내보내기 지원 플랫폼 */
-export type PlayAutoExportPlatform = "smartstore" | "gmarket_auction" | "coupang" | "myeolchi";
+export type PlayAutoExportPlatform = "smartstore" | "gmarket_auction" | "coupang";
 
 /** 플랫폼별 고정값 설정 */
 export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
@@ -100,7 +100,7 @@ export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
     templateCode: "2201548\n2201554",
     headerFooterTemplateCode: "14672\n14672",
     rateKey: "esm",
-    filenameLabel: "지마켓옥션",
+    filenameLabel: "지마켓옥션11번가",
   },
   coupang: {
     shopAccount: "쿠팡=redgoom",
@@ -108,13 +108,6 @@ export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
     headerFooterTemplateCode: "14672",
     rateKey: "coupang",
     filenameLabel: "쿠팡",
-  },
-  myeolchi: {
-    shopAccount: "",
-    templateCode: "",
-    headerFooterTemplateCode: "",
-    rateKey: "myeolchi",
-    filenameLabel: "멸치쇼핑",
   },
 };
 
@@ -219,10 +212,16 @@ export function generatePlayAutoProductExcel(
 
   const ws = XLSX.utils.json_to_sheet(data);
 
-  // 줄바꿈(\n) 포함 셀에 wrapText 스타일 적용 (플토 업로드 시 멀티라인 인식 필수)
+  // 멀티라인 필요 컬럼만 wrapText 적용 (상세설명 등 긴 텍스트 컬럼은 제외하여 행 높이 축소)
+  const WRAP_HEADERS = new Set(["쇼핑몰(계정)", "템플릿코드", "머리말/꼬리말 템플릿코드"]);
   const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
-  for (let R = range.s.r; R <= range.e.r; R++) {
-    for (let C = range.s.c; C <= range.e.c; C++) {
+  const wrapCols = new Set<number>();
+  for (let C = range.s.c; C <= range.e.c; C++) {
+    const hdr = ws[XLSX.utils.encode_cell({ r: 0, c: C })];
+    if (hdr && WRAP_HEADERS.has(String(hdr.v))) wrapCols.add(C);
+  }
+  for (let R = range.s.r + 1; R <= range.e.r; R++) {
+    for (const C of wrapCols) {
       const addr = XLSX.utils.encode_cell({ r: R, c: C });
       const cell = ws[addr];
       if (cell && typeof cell.v === "string" && cell.v.includes("\n")) {

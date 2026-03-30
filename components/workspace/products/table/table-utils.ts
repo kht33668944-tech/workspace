@@ -10,7 +10,7 @@ export const NUMERIC_KEYS = new Set(["lowest_price", "margin_rate"]);
 // 자동 계산 컬럼 (편집 불가)
 export const COMPUTED_KEYS = new Set([
   "name_length", "net_margin", "settlement_price",
-  "price_smartstore", "price_esm", "price_coupang", "price_myeolchi",
+  "price_smartstore", "price_esm", "price_coupang",
   "price_change", "platform_codes",
 ]);
 
@@ -27,7 +27,6 @@ export const COLUMNS: Col[] = [
   { key: "price_smartstore", label: "스마트스토어", minWidth: 95, align: "right" },
   { key: "price_esm", label: "ESM 11번가", minWidth: 90, align: "right" },
   { key: "price_coupang", label: "쿠팡", minWidth: 80, align: "right" },
-  { key: "price_myeolchi", label: "멸치쇼핑", minWidth: 80, align: "right" },
   { key: "platform_codes", label: "플랫폼 코드", minWidth: 90 },
   { key: "purchase_url", label: "상품 구매 URL", minWidth: 150 },
   { key: "thumbnail_url", label: "썸네일 URL", minWidth: 80 },
@@ -82,7 +81,6 @@ function getComputedAll(
     price_smartstore: catRates?.smartstore ? calcPlatformPrice(sp, catRates.smartstore) : 0,
     price_esm: catRates?.esm ? calcPlatformPrice(sp, catRates.esm) : 0,
     price_coupang: catRates?.coupang ? calcPlatformPrice(sp, catRates.coupang) : 0,
-    price_myeolchi: catRates?.myeolchi ? calcPlatformPrice(sp, catRates.myeolchi) : 0,
   };
 
   computedCache.set(product, { rateMap, values });
@@ -113,8 +111,9 @@ export function formatCell(
     if (!codes || Object.keys(codes).length === 0) {
       return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
     }
-    const count = Object.keys(codes).length;
-    const tooltip = Object.entries(codes).map(([k, v]) => `${k}: ${v}`).join("\n");
+    const platformNames = [...new Set(Object.keys(codes).map(k => k.split("=")[0]))];
+    const count = platformNames.length;
+    const tooltip = platformNames.join(", ");
     return React.createElement("span", {
       title: tooltip,
       className: "inline-block px-2 py-0.5 rounded text-xs font-medium bg-orange-500/20 text-orange-400 cursor-help",

@@ -133,14 +133,13 @@ export const PLATFORM_LABELS: Record<PurchasePlatform, string> = {
 };
 
 // ─── 수수료 ───
-export type CommissionPlatform = "smartstore" | "esm" | "coupang" | "esm_5pct" | "myeolchi";
+export type CommissionPlatform = "smartstore" | "esm" | "coupang" | "esm_5pct";
 
 export const COMMISSION_PLATFORM_LABELS: Record<CommissionPlatform, string> = {
   smartstore: "스마트스토어",
   esm: "오픈마켓(ESM)",
   coupang: "쿠팡",
   esm_5pct: "지마켓/옥션(5%)",
-  myeolchi: "멸치쇼핑",
 };
 
 export interface CommissionRate {

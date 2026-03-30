@@ -51,9 +51,5 @@ export function calcProductFields(
   const priceCoupang = categoryRates.coupang
     ? calcPlatformPrice(settlementPrice, categoryRates.coupang)
     : 0;
-  const priceMyeolchi = categoryRates.myeolchi
-    ? calcPlatformPrice(settlementPrice, categoryRates.myeolchi)
-    : 0;
-
-  return { nameLength, settlementPrice, netMargin, priceSmartstore, priceEsm, priceCoupang, priceMyeolchi };
+  return { nameLength, settlementPrice, netMargin, priceSmartstore, priceEsm, priceCoupang };
 }

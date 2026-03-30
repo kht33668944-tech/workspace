@@ -588,7 +588,7 @@ export default function ProductsPage() {
                         className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                       >
                         <span className="w-2 h-2 rounded-full bg-yellow-400" />
-                        지마켓·옥션
+                        지마켓·옥션·11번가
                       </button>
                       <button
                         onClick={() => handlePlayAutoExport("coupang")}
@@ -596,14 +596,6 @@ export default function ProductsPage() {
                       >
                         <span className="w-2 h-2 rounded-full bg-red-400" />
                         쿠팡
-                      </button>
-                      <button
-                        disabled
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-disabled)] cursor-not-allowed"
-                      >
-                        <span className="w-2 h-2 rounded-full bg-blue-400/40" />
-                        멸치쇼핑
-                        <span className="ml-auto text-[10px] bg-[var(--bg-tertiary)] text-[var(--text-muted)] px-1.5 py-0.5 rounded">준비중</span>
                       </button>
                       <div className="border-t border-[var(--border)]">
                         <button

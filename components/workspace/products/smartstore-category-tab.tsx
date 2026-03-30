@@ -283,7 +283,7 @@ export default function SmartStoreCategoryTab() {
         <div>
           <h2 className="text-base font-semibold text-[var(--text-primary)]">플레이오토 카테고리코드</h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            플레이오토 대량등록 시 카테고리코드(B열)에 사용되는 카테고리 목록입니다. (옥션/지마켓/11번가/멸치쇼핑/쿠팡 등 전 플랫폼 공통)
+            플레이오토 대량등록 시 카테고리코드(B열)에 사용되는 카테고리 목록입니다. (옥션/지마켓/11번가/쿠팡 등 전 플랫폼 공통)
           </p>
         </div>
 

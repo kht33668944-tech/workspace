@@ -9,9 +9,8 @@ import type { PlayAutoExportConfig, PlayAutoNoticeConfig } from "@/types/databas
 
 const PLATFORMS: { key: PlayAutoExportPlatform; label: string; color: string }[] = [
   { key: "smartstore", label: "스마트스토어", color: "green" },
-  { key: "gmarket_auction", label: "지마켓·옥션", color: "yellow" },
+  { key: "gmarket_auction", label: "지마켓·옥션·11번가", color: "yellow" },
   { key: "coupang", label: "쿠팡", color: "red" },
-  { key: "myeolchi", label: "멸치쇼핑", color: "blue" },
 ];
 
 type PlatformConfig = {
