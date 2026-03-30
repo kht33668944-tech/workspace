@@ -232,18 +232,6 @@ export async function POST(request: NextRequest) {
             const previousPrice = r.lowest_price;
 
             if (r.price > 0 && r.price !== previousPrice) {
-              await sb.from("products").update({ lowest_price: r.price }).eq("id", r.id);
-              // 최초 가격 설정(0→N)은 이력에 기록하지 않음
-              if (previousPrice > 0) {
-                await sb.from("price_history").insert({
-                  product_id: r.id,
-                  previous_price: previousPrice,
-                  new_price: r.price,
-                  change_amount: r.price - previousPrice,
-                  change_rate: Math.round(((r.price - previousPrice) / previousPrice) * 10000) / 100,
-                  source: "scrape",
-                });
-              }
               updated++;
             } else if (r.price > 0) {
               unchanged++;

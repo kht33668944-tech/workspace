@@ -52,6 +52,10 @@ export default function ProductsPage() {
   const [platformCodeDragOver, setPlatformCodeDragOver] = useState(false);
   const [platformCodeResult, setPlatformCodeResult] = useState<{ matched: number; unmatched: string[]; total: number } | null>(null);
   const [priceUpdateExporting, setPriceUpdateExporting] = useState(false);
+  const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
+  const [scrapeResultModalOpen, setScrapeResultModalOpen] = useState(false);
+  const [applyingPrices, setApplyingPrices] = useState(false);
+  const scrapeAbortRef = useRef<AbortController | null>(null);
   const platformCodeFileRef = useRef<HTMLInputElement>(null);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
@@ -61,6 +65,11 @@ export default function ProductsPage() {
   });
 
   const rateMap = useMemo(() => buildRateMap(rates), [rates]);
+  const sortedScrapeResults = useMemo(() =>
+    [...scrapeResults].sort((a, b) => (a.price === a.previous ? 1 : 0) - (b.price === b.previous ? 1 : 0)),
+    [scrapeResults]
+  );
+  const changedScrapeCount = useMemo(() => scrapeResults.filter(r => r.price !== r.previous).length, [scrapeResults]);
 
   // products 탭에서 배치 완료 시 로컬 캐시 동기화
   useEffect(() => {
@@ -146,8 +155,14 @@ export default function ProductsPage() {
     if (ids.length === 0) return;
     if (!confirm(`${selectedIds.size > 0 ? `선택한 ${ids.length}개` : `전체 ${ids.length}개`} 상품의 최저가를 갱신하시겠습니까?`)) return;
 
+    const abortController = new AbortController();
+    scrapeAbortRef.current = abortController;
     setScrapingPrices(true);
     setScrapeProgress("최저가 수집 준비 중...");
+    setScrapeResults([]);
+
+    const collectedChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
+    let stopped = false;
 
     try {
       const res = await fetch("/api/products/scrape-prices", {
@@ -157,24 +172,13 @@ export default function ProductsPage() {
           Authorization: `Bearer ${session?.access_token}`,
         },
         body: JSON.stringify({ productIds: ids }),
+        signal: abortController.signal,
       });
 
       if (!res.ok || !res.body) {
         alert("최저가 수집 실패");
         return;
       }
-
-      const pendingUpdates: Array<{ id: string; price: number }> = [];
-      let flushTimer: ReturnType<typeof setTimeout> | null = null;
-      const flushUpdates = () => {
-        if (pendingUpdates.length === 0) return;
-        startBatchUndo();
-        for (const u of pendingUpdates) {
-          updateProduct(u.id, { lowest_price: u.price });
-        }
-        endBatchUndo();
-        pendingUpdates.length = 0;
-      };
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -201,32 +205,71 @@ export default function ProductsPage() {
                 : "실패";
               setScrapeProgress(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
               if (event.price > 0) {
-                pendingUpdates.push({ id: event.id, price: event.price });
-                if (flushTimer) clearTimeout(flushTimer);
-                flushTimer = setTimeout(flushUpdates, 200);
+                collectedChanges.push({ id: event.id, name: event.name, previous: event.previous_price, price: event.price });
               }
             } else if (event.type === "done") {
-              if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-              flushUpdates();
-              refetchPriceChanges();
-              setScrapeProgress(`완료: ${event.updated}개 갱신, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패`);
+              setScrapeProgress(`완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패`);
             } else if (event.type === "error") {
-              if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-              flushUpdates();
               setScrapeProgress(`오류: ${event.message}`);
             }
           } catch {}
         }
       }
-      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-      flushUpdates();
-    } catch {
-      setScrapeProgress("최저가 수집 중 오류 발생");
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        stopped = true;
+        setScrapeProgress(`중단됨: ${collectedChanges.length}개 수집 완료`);
+      } else {
+        setScrapeProgress("최저가 수집 중 오류 발생");
+      }
     } finally {
-      setTimeout(() => {
-        setScrapingPrices(false);
-        setScrapeProgress("");
-      }, 3000);
+      scrapeAbortRef.current = null;
+      setScrapingPrices(false);
+      // 수집 결과가 있으면 모달 표시
+      if (collectedChanges.length > 0) {
+        setScrapeResults([...collectedChanges]);
+        setScrapeResultModalOpen(true);
+      }
+      if (!stopped && collectedChanges.length === 0) {
+        setTimeout(() => setScrapeProgress(""), 3000);
+      }
+    }
+  };
+
+  const handleStopScrape = () => {
+    scrapeAbortRef.current?.abort();
+  };
+
+  const handleApplyScrapeResults = async () => {
+    const changed = scrapeResults.filter(r => r.price !== r.previous);
+    if (changed.length === 0) { setScrapeResultModalOpen(false); return; }
+
+    setApplyingPrices(true);
+    try {
+      const res = await fetch("/api/products/apply-price-updates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ updates: changed.map(r => ({ id: r.id, price: r.price, previous_price: r.previous })) }),
+      });
+      const json = await res.json() as { applied?: number; error?: string };
+      if (!res.ok) {
+        alert(json.error ?? "가격 적용 실패");
+        return;
+      }
+      // 로컬 상태 반영
+      startBatchUndo();
+      for (const r of changed) {
+        updateProduct(r.id, { lowest_price: r.price });
+      }
+      endBatchUndo();
+      refetchPriceChanges();
+      setScrapeResultModalOpen(false);
+      setScrapeResults([]);
+      setScrapeProgress("");
+    } catch {
+      alert("가격 적용 중 오류가 발생했습니다.");
+    } finally {
+      setApplyingPrices(false);
     }
   };
 
@@ -710,6 +753,64 @@ export default function ProductsPage() {
         </div>
       )}
 
+      {/* 최저가 갱신 결과 모달 */}
+      {scrapeResultModalOpen && scrapeResults.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setScrapeResultModalOpen(false)} />
+          <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-lg p-6">
+            <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">최저가 갱신 결과</h3>
+            <p className="text-xs text-[var(--text-muted)] mb-4">
+              전체 {scrapeResults.length}개 · <span className="text-orange-400">변동 {changedScrapeCount}개</span> · 변동없음 {scrapeResults.length - changedScrapeCount}개
+            </p>
+            <div className="max-h-80 overflow-y-auto space-y-1.5 mb-4">
+              {sortedScrapeResults.map((r) => {
+                const diff = r.price - r.previous;
+                const isChanged = diff !== 0;
+                const isUp = diff > 0;
+                return (
+                  <div key={r.id} className={`flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] ${isChanged ? "" : "opacity-50"}`}>
+                    <span className="text-sm text-[var(--text-primary)] truncate flex-1 mr-3">{r.name}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {isChanged ? (
+                        <>
+                          <span className="text-xs text-[var(--text-muted)]">{r.previous.toLocaleString()}</span>
+                          <span className="text-xs text-[var(--text-muted)]">→</span>
+                          <span className={`text-xs font-medium ${isUp ? "text-red-400" : "text-blue-400"}`}>
+                            {r.price.toLocaleString()}
+                          </span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${isUp ? "bg-red-500/10 text-red-400" : "bg-blue-500/10 text-blue-400"}`}>
+                            {isUp ? "▲" : "▼"}{Math.abs(diff).toLocaleString()}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-xs text-[var(--text-muted)]">{r.price.toLocaleString()}원 (변동없음)</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setScrapeResultModalOpen(false); setScrapeResults([]); setScrapeProgress(""); }}
+                className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+              >
+                닫기
+              </button>
+              {changedScrapeCount > 0 && (
+                <button
+                  onClick={handleApplyScrapeResults}
+                  disabled={applyingPrices}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
+                >
+                  {applyingPrices ? "적용 중..." : `적용하기 (${changedScrapeCount}개)`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 지마켓 가져오기 모달 */}
       {importModalOpen && (
         <GmarketImportModal
@@ -725,10 +826,18 @@ export default function ProductsPage() {
       )}
 
       {/* 최저가 수집 진행 상태 바 */}
-      {scrapingPrices && scrapeProgress && (
+      {(scrapingPrices || scrapeProgress) && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-lg">
-          <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />
+          {scrapingPrices && <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />}
           <span className="text-sm text-[var(--text-primary)]">{scrapeProgress}</span>
+          {scrapingPrices && (
+            <button
+              onClick={handleStopScrape}
+              className="ml-2 px-2.5 py-1 text-xs font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors"
+            >
+              중단
+            </button>
+          )}
         </div>
       )}
 
