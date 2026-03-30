@@ -12,9 +12,10 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { productIds, platform = "smartstore" } = (await req.json()) as {
+    const { productIds, platform = "smartstore", priceUpdate = false } = (await req.json()) as {
       productIds: string[];
       platform?: PlayAutoExportPlatform;
+      priceUpdate?: boolean;
     };
 
     if (!productIds || productIds.length === 0) {
@@ -117,7 +118,8 @@ export async function POST(req: NextRequest) {
         saleQuantity: userConfig.sale_quantity,
         productInfoNotice: "상세페이지 참조",
       } : undefined,
-      Object.keys(noticeMap).length > 0 ? noticeMap : undefined
+      Object.keys(noticeMap).length > 0 ? noticeMap : undefined,
+      priceUpdate ? { useSavedSellerCodes: true } : undefined
     );
 
     const base64 = arrayBufferToBase64(buffer);

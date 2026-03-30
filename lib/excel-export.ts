@@ -139,7 +139,8 @@ export function generatePlayAutoProductExcel(
   smartstoreCategoryCodes: string[] = [],
   platform: PlayAutoExportPlatform = "smartstore",
   userConfig?: ExportConfigOverride,
-  noticeMap?: Record<string, string[]>
+  noticeMap?: Record<string, string[]>,
+  options?: { useSavedSellerCodes?: boolean }
 ): { buffer: ArrayBuffer; filename: string } {
   const now = new Date();
   const yy = String(now.getFullYear()).slice(2);
@@ -174,7 +175,7 @@ export function generatePlayAutoProductExcel(
       : p.lowest_price;
 
     const meta = metadataList[i] ?? { model: "", brand: "", manufacturer: "" };
-    const sellerCode = `${dateStr}${String(i + 1).padStart(3, "0")}`;
+    const sellerCode = (options?.useSavedSellerCodes && p.seller_code) ? p.seller_code : `${dateStr}${String(i + 1).padStart(3, "0")}`;
 
     const playautoCode = categoryMappings[p.category] ?? DEFAULT_SCHEMA.code;
     const schema = getSchemaByCode(playautoCode);
@@ -315,7 +316,7 @@ export function generatePriceUpdateExcel(
   };
 
   const buildRows = (accounts: string[]) => {
-    const rows: Array<{ "쇼핑몰 상품번호": string; 판매가: number }> = [];
+    const rows: Array<{ "쇼핑몰(계정)": string; "쇼핑몰 상품번호": string; 판매가: number }> = [];
     for (const p of products) {
       if (!p.platform_codes) continue;
       const settlementPrice = calcSettlementPrice(p.lowest_price, p.margin_rate);
@@ -329,7 +330,7 @@ export function generatePriceUpdateExcel(
         const rate = (categoryRates as Record<string, number>)[rateKey] ?? 0;
         const salePrice = rate > 0 ? calcPlatformPrice(settlementPrice, rate) : p.lowest_price;
 
-        rows.push({ "쇼핑몰 상품번호": code, 판매가: salePrice });
+        rows.push({ "쇼핑몰(계정)": account, "쇼핑몰 상품번호": code, 판매가: salePrice });
       }
     }
     return rows;
@@ -339,7 +340,7 @@ export function generatePriceUpdateExcel(
     if (rows.length === 0) return null;
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+    XLSX.utils.book_append_sheet(wb, ws, "쇼핑몰상품");
     const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
     return { buffer: buf as ArrayBuffer, filename: `가격수정_${label}_${today}.xlsx` };
   };

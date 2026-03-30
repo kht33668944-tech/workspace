@@ -174,11 +174,12 @@ export interface Product {
   detail_image_url: string | null; // AI 생성 상세페이지 이미지 URL
   registration_status: string; // 상품 등록 상태
   platform_codes: Record<string, string> | null; // 플랫폼별 쇼핑몰 상품번호 {"옥션=redgoom00": "F445675075", ...}
+  seller_code: string | null; // 플레이오토 판매자관리코드 (가격수정 시 필수)
   created_at: string;
   updated_at: string;
 }
 
-export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at" | "platform_codes">;
+export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at" | "platform_codes" | "seller_code">;
 export type ProductUpdate = Partial<Omit<Product, "id" | "user_id" | "created_at" | "updated_at">>;
 
 // ─── 플레이오토 카테고리 매핑 ───

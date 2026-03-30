@@ -324,7 +324,10 @@ export default function ProductsPage() {
     setPlatformCodeResult(null);
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const base64 = btoa(binary);
       const res = await fetch("/api/products/import-platform-codes", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
@@ -355,23 +358,37 @@ export default function ProductsPage() {
     if (ids.length === 0) return;
     setExportModalOpen(false);
     setPriceUpdateExporting(true);
+    setExportStep("가격수정 엑셀 생성 중...");
+
+    const platforms: PlayAutoExportPlatform[] = ["smartstore", "gmarket_auction", "coupang"];
     try {
-      const res = await fetch("/api/products/price-update-export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ productIds: ids }),
-      });
-      const json = await res.json() as { normal?: { base64: string; filename: string }; single?: { base64: string; filename: string }; error?: string };
-      if (!res.ok) {
-        alert(json.error ?? "가격수정 내보내기 실패");
-        return;
+      const results = await Promise.allSettled(
+        platforms.map(async (platform) => {
+          const res = await fetch("/api/products/playauto-export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+            body: JSON.stringify({ productIds: ids, platform, priceUpdate: true }),
+          });
+          const json = await res.json() as { base64?: string; filename?: string; error?: string };
+          if (!res.ok || !json.base64 || !json.filename) {
+            throw new Error(json.error ?? `${PLATFORM_CONFIGS[platform].filenameLabel} 가격수정 실패`);
+          }
+          return { platform, ...json } as { platform: PlayAutoExportPlatform; base64: string; filename: string };
+        })
+      );
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          const fn = r.value.filename.replace("플레이오토_", "가격수정_");
+          downloadExcelFromBase64(r.value.base64, fn);
+        } else {
+          alert(r.reason?.message ?? "가격수정 내보내기 실패");
+        }
       }
-      if (json.normal) downloadExcelFromBase64(json.normal.base64, json.normal.filename);
-      if (json.single) downloadExcelFromBase64(json.single.base64, json.single.filename);
     } catch {
       alert("가격수정 내보내기 중 오류가 발생했습니다.");
     } finally {
       setPriceUpdateExporting(false);
+      setExportStep("");
     }
   };
 

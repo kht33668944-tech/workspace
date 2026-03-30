@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
     const nameCol = keys.find(k => k.includes("온라인 상품명") || k === "온라인 상품명");
     const accountCol = keys.find(k => k.includes("쇼핑몰(계정)") || k === "쇼핑몰(계정)");
     const codeCol = keys.find(k => k.includes("쇼핑몰 상품번호") || k === "쇼핑몰 상품번호");
+    const sellerCodeCol = keys.find(k => k.includes("판매자관리코드") || k === "판매자관리코드");
 
     if (!nameCol || !accountCol || !codeCol) {
       return NextResponse.json({
@@ -36,23 +37,24 @@ export async function POST(request: NextRequest) {
     // 3. 사용자 상품 조회
     const { data: products, error: fetchErr } = await supabase
       .from("products")
-      .select("id, product_name, platform_codes");
+      .select("id, product_name, platform_codes, seller_code");
     if (fetchErr) throw fetchErr;
 
     // 상품명 → product Map
-    const productMap = new Map<string, { id: string; platform_codes: Record<string, string> | null }>();
+    const productMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: string | null }>();
     for (const p of products ?? []) {
-      productMap.set(p.product_name, { id: p.id, platform_codes: p.platform_codes });
+      productMap.set(p.product_name, { id: p.id, platform_codes: p.platform_codes, seller_code: p.seller_code });
     }
 
     // 4. 엑셀 행 처리 — 상품별로 코드 병합
-    const updates = new Map<string, { id: string; platform_codes: Record<string, string> }>();
+    const updates = new Map<string, { id: string; platform_codes: Record<string, string>; seller_code: string | null }>();
     const unmatchedNames = new Set<string>();
 
     for (const row of rows) {
       const productName = String(row[nameCol]).trim();
       const account = String(row[accountCol]).trim();
       const code = String(row[codeCol]).trim();
+      const sellerCode = sellerCodeCol ? String(row[sellerCodeCol]).trim() : "";
 
       if (!productName || !account || !code) continue;
 
@@ -65,17 +67,22 @@ export async function POST(request: NextRequest) {
       const existing = updates.get(product.id) ?? {
         id: product.id,
         platform_codes: { ...(product.platform_codes ?? {}) },
+        seller_code: product.seller_code,
       };
       existing.platform_codes[account] = code;
+      // 판매자관리코드는 상품당 하나 (첫 번째 값 사용)
+      if (sellerCode && !existing.seller_code) {
+        existing.seller_code = sellerCode;
+      }
       updates.set(product.id, existing);
     }
 
     // 5. DB 일괄 업데이트
     let matched = 0;
-    for (const { id, platform_codes } of updates.values()) {
+    for (const { id, platform_codes, seller_code } of updates.values()) {
       const { error: updateErr } = await supabase
         .from("products")
-        .update({ platform_codes })
+        .update({ platform_codes, seller_code })
         .eq("id", id);
       if (updateErr) {
         console.error(`[import-platform-codes] 업데이트 실패 (${id}):`, updateErr.message);
