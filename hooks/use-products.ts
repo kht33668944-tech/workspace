@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
-import type { Product, ProductUpdate } from "@/types/database";
+import type { Product, ProductInsert, ProductUpdate } from "@/types/database";
 
 function urlToStoragePath(publicUrl: string): string {
   const marker = "/product-images/";
@@ -160,7 +160,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     filteredProducts = filteredProducts.filter((p) => p.category === options.categoryFilter);
   }
 
-  const insertProducts = async (rows: Omit<Product, "id" | "created_at" | "updated_at">[]) => {
+  const insertProducts = async (rows: ProductInsert[]) => {
     if (!user) return { error: "Not authenticated" };
     const startSort = nextSortOrderRef.current;
     const withUserId = rows.map((row, i) => ({ ...row, user_id: user.id, sort_order: startSort + i }));

@@ -278,3 +278,77 @@ export function downloadExcelFromBase64(base64: string, filename: string) {
   const buffer = base64ToArrayBuffer(base64);
   downloadExcel(buffer, filename);
 }
+
+/**
+ * 가격수정용 엑셀 2종 생성 (일반상품 + 단일상품)
+ * 일반상품: 스마트스토어, 쿠팡
+ * 단일상품: 지마켓, 옥션, 11번가
+ */
+export function generatePriceUpdateExcel(
+  products: Product[],
+  commissionRates: CommissionRate[],
+  exportConfigs?: Record<string, { shopAccount: string }>
+): { normal: { buffer: ArrayBuffer; filename: string } | null; single: { buffer: ArrayBuffer; filename: string } | null } {
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const rateMap = buildRateMap(commissionRates);
+
+  // 플랫폼별 계정 키 목록 (exportConfigs 우선, 없으면 PLATFORM_CONFIGS 기본값)
+  const normalAccounts: string[] = []; // 스마트스토어, 쿠팡
+  const singleAccounts: string[] = []; // 옥션, 지마켓, 11번가
+
+  const smartstoreAccount = exportConfigs?.smartstore?.shopAccount || PLATFORM_CONFIGS.smartstore.shopAccount;
+  const coupangAccount = exportConfigs?.coupang?.shopAccount || PLATFORM_CONFIGS.coupang.shopAccount;
+  const esmAccount = exportConfigs?.gmarket_auction?.shopAccount || PLATFORM_CONFIGS.gmarket_auction.shopAccount;
+
+  normalAccounts.push(...smartstoreAccount.split("\n").map(s => s.trim()).filter(Boolean));
+  normalAccounts.push(...coupangAccount.split("\n").map(s => s.trim()).filter(Boolean));
+  singleAccounts.push(...esmAccount.split("\n").map(s => s.trim()).filter(Boolean));
+
+  // 플랫폼 계정 → rateKey 매핑
+  const accountRateKey = (account: string): string => {
+    const lower = account.toLowerCase();
+    if (lower.startsWith("스마트스토어")) return "smartstore";
+    if (lower.startsWith("쿠팡")) return "coupang";
+    if (lower.startsWith("옥션") || lower.startsWith("지마켓")) return "esm";
+    if (lower.startsWith("11번가")) return "esm";
+    return "esm";
+  };
+
+  const buildRows = (accounts: string[]) => {
+    const rows: Array<{ "쇼핑몰 상품번호": string; 판매가: number }> = [];
+    for (const p of products) {
+      if (!p.platform_codes) continue;
+      const settlementPrice = calcSettlementPrice(p.lowest_price, p.margin_rate);
+      const categoryRates = rateMap[p.category] ?? {};
+
+      for (const account of accounts) {
+        const code = (p.platform_codes as Record<string, string>)[account];
+        if (!code) continue;
+
+        const rateKey = accountRateKey(account);
+        const rate = (categoryRates as Record<string, number>)[rateKey] ?? 0;
+        const salePrice = rate > 0 ? calcPlatformPrice(settlementPrice, rate) : p.lowest_price;
+
+        rows.push({ "쇼핑몰 상품번호": code, 판매가: salePrice });
+      }
+    }
+    return rows;
+  };
+
+  const toExcel = (rows: Array<Record<string, string | number>>, label: string) => {
+    if (rows.length === 0) return null;
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    return { buffer: buf as ArrayBuffer, filename: `가격수정_${label}_${today}.xlsx` };
+  };
+
+  const normalRows = buildRows(normalAccounts);
+  const singleRows = buildRows(singleAccounts);
+
+  return {
+    normal: toExcel(normalRows, "일반상품"),
+    single: toExcel(singleRows, "단일상품"),
+  };
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Plus, Trash2, Search, Settings2, Package, Download, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags } from "lucide-react";
+import { Plus, Trash2, Search, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
@@ -47,6 +47,8 @@ export default function ProductsPage() {
   const [scrapeProgress, setScrapeProgress] = useState("");
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
+  const [importingCodes, setImportingCodes] = useState(false);
+  const [priceUpdateExporting, setPriceUpdateExporting] = useState(false);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
   const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, refetchPriceChanges } = useProducts({
@@ -313,6 +315,65 @@ export default function ProductsPage() {
     }
   };
 
+  const handleImportPlatformCodes = async () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".xlsx,.xls";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      setImportingCodes(true);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+        const res = await fetch("/api/products/import-platform-codes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+          body: JSON.stringify({ excelBase64: base64 }),
+        });
+        const json = await res.json() as { matched?: number; unmatched?: string[]; total?: number; error?: string };
+        if (!res.ok) {
+          alert(json.error ?? "가져오기 실패");
+          return;
+        }
+        const unmatchedMsg = json.unmatched && json.unmatched.length > 0
+          ? `\n\n미매칭 상품 (${json.unmatched.length}개):\n${json.unmatched.slice(0, 10).join("\n")}${json.unmatched.length > 10 ? "\n..." : ""}`
+          : "";
+        alert(`플랫폼 코드 가져오기 완료!\n\n전체 ${json.total}행 중 ${json.matched}개 상품 매칭 성공${unmatchedMsg}`);
+      } catch {
+        alert("플랫폼 코드 가져오기 중 오류가 발생했습니다.");
+      } finally {
+        setImportingCodes(false);
+      }
+    };
+    input.click();
+  };
+
+  const handlePriceUpdateExport = async () => {
+    const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
+    if (ids.length === 0) return;
+    setExportModalOpen(false);
+    setPriceUpdateExporting(true);
+    try {
+      const res = await fetch("/api/products/price-update-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ productIds: ids }),
+      });
+      const json = await res.json() as { normal?: { base64: string; filename: string }; single?: { base64: string; filename: string }; error?: string };
+      if (!res.ok) {
+        alert(json.error ?? "가격수정 내보내기 실패");
+        return;
+      }
+      if (json.normal) downloadExcelFromBase64(json.normal.base64, json.normal.filename);
+      if (json.single) downloadExcelFromBase64(json.single.base64, json.single.filename);
+    } catch {
+      alert("가격수정 내보내기 중 오류가 발생했습니다.");
+    } finally {
+      setPriceUpdateExporting(false);
+    }
+  };
+
   const TAB_CLASSES = (tab: ActiveTab) =>
     `flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
       activeTab === tab
@@ -492,10 +553,28 @@ export default function ProductsPage() {
                           전체 다운로드
                         </button>
                       </div>
+                      <div className="border-t border-[var(--border)]">
+                        <button
+                          onClick={handlePriceUpdateExport}
+                          disabled={priceUpdateExporting}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-orange-400 hover:bg-orange-600/10 transition-colors font-medium"
+                        >
+                          <TrendingUp className="w-3.5 h-3.5" />
+                          {priceUpdateExporting ? "생성 중..." : "가격수정 내보내기"}
+                        </button>
+                      </div>
                     </div>
                   </>
                 )}
               </div>
+              <button
+                onClick={handleImportPlatformCodes}
+                disabled={importingCodes}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Upload className="w-4 h-4" />
+                {importingCodes ? "가져오는 중..." : "플랫폼 코드 가져오기"}
+              </button>
               <button
                 onClick={() => setImportModalOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
