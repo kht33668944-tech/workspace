@@ -414,6 +414,88 @@ ${numbered}
 }
 
 /**
+ * 단위가격 표시제 정보 추출 (플레이오토 대량등록용)
+ * 상품명에서 용량/단위 정보를 파싱하여 단위가격 표시 필드 생성
+ * - display=Y: displayAmount(1~999), displayUnit(허용 단위), totalAmount(0.01~99999999)
+ * - display=N: displayAmount=0, displayUnit=0, totalAmount=0
+ */
+export async function extractUnitPriceInfo(
+  productNames: string[]
+): Promise<Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }>> {
+  const fallback = productNames.map(() => ({ display: "N", displayAmount: 0, displayUnit: 0 as string | number, totalAmount: 0 }));
+  if (!process.env.GEMINI_API_KEY || productNames.length === 0) return fallback;
+
+  const VALID_UNITS = ["g", "kg", "ml", "L", "cm", "m", "개", "개입", "매", "매입", "정", "캡슐", "구미", "포", "구"];
+
+  const numbered = productNames.map((n, i) => `${i + 1}. ${n}`).join("\n");
+  const result = await generateText(
+    `아래 상품명 목록을 분석해서 각 상품의 단위가격 표시 정보를 추출하세요.
+
+상품명 목록:
+${numbered}
+
+규칙:
+- 식품, 음료, 생활용품(세제, 샴푸, 바디워시, 치약, 물티슈, 화장지 등), 반려동물 사료 등 용량/중량이 있는 상품은 display: "Y"
+- 전자기기, 의류, 가구, 잡화 등 단위가격 비대상 상품은 display: "N"
+- 상품명에서 용량 정보를 파악할 수 없으면 display: "N"
+
+display가 "Y"인 경우:
+  - displayUnit: 허용 단위만 사용 → g, kg, ml, L, cm, m, 개, 개입, 매, 매입, 정, 캡슐, 구미, 포, 구
+  - displayAmount: 단위가격 계산 기준 용량 (1~999 범위). 일반적으로 g→100, kg→1, ml→100, L→1, 개→1, 매→1 등
+  - totalAmount: 상품 전체 용량 (숫자, 0.01~99999999 범위). 멀티팩이면 총량 계산
+  - totalAmount와 displayUnit은 같은 단위 사용 (예: 2L → displayUnit: "ml", totalAmount: 2000, displayAmount: 100)
+  - 예시: "삼다수 2L 6입" → display:"Y", displayUnit:"ml", displayAmount:100, totalAmount:12000
+  - 예시: "비비고 왕교자 350g 4개" → display:"Y", displayUnit:"g", displayAmount:100, totalAmount:1400
+  - 예시: "물티슈 100매 10팩" → display:"Y", displayUnit:"매", displayAmount:1, totalAmount:1000
+
+display가 "N"인 경우: displayAmount:0, displayUnit:0, totalAmount:0
+
+반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
+[
+  {"display": "Y", "displayAmount": 100, "displayUnit": "ml", "totalAmount": 12000},
+  {"display": "N", "displayAmount": 0, "displayUnit": 0, "totalAmount": 0}
+]
+
+상품 개수: ${productNames.length}개, JSON 배열 항목도 반드시 ${productNames.length}개`
+  );
+
+  if (!result) return fallback;
+
+  try {
+    const jsonMatch = result.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return fallback;
+    const parsed = JSON.parse(jsonMatch[0]) as Array<{
+      display?: string;
+      displayAmount?: number;
+      displayUnit?: string | number;
+      totalAmount?: number;
+    }>;
+    if (!Array.isArray(parsed)) return fallback;
+    return productNames.map((_, i) => {
+      const item = parsed[i];
+      if (!item || item.display !== "Y") {
+        return { display: "N", displayAmount: 0, displayUnit: 0, totalAmount: 0 };
+      }
+      const unit = String(item.displayUnit ?? "");
+      const amount = Number(item.displayAmount) || 0;
+      const total = Number(item.totalAmount) || 0;
+      // 유효성 검증: 허용 단위, 범위 체크
+      if (!VALID_UNITS.includes(unit) || amount < 1 || amount > 999 || total < 0.01) {
+        return { display: "N", displayAmount: 0, displayUnit: 0, totalAmount: 0 };
+      }
+      return {
+        display: "Y",
+        displayAmount: amount,
+        displayUnit: unit,
+        totalAmount: total,
+      };
+    });
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * 상품명 정규화 전용 헬퍼
  * 구조: 브랜드 + 제품명 + 옵션(용량/무게) + 수량
  */

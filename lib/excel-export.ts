@@ -142,7 +142,8 @@ export async function generatePlayAutoProductExcel(
   platform: PlayAutoExportPlatform = "smartstore",
   userConfig?: ExportConfigOverride,
   noticeMap?: Record<string, string[]>,
-  options?: { useSavedSellerCodes?: boolean }
+  options?: { useSavedSellerCodes?: boolean },
+  unitPriceInfoList?: Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }>
 ): Promise<{ buffer: ArrayBuffer; filename: string }> {
   await loadXLSX();
   const now = new Date();
@@ -208,6 +209,15 @@ export async function generatePlayAutoProductExcel(
       제조사: meta.manufacturer,
       상품분류코드: playautoCode,
     };
+
+    // 스마트스토어: 단위가격 표시 컬럼 추가
+    if (platform === "smartstore") {
+      const upi = unitPriceInfoList?.[i] ?? { display: "N", displayAmount: 0, displayUnit: 0, totalAmount: 0 };
+      row["단위 가격 표시 여부"] = upi.display;
+      row["표시 용량"] = upi.displayAmount;
+      row["표시 단위"] = upi.displayUnit;
+      row["총 용량"] = upi.totalAmount;
+    }
 
     // 이 상품의 고시 항목 채우기 (해당 카테고리 개수만큼 "상세페이지 참조", 나머지 빈칸)
     for (let n = 1; n <= maxFields; n++) {

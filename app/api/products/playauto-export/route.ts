@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
-import { extractProductMetadataBatch, suggestSmartStoreCategoryCodes } from "@/lib/gemini";
+import { extractProductMetadataBatch, suggestSmartStoreCategoryCodes, extractUnitPriceInfo } from "@/lib/gemini";
 import { generatePlayAutoProductExcel, arrayBufferToBase64, type PlayAutoExportPlatform } from "@/lib/excel-export";
 
 export async function POST(req: NextRequest) {
@@ -78,9 +78,9 @@ export async function POST(req: NextRequest) {
 
     const availableSsCodes = allCategoryCodes;
 
-    // Gemini로 브랜드/모델명/제조사 + 스마트스토어 카테고리코드 병렬 추출
+    // Gemini로 브랜드/모델명/제조사 + 스마트스토어 카테고리코드 + 단위가격정보 병렬 추출
     const productNames = products.map((p) => p.product_name as string);
-    const [metadataList, smartstoreCategoryCodes] = await Promise.all([
+    const [metadataList, smartstoreCategoryCodes, unitPriceInfoList] = await Promise.all([
       extractProductMetadataBatch(productNames),
       availableSsCodes.length > 0
         ? suggestSmartStoreCategoryCodes(
@@ -92,6 +92,9 @@ export async function POST(req: NextRequest) {
             availableSsCodes
           )
         : Promise.resolve(products.map(() => "")),
+      platform === "smartstore"
+        ? extractUnitPriceInfo(productNames)
+        : Promise.resolve(undefined),
     ]);
 
     // 사용자 커스텀 설정 (DB에 저장된 값 우선)
@@ -119,7 +122,8 @@ export async function POST(req: NextRequest) {
         productInfoNotice: "상세페이지 참조",
       } : undefined,
       Object.keys(noticeMap).length > 0 ? noticeMap : undefined,
-      priceUpdate ? { useSavedSellerCodes: true } : undefined
+      priceUpdate ? { useSavedSellerCodes: true } : undefined,
+      unitPriceInfoList ?? undefined
     );
 
     const base64 = arrayBufferToBase64(buffer);
