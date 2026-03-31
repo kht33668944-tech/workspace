@@ -13,12 +13,14 @@ import { exportOrdersToCSV } from "@/lib/excel-parser";
 import { generateOrderExcel, generatePlayAutoTrackingExcel, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import OrderTable from "@/components/workspace/orders/order-table";
-import ExcelImport from "@/components/workspace/orders/excel-import";
 import OrderModal from "@/components/workspace/orders/order-modal";
 import OrderSidePanel from "@/components/workspace/orders/order-side-panel";
-import TrackingCollectModal from "@/components/workspace/orders/tracking-collect-modal";
-import AutoPurchaseModal from "@/components/workspace/orders/auto-purchase-modal";
 import BulkEditBar from "@/components/workspace/orders/bulk-edit-bar";
+import dynamic from "next/dynamic";
+
+const ExcelImport = dynamic(() => import("@/components/workspace/orders/excel-import"), { ssr: false });
+const TrackingCollectModal = dynamic(() => import("@/components/workspace/orders/tracking-collect-modal"), { ssr: false });
+const AutoPurchaseModal = dynamic(() => import("@/components/workspace/orders/auto-purchase-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
 import type { Order, OrderInsert } from "@/types/database";
 
@@ -305,7 +307,7 @@ function OrdersPageInner() {
     return orders;
   }, [orders, selectedIds]);
 
-  const handleExportOrder = () => {
+  const handleExportOrder = async () => {
     const exportData = exportTargetOrders.map((o) => ({
       묶음번호: o.bundle_no,
       주문일시: o.order_date ? o.order_date.slice(0, 16).replace("T", " ") : null,
@@ -333,12 +335,12 @@ function OrdersPageInner() {
       최저가링크: o.purchase_url,
     }));
     const monthLabel = selectedMonth || "전체";
-    exportOrdersToCSV(exportData, `발주서_${monthLabel}.xlsx`);
+    await exportOrdersToCSV(exportData, `발주서_${monthLabel}.xlsx`);
     setShowExportMenu(false);
   };
 
-  const handleExportPlayAuto = () => {
-    const { buffer, filename } = generatePlayAutoTrackingExcel(exportTargetOrders, courierCodeMap);
+  const handleExportPlayAuto = async () => {
+    const { buffer, filename } = await generatePlayAutoTrackingExcel(exportTargetOrders, courierCodeMap);
     downloadExcel(buffer, filename);
     setShowExportMenu(false);
 

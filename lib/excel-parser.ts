@@ -1,4 +1,13 @@
-import * as XLSX from "xlsx";
+import type { WorkSheet } from "xlsx";
+
+// XLSX를 lazy load하여 클라이언트 번들에서 제외 (~1MB 절감)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let XLSX: any = null;
+let _xlsxPromise: Promise<void> | null = null;
+async function loadXLSX() {
+  if (!_xlsxPromise) _xlsxPromise = import("xlsx").then(m => { XLSX = m; });
+  await _xlsxPromise;
+}
 import { EXCEL_COLUMN_MAP, LEGACY_EXCEL_COLUMN_MAP } from "./constants";
 import type { OrderInsert } from "@/types/database";
 
@@ -143,7 +152,7 @@ function isHeaderRow(row: unknown[]): boolean {
 }
 
 // 시트에서 헤더 행의 시작 위치를 찾고 파싱
-function parseSheet(sheet: XLSX.WorkSheet): { headers: string[]; rows: RawRow[] } {
+function parseSheet(sheet: WorkSheet): { headers: string[]; rows: RawRow[] } {
   // 먼저 기본 파싱 시도
   const defaultRows: RawRow[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
   if (defaultRows.length > 0) {
@@ -213,7 +222,7 @@ function detectLegacyFormat(headerMap: Record<string, string>): boolean {
 }
 
 // 시트 하나를 파싱하여 주문 목록 반환 (내부 공용)
-function parseSheetToOrders(sheet: XLSX.WorkSheet): { orders: OrderInsert[]; headers: string[]; headerMap: Record<string, string> } {
+function parseSheetToOrders(sheet: WorkSheet): { orders: OrderInsert[]; headers: string[]; headerMap: Record<string, string> } {
   const { headers, rows } = parseSheet(sheet);
   const headerMap = buildHeaderMap(headers);
   const bundleKey = headers.find((h) => headerMap[h] === "bundle_no");
@@ -226,7 +235,8 @@ function parseSheetToOrders(sheet: XLSX.WorkSheet): { orders: OrderInsert[]; hea
   return { orders, headers, headerMap };
 }
 
-export function parseExcelFile(file: File, sheetIndex = 0): Promise<ParsedExcelResult> {
+export async function parseExcelFile(file: File, sheetIndex = 0): Promise<ParsedExcelResult> {
+  await loadXLSX();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -248,7 +258,7 @@ export function parseExcelFile(file: File, sheetIndex = 0): Promise<ParsedExcelR
         // 여러 시트가 있으면 시트별 건수 미리 계산
         let sheetOrderCounts: number[] | undefined;
         if (sheetNames.length > 1) {
-          sheetOrderCounts = sheetNames.map((name, i) => {
+          sheetOrderCounts = sheetNames.map((name: string, i: number) => {
             if (i === (sheetIndex || 0)) return orders.length;
             try {
               const s = workbook.Sheets[name];
@@ -261,7 +271,7 @@ export function parseExcelFile(file: File, sheetIndex = 0): Promise<ParsedExcelR
 
           // 현재 시트에 데이터가 없으면 데이터가 있는 첫 시트로 자동 전환
           if (orders.length === 0) {
-            const firstWithData = sheetOrderCounts.findIndex((c) => c > 0);
+            const firstWithData = sheetOrderCounts!.findIndex((c) => c > 0);
             if (firstWithData >= 0 && firstWithData !== sheetIndex) {
               const altSheet = workbook.Sheets[sheetNames[firstWithData]];
               const alt = parseSheetToOrders(altSheet);
@@ -287,7 +297,8 @@ export function parseExcelFile(file: File, sheetIndex = 0): Promise<ParsedExcelR
   });
 }
 
-export function parseExcelSheet(file: File, sheetIndex: number): Promise<OrderInsert[]> {
+export async function parseExcelSheet(file: File, sheetIndex: number): Promise<OrderInsert[]> {
+  await loadXLSX();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -477,7 +488,8 @@ function parseDate(value: string | number | undefined): string | null {
   return null;
 }
 
-export function exportOrdersToCSV(orders: Record<string, unknown>[], filename: string) {
+export async function exportOrdersToCSV(orders: Record<string, unknown>[], filename: string) {
+  await loadXLSX();
   const ws = XLSX.utils.json_to_sheet(orders);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "발주서");

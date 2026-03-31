@@ -292,8 +292,8 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
 
     try {
       const { buffer, filename } = type === "order"
-        ? generateOrderExcel(collectedOrders)
-        : generatePlayAutoTrackingExcel(collectedOrders, courierCodeMap);
+        ? await generateOrderExcel(collectedOrders)
+        : await generatePlayAutoTrackingExcel(collectedOrders, courierCodeMap);
 
       downloadExcel(buffer, filename);
 
@@ -325,11 +325,11 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     if (targetOrders.length === 0) return;
     try {
       // 1) 발주서 양식
-      const orderResult = generateOrderExcel(targetOrders);
+      const orderResult = await generateOrderExcel(targetOrders);
       downloadExcel(orderResult.buffer, orderResult.filename);
 
       // 2) 플레이오토 운송장 양식
-      const playAutoResult = generatePlayAutoTrackingExcel(targetOrders, courierCodeMap);
+      const playAutoResult = await generatePlayAutoTrackingExcel(targetOrders, courierCodeMap);
       downloadExcel(playAutoResult.buffer, playAutoResult.filename);
 
       // 보관함 저장

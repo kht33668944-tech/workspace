@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       exportConfigs[c.platform] = { shopAccount: c.shop_account };
     }
 
-    const result = generatePriceUpdateExcel(withCodes, rates ?? [], exportConfigs);
+    const result = await generatePriceUpdateExcel(withCodes, rates ?? [], exportConfigs);
 
     const response: Record<string, unknown> = {};
     if (result.normal) {

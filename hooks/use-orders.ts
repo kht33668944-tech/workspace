@@ -85,7 +85,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
         query = query.eq("marketplace", options.marketplace);
       }
       if (options.search) {
-        const s = options.search.replace(/[%_\\]/g, "\\$&");
+        const s = options.search.replace(/[%_\\]/g, "\\$&").replace(/[,().]/g, "");
         query = query.or(
           `product_name.ilike.%${s}%,recipient_name.ilike.%${s}%,bundle_no.ilike.%${s}%,marketplace.ilike.%${s}%,recipient_phone.ilike.%${s}%,orderer_phone.ilike.%${s}%,address.ilike.%${s}%,address_detail.ilike.%${s}%,delivery_memo.ilike.%${s}%,purchase_id.ilike.%${s}%,purchase_source.ilike.%${s}%,purchase_order_no.ilike.%${s}%,courier.ilike.%${s}%,tracking_no.ilike.%${s}%,memo.ilike.%${s}%`
         );
@@ -93,7 +93,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
 
       const { data, error } = await query;
       if (error) {
-        console.error("Failed to fetch orders:", error);
+        console.error("[use-orders] 주문 조회 실패:", error instanceof Error ? error.message : String(error));
         break;
       }
 
@@ -122,13 +122,8 @@ export function useOrders(options: UseOrdersOptions = {}) {
     }
   }, [userId]);
 
-  useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
-
-  useEffect(() => {
-    fetchMonths();
-  }, [fetchMonths]);
+  useEffect(() => { fetchOrders(); }, [fetchOrders]);
+  useEffect(() => { fetchMonths(); }, [fetchMonths]);
 
   // 클라이언트 측 컬럼 필터링 (스냅샷 방식: 필터 설정 변경 또는 DB 재조회 시에만 재평가)
   const filtersKey = JSON.stringify(options.columnFilters || {});
@@ -299,7 +294,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
       .eq("id", id)
       .then(({ error }) => {
         if (error) {
-          console.error("Update failed:", error);
+          console.error("[use-orders] 주문 업데이트 실패:", error instanceof Error ? error.message : String(error));
           fetchOrders(); // 실패 시 원복
         }
       });

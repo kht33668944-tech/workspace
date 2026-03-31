@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
     });
 
     // 엑셀 생성
-    const { buffer, filename } = generatePlayAutoProductExcel(
+    const { buffer, filename } = await generatePlayAutoProductExcel(
       products,
       metadataList,
       ratesResult.data ?? [],

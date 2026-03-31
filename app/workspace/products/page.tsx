@@ -9,12 +9,13 @@ import { buildRateMap } from "@/lib/product-calculations";
 import { useAiTask } from "@/context/AiTaskContext";
 import { useAuth } from "@/context/AuthContext";
 import ProductTable from "@/components/workspace/products/product-table";
-import CommissionTab from "@/components/workspace/products/commission-tab";
-import ImageTab from "@/components/workspace/products/image-tab";
-import SmartStoreCategoryTab from "@/components/workspace/products/smartstore-category-tab";
-import GmarketImportModal from "@/components/workspace/products/gmarket-import-modal";
-import BatchDetailModal from "@/components/workspace/products/batch-detail-modal";
 import dynamic from "next/dynamic";
+
+const CommissionTab = dynamic(() => import("@/components/workspace/products/commission-tab"), { ssr: false });
+const ImageTab = dynamic(() => import("@/components/workspace/products/image-tab"), { ssr: false });
+const SmartStoreCategoryTab = dynamic(() => import("@/components/workspace/products/smartstore-category-tab"), { ssr: false });
+const GmarketImportModal = dynamic(() => import("@/components/workspace/products/gmarket-import-modal"), { ssr: false });
+const BatchDetailModal = dynamic(() => import("@/components/workspace/products/batch-detail-modal"), { ssr: false });
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
 import { downloadExcelFromBase64, type PlayAutoExportPlatform, PLATFORM_CONFIGS } from "@/lib/excel-export";
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";

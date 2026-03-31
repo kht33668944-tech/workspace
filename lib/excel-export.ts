@@ -1,11 +1,19 @@
-import XLSX from "xlsx-js-style";
+// XLSX를 lazy load하여 클라이언트 번들에서 제외 (~1MB 절감)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let XLSX: any = null;
+let _xlsxPromise: Promise<void> | null = null;
+async function loadXLSX() {
+  if (!_xlsxPromise) _xlsxPromise = import("xlsx-js-style").then(m => { XLSX = m.default; });
+  await _xlsxPromise;
+}
 import type { Order, Product, CommissionRate } from "@/types/database";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { calcPlatformPrice, calcSettlementPrice, buildRateMap } from "@/lib/product-calculations";
 import { getSchemaByCode, DEFAULT_SCHEMA } from "@/lib/playauto-schema";
 
 /** 발주서 양식 엑셀 생성 (현재 발주서 테이블과 동일한 양식) */
-export function generateOrderExcel(orders: Order[]): { buffer: ArrayBuffer; filename: string } {
+export async function generateOrderExcel(orders: Order[]): Promise<{ buffer: ArrayBuffer; filename: string }> {
+  await loadXLSX();
   const today = new Date().toISOString().slice(0, 10);
   const data = orders.map((o) => ({
     묶음번호: o.bundle_no,
@@ -48,10 +56,11 @@ export function generateOrderExcel(orders: Order[]): { buffer: ArrayBuffer; file
  * 양식: 묶음번호 | 택배사(코드숫자) | 운송장번호
  * @param courierCodeMap 택배사명 → 코드 매핑 (사용자 설정 or 기본값)
  */
-export function generatePlayAutoTrackingExcel(
+export async function generatePlayAutoTrackingExcel(
   orders: Order[],
   courierCodeMap: Record<string, number> = {}
-): { buffer: ArrayBuffer; filename: string } {
+): Promise<{ buffer: ArrayBuffer; filename: string }> {
+  await loadXLSX();
   const today = new Date().toISOString().slice(0, 10);
 
   // 운송장이 있는 주문만 필터링
@@ -124,7 +133,7 @@ export interface ExportConfigOverride {
   productInfoNotice: string;
 }
 
-export function generatePlayAutoProductExcel(
+export async function generatePlayAutoProductExcel(
   products: Product[],
   metadataList: Array<{ model: string; brand: string; manufacturer: string }>,
   commissionRates: CommissionRate[],
@@ -134,7 +143,8 @@ export function generatePlayAutoProductExcel(
   userConfig?: ExportConfigOverride,
   noticeMap?: Record<string, string[]>,
   options?: { useSavedSellerCodes?: boolean }
-): { buffer: ArrayBuffer; filename: string } {
+): Promise<{ buffer: ArrayBuffer; filename: string }> {
+  await loadXLSX();
   const now = new Date();
   const yy = String(now.getFullYear()).slice(2);
   const mm = String(now.getMonth() + 1).padStart(2, "0");
@@ -284,11 +294,12 @@ export function downloadExcelFromBase64(base64: string, filename: string) {
  * 일반상품: 스마트스토어, 쿠팡
  * 단일상품: 지마켓, 옥션, 11번가
  */
-export function generatePriceUpdateExcel(
+export async function generatePriceUpdateExcel(
   products: Product[],
   commissionRates: CommissionRate[],
   exportConfigs?: Record<string, { shopAccount: string }>
-): { normal: { buffer: ArrayBuffer; filename: string } | null; single: { buffer: ArrayBuffer; filename: string } | null } {
+): Promise<{ normal: { buffer: ArrayBuffer; filename: string } | null; single: { buffer: ArrayBuffer; filename: string } | null }> {
+  await loadXLSX();
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const rateMap = buildRateMap(commissionRates);
 
