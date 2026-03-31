@@ -133,7 +133,7 @@ function ColumnFilterDropdown({ columnKey, allOrders, columnFilters, selectedVal
         <span className="text-[var(--text-disabled)]">|</span>
         <button onClick={() => setPending(["__NONE__"])} className={`text-xs ${noneChecked ? "text-[var(--text-secondary)] font-medium" : "text-[var(--text-muted)] hover:text-[var(--text-tertiary)]"}`}>전체 해제</button>
       </div>
-      <div className="max-h-[250px] overflow-y-auto py-1">
+      <div className="max-h-[200px] overflow-y-auto py-1">
         {filtered.map(({ value, count }) => (
           <label key={value} className="flex items-center gap-2 px-2 py-1 hover:bg-[var(--bg-hover)] cursor-pointer text-xs" onClick={e => { e.preventDefault(); toggle(value); }}>
             <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${isChecked(value) ? "bg-blue-600 border-blue-600" : "border-[var(--border-strong)]"}`}>
