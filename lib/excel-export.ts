@@ -89,21 +89,21 @@ export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
   filenameLabel: string;
 }> = {
   smartstore: {
-    shopAccount: "스마트스토어=redgoom",
+    shopAccount: "스마트스토어=계정명",
     templateCode: "2200901",
     headerFooterTemplateCode: "14672",
     rateKey: "smartstore",
     filenameLabel: "스마트스토어",
   },
   gmarket_auction: {
-    shopAccount: "옥션=redgoom00\n지마켓=redgoom00",
+    shopAccount: "옥션=계정명\n지마켓=계정명",
     templateCode: "2201548\n2201554",
     headerFooterTemplateCode: "14672\n14672",
     rateKey: "esm",
     filenameLabel: "지마켓옥션11번가",
   },
   coupang: {
-    shopAccount: "쿠팡=redgoom",
+    shopAccount: "쿠팡=계정명",
     templateCode: "2201570",
     headerFooterTemplateCode: "14672",
     rateKey: "coupang",

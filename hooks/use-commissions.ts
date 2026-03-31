@@ -117,7 +117,7 @@ export function useCommissions() {
       .order("sort_order", { ascending: true });
 
     if (error) {
-      console.error("Failed to fetch commission rates:", error);
+      console.error("[use-commissions] 수수료율 조회 실패:", error instanceof Error ? error.message : String(error));
       setLoading(false);
       return;
     }
@@ -160,7 +160,7 @@ export function useCommissions() {
 
     const { error } = await supabase.from("commission_rates").insert(rows);
     if (error) {
-      console.error("Failed to seed commission rates:", error.message, error.code, error.details, error.hint);
+      console.error("[use-commissions] 수수료 시딩 실패:", error.message);
       // 에러 시 (UNIQUE 위반 등) 재시딩 방지 — 직접 데이터만 조회
       const { data } = await supabase
         .from("commission_rates")
@@ -194,7 +194,7 @@ export function useCommissions() {
         .eq("id", id)
         .then(({ error }) => {
           if (error) {
-            console.error("Update commission rate failed:", error);
+            console.error("[use-commissions] 수수료율 업데이트 실패:", error instanceof Error ? error.message : String(error));
             fetchRates();
           }
         });
@@ -219,7 +219,7 @@ export function useCommissions() {
 
       const { error } = await supabase.from("commission_rates").insert(rows);
       if (error) {
-        console.error("Failed to add category:", error);
+        console.error("[use-commissions] 카테고리 추가 실패:", error instanceof Error ? error.message : String(error));
         return;
       }
       await fetchRates();
@@ -238,7 +238,7 @@ export function useCommissions() {
         .eq("category", name);
 
       if (error) {
-        console.error("Failed to delete category:", error);
+        console.error("[use-commissions] 카테고리 삭제 실패:", error instanceof Error ? error.message : String(error));
         return;
       }
       await fetchRates();

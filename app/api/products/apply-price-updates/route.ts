@@ -11,15 +11,31 @@ export async function POST(request: NextRequest) {
     const { data: { user } } = await userSb.auth.getUser();
     if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
-    const { updates } = await request.json() as {
-      updates: Array<{ id: string; price: number; previous_price: number }>;
-    };
+    const body = await request.json();
+    const updates = body?.updates;
 
-    if (!updates || updates.length === 0) {
+    if (!Array.isArray(updates) || updates.length === 0) {
       return NextResponse.json({ error: "업데이트할 데이터가 없습니다." }, { status: 400 });
     }
 
-    const changed = updates.filter(u => u.price !== u.previous_price);
+    const MAX_BATCH = 500;
+    if (updates.length > MAX_BATCH) {
+      return NextResponse.json({ error: `최대 ${MAX_BATCH}개까지 처리 가능합니다.` }, { status: 400 });
+    }
+
+    // 입력값 검증
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const validated = updates.filter((u: Record<string, unknown>) =>
+      typeof u.id === "string" && UUID_RE.test(u.id) &&
+      typeof u.price === "number" && Number.isFinite(u.price) && u.price > 0 && u.price <= 100_000_000 &&
+      typeof u.previous_price === "number" && Number.isFinite(u.previous_price) && u.previous_price >= 0
+    ) as Array<{ id: string; price: number; previous_price: number }>;
+
+    if (validated.length === 0) {
+      return NextResponse.json({ error: "유효한 업데이트가 없습니다." }, { status: 400 });
+    }
+
+    const changed = validated.filter(u => u.price !== u.previous_price);
     if (changed.length === 0) {
       return NextResponse.json({ applied: 0 });
     }
@@ -45,7 +61,7 @@ export async function POST(request: NextRequest) {
       const batch = validUpdates.slice(i, i + BATCH);
       const results = await Promise.allSettled(
         batch.map(u =>
-          supabase.from("products").update({ lowest_price: u.price }).eq("id", u.id)
+          supabase.from("products").update({ lowest_price: u.price }).eq("id", u.id).eq("lowest_price", u.previous_price)
         )
       );
       for (let j = 0; j < results.length; j++) {

@@ -69,7 +69,7 @@ export function useProducts(options: UseProductsOptions = {}) {
         .range(from, from + PAGE_SIZE - 1);
 
       if (options.search) {
-        const s = options.search.replace(/[%_\\]/g, "\\$&");
+        const s = options.search.replace(/[%_\\]/g, "\\$&").replace(/[,().]/g, "");
         query = query.or(
           `product_name.ilike.%${s}%,category.ilike.%${s}%,purchase_url.ilike.%${s}%,memo.ilike.%${s}%`
         );
@@ -77,7 +77,7 @@ export function useProducts(options: UseProductsOptions = {}) {
 
       const { data, error } = await query;
       if (error) {
-        console.error("Failed to fetch products:", error);
+        console.error("[use-products] 상품 조회 실패:", error instanceof Error ? error.message : String(error));
         break;
       }
 
@@ -203,7 +203,7 @@ export function useProducts(options: UseProductsOptions = {}) {
       .single();
 
     if (error) {
-      console.error("Failed to add product:", error);
+      console.error("[use-products] 상품 추가 실패:", error instanceof Error ? error.message : String(error));
       return;
     }
 
@@ -254,7 +254,7 @@ export function useProducts(options: UseProductsOptions = {}) {
         .eq("id", id)
         .then(({ error }) => {
           if (error) {
-            console.error("Update product failed:", error);
+            console.error("[use-products] 상품 업데이트 실패:", error instanceof Error ? error.message : String(error));
             fetchProducts();
           }
         });

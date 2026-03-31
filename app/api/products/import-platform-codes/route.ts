@@ -10,15 +10,26 @@ export async function POST(request: NextRequest) {
     const { excelBase64 } = await request.json() as { excelBase64: string };
     if (!excelBase64) return NextResponse.json({ error: "엑셀 데이터가 없습니다." }, { status: 400 });
 
+    // 파일 크기 제한 (5MB)
+    const MAX_EXCEL_SIZE = 5 * 1024 * 1024;
+    if (excelBase64.length > MAX_EXCEL_SIZE * 1.37) {
+      return NextResponse.json({ error: "파일 크기가 초과되었습니다 (최대 5MB)." }, { status: 400 });
+    }
+
     const supabase = getSupabaseClient(token);
 
     // 1. 엑셀 파싱
     const buffer = Buffer.from(excelBase64, "base64");
+    if (buffer.length > MAX_EXCEL_SIZE) {
+      return NextResponse.json({ error: "파일 크기가 초과되었습니다 (최대 5MB)." }, { status: 400 });
+    }
     const wb = XLSX.read(buffer, { type: "buffer" });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
 
+    const MAX_ROWS = 10000;
     if (rows.length === 0) return NextResponse.json({ error: "엑셀에 데이터가 없습니다." }, { status: 400 });
+    if (rows.length > MAX_ROWS) return NextResponse.json({ error: `최대 ${MAX_ROWS}행까지 처리 가능합니다.` }, { status: 400 });
 
     // 2. 헤더 검증
     const firstRow = rows[0];
@@ -77,17 +88,25 @@ export async function POST(request: NextRequest) {
       updates.set(product.id, existing);
     }
 
-    // 5. DB 일괄 업데이트
+    // 5. DB 배치 업데이트 (10개씩 병렬)
     let matched = 0;
-    for (const { id, platform_codes, seller_code } of updates.values()) {
-      const { error: updateErr } = await supabase
-        .from("products")
-        .update({ platform_codes, seller_code })
-        .eq("id", id);
-      if (updateErr) {
-        console.error(`[import-platform-codes] 업데이트 실패 (${id}):`, updateErr.message);
-      } else {
-        matched++;
+    const updateEntries = [...updates.values()];
+    const BATCH = 10;
+    for (let i = 0; i < updateEntries.length; i += BATCH) {
+      const batch = updateEntries.slice(i, i + BATCH);
+      const results = await Promise.allSettled(
+        batch.map(({ id, platform_codes, seller_code }) =>
+          supabase.from("products").update({ platform_codes, seller_code }).eq("id", id)
+        )
+      );
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j];
+        if (r.status === "fulfilled" && !r.value.error) {
+          matched++;
+        } else {
+          const errMsg = r.status === "fulfilled" ? r.value.error?.message : r.reason;
+          console.error(`[import-platform-codes] 업데이트 실패 (${batch[j].id}):`, errMsg);
+        }
       }
     }
 

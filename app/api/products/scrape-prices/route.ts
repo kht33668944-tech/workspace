@@ -9,24 +9,24 @@ import { loadSession, saveSession } from "@/lib/scrapers/session-manager";
 export const maxDuration = 300;
 
 // ── G마켓 로그인 ──────────────────────────────────
-let cookieCache: import("playwright").Cookie[] | null = null;
-let cookieCachedAt = 0;
+const userCookieCache = new Map<string, { cookies: import("playwright").Cookie[]; cachedAt: number }>();
 const COOKIE_TTL = 4 * 60 * 60 * 1000;
 
-async function getGmarketCred() {
+async function getGmarketCred(userId: string) {
   const sb = getServiceSupabaseClient();
   const { data } = await sb
     .from("purchase_credentials")
     .select("login_id, login_pw_encrypted")
     .eq("platform", "gmarket")
+    .eq("user_id", userId)
     .limit(1)
     .single();
   if (!data?.login_id || !data.login_pw_encrypted) return null;
   return { id: data.login_id, pw: decrypt(data.login_pw_encrypted) };
 }
 
-async function loginGmarket(ctx: BrowserContext): Promise<boolean> {
-  const cred = await getGmarketCred();
+async function loginGmarket(ctx: BrowserContext, userId: string): Promise<boolean> {
+  const cred = await getGmarketCred(userId);
   if (!cred) return false;
   const page = await ctx.newPage();
   try {
@@ -53,29 +53,30 @@ async function verifyLogin(ctx: BrowserContext): Promise<boolean> {
   finally { await page.close(); }
 }
 
-async function ensureLogin(ctx: BrowserContext) {
+async function ensureLogin(ctx: BrowserContext, userId: string) {
   const sb = getServiceSupabaseClient();
-  const cred = await getGmarketCred();
+  const cred = await getGmarketCred(userId);
   const loginId = cred?.id ?? "";
   const now = Date.now();
 
-  if (cookieCache && now - cookieCachedAt < COOKIE_TTL) {
-    await ctx.addCookies(cookieCache);
+  // per-user 쿠키 캐시 확인
+  const cached = userCookieCache.get(userId);
+  if (cached && now - cached.cachedAt < COOKIE_TTL) {
+    await ctx.addCookies(cached.cookies);
     if (await verifyLogin(ctx)) return;
-    cookieCache = null;
+    userCookieCache.delete(userId);
   }
   if (loginId) {
     const dbCookies = await loadSession(sb, "gmarket", loginId);
     if (dbCookies) {
       await ctx.addCookies(dbCookies);
-      if (await verifyLogin(ctx)) { cookieCache = dbCookies; cookieCachedAt = now; return; }
+      if (await verifyLogin(ctx)) { userCookieCache.set(userId, { cookies: dbCookies, cachedAt: now }); return; }
     }
   }
-  const ok = await loginGmarket(ctx);
+  const ok = await loginGmarket(ctx, userId);
   if (ok && await verifyLogin(ctx)) {
     const cookies = await ctx.cookies();
-    cookieCache = cookies;
-    cookieCachedAt = Date.now();
+    userCookieCache.set(userId, { cookies, cachedAt: Date.now() });
     if (loginId) saveSession(sb, "gmarket", loginId, cookies).catch(() => {});
   }
 }
@@ -209,7 +210,7 @@ export async function POST(request: NextRequest) {
       try {
         // 지마켓 로그인
         if (gmarketProducts.length > 0) {
-          await ensureLogin(ctx);
+          await ensureLogin(ctx, authUser.id);
         }
 
         const CONCURRENCY = 4;

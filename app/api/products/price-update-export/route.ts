@@ -7,15 +7,20 @@ export async function POST(request: NextRequest) {
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   try {
-    const { productIds } = await request.json() as { productIds: string[] };
+    const body = await request.json();
+    const productIds = body?.productIds;
     const supabase = getSupabaseClient(token);
 
-    // 상품 조회
-    let query = supabase.from("products").select("*");
-    if (productIds?.length > 0) {
-      query = query.in("id", productIds);
+    // productIds 필수 검증
+    if (!Array.isArray(productIds) || productIds.length === 0) {
+      return NextResponse.json({ error: "상품 ID가 필요합니다." }, { status: 400 });
     }
-    const { data: products, error: pErr } = await query;
+
+    // 상품 조회
+    const { data: products, error: pErr } = await supabase
+      .from("products")
+      .select("*")
+      .in("id", productIds);
     if (pErr) throw pErr;
     if (!products || products.length === 0) {
       return NextResponse.json({ error: "상품이 없습니다." }, { status: 400 });
