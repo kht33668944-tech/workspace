@@ -108,36 +108,52 @@ export async function collectGmarketTracking(
       const originalUrl = firstApiRes.url();
       const originalParams = new URL(originalUrl).searchParams;
 
-      // 나머지 페이지를 캡처한 헤더로 직접 요청
-      for (let pageNo = 2; pageNo <= Math.min(totalPages, 100) && found.size < targetSet.size; pageNo++) {
+      // 나머지 페이지를 병렬 배치로 요청 (10페이지씩)
+      const BATCH_SIZE = 10;
+      const maxPage = Math.min(totalPages, 100);
+
+      for (let batchStart = 2; batchStart <= maxPage && found.size < targetSet.size; batchStart += BATCH_SIZE) {
         if (abortSignal?.aborted) {
           console.log("[gmarket] 사용자 중단 요청 → 페이지네이션 중단");
           break;
         }
-        const params = new URLSearchParams();
-        originalParams.forEach((v, k) => params.set(k, v));
-        params.set("pageNo", String(pageNo));
 
-        const apiRes = await context.request.get(`${capturedBaseUrl}?${params}`, {
-          headers: capturedHeaders,
-        });
+        const batchEnd = Math.min(batchStart + BATCH_SIZE - 1, maxPage);
+        const pageNos = Array.from({ length: batchEnd - batchStart + 1 }, (_, i) => batchStart + i);
 
-        if (!apiRes.ok()) {
-          console.log(`[gmarket] 페이지 ${pageNo}: HTTP ${apiRes.status()}`);
-          break;
-        }
+        const batchResults = await Promise.all(
+          pageNos.map(async (pageNo) => {
+            const params = new URLSearchParams();
+            originalParams.forEach((v, k) => params.set(k, v));
+            params.set("pageNo", String(pageNo));
 
-        const pageData = await apiRes.json() as GmarketOrderResponse;
-        if (!pageData.data?.payBundleList?.length) break;
-        allBundles.push(...pageData.data.payBundleList);
-        console.log(`[gmarket] 페이지 ${pageNo}: bundles=${pageData.data.payBundleList.length}`);
+            const apiRes = await context.request.get(`${capturedBaseUrl}?${params}`, {
+              headers: capturedHeaders,
+            });
 
-        // 현재까지 모은 번들에서 대상 주문 찾기 (일찍 종료용)
-        for (const bundle of pageData.data.payBundleList) {
-          for (const order of bundle.orderList) {
-            if (targetSet.has(String(order.orderNo))) found.add(String(order.orderNo));
+            if (!apiRes.ok()) {
+              console.log(`[gmarket] 페이지 ${pageNo}: HTTP ${apiRes.status()}`);
+              return null;
+            }
+
+            const pageData = await apiRes.json() as GmarketOrderResponse;
+            if (!pageData.data?.payBundleList?.length) return null;
+            console.log(`[gmarket] 페이지 ${pageNo}: bundles=${pageData.data.payBundleList.length}`);
+            return pageData.data.payBundleList;
+          })
+        );
+
+        let stopped = false;
+        for (const bundles of batchResults) {
+          if (!bundles) { stopped = true; break; }
+          allBundles.push(...bundles);
+          for (const bundle of bundles) {
+            for (const order of bundle.orderList) {
+              if (targetSet.has(String(order.orderNo))) found.add(String(order.orderNo));
+            }
           }
         }
+        if (stopped) break;
       }
     }
 
