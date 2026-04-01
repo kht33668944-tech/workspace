@@ -835,12 +835,63 @@ async function changeShippingAddress(page: Page, order: PurchaseOrderInfo) {
     await saveBtn.click();
     await page.waitForTimeout(2000);
 
-    // 13. "배송 요청사항을 입력하지 않으셨습니다" 확인 팝업 처리
-    const confirmBtn = shippingFrame.getByRole("button", { name: "확인" });
-    if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await confirmBtn.click();
-      console.log("[gmarket-purchase] 배송 요청사항 미입력 확인 팝업 처리");
-      await page.waitForTimeout(2000);
+    // 13. "이대로 저장하시겠습니까?" 확인 팝업 처리 (최대 3회 반복)
+    // 저장하기 클릭 후 순차적으로 뜰 수 있는 팝업:
+    //   1) "상세주소를 입력하지 않으셨습니다. 이대로 저장하시겠습니까?" → 확인
+    //   2) "배송 요청사항을 입력하지 않으셨습니다. 이대로 저장하시겠습니까?" → 확인
+    for (let popupAttempt = 0; popupAttempt < 3; popupAttempt++) {
+      let clicked = false;
+
+      for (const frame of [shippingFrame, ...page.frames()]) {
+        try {
+          const result = await frame.evaluate(() => {
+            // 화면에 보이는 "저장하시겠습니까" 텍스트가 있는 요소를 찾기
+            // script/style/template 태그 내부 텍스트 제외
+            const candidates = document.querySelectorAll('div, p, span, h1, h2, h3, h4, h5, h6, strong, em, label');
+            for (const el of candidates) {
+              const htmlEl = el as HTMLElement;
+              // 화면에 보이지 않는 요소 건너뛰기
+              if (htmlEl.offsetParent === null && htmlEl.style.position !== 'fixed') continue;
+              // 직접 텍스트만 확인 (자식 요소 텍스트 제외하여 정확도 향상)
+              const directText = Array.from(el.childNodes)
+                .filter(n => n.nodeType === Node.TEXT_NODE)
+                .map(n => n.textContent || "")
+                .join("");
+              if (!directText.includes("저장하시겠습니까")) continue;
+
+              // 이 텍스트 요소에서 부모를 거슬러 올라가며 "확인" 버튼 탐색
+              let container = htmlEl.parentElement;
+              for (let depth = 0; container && depth < 10; depth++) {
+                const btns = container.querySelectorAll('button');
+                for (const btn of btns) {
+                  const btnEl = btn as HTMLElement;
+                  if ((btnEl.textContent || "").trim() === "확인" && btnEl.offsetParent !== null) {
+                    btnEl.click();
+                    return directText.trim().slice(0, 30);
+                  }
+                }
+                container = container.parentElement;
+              }
+            }
+            return null;
+          }).catch(() => null);
+
+          if (result) {
+            console.log(`[gmarket-purchase] 저장 확인 팝업 처리 (${popupAttempt + 1}회차): "${result}..."`);
+            clicked = true;
+            await page.waitForTimeout(3000);
+            break;
+          }
+        } catch { /* frame detached */ }
+      }
+
+      if (!clicked) {
+        // 팝업이 더 이상 없음
+        if (popupAttempt === 0) {
+          console.log("[gmarket-purchase] 저장 확인 팝업 없음 (상세주소/배송메모 입력됨)");
+        }
+        break;
+      }
     }
 
     // 14. 저장 후 배송지 목록으로 돌아감 → 새 배송지 "선택" 클릭
@@ -871,11 +922,10 @@ async function changeShippingAddress(page: Page, order: PurchaseOrderInfo) {
         await page.waitForTimeout(2000);
       }
 
-      // dialog 닫기 시도 2: 여전히 열려있으면 JS로 강제 닫기 + 페이지 refresh 이벤트 트리거
+      // dialog 닫기 시도 2: 여전히 열려있으면 JS로 강제 닫기
       const stillOpen = await page.evaluate(() => {
         const dialog = document.querySelector('.box__layer.box__checkout-iframe') as HTMLElement;
         if (dialog && window.getComputedStyle(dialog).display !== 'none') {
-          // dimmed와 dialog를 완전히 제거 (display:none 대신 remove)
           dialog.remove();
           return true;
         }
@@ -927,38 +977,46 @@ function extractSearchKeyword(address: string): string {
 // ═══════════════════════════════════
 async function handleAddressConfirmPopup(page: Page) {
   try {
-    // "이 배송지 맞나요?" 팝업 내 "결제하기" 버튼 (파란색)
-    // 팝업에는 "배송지 변경하기"와 "결제하기" 두 버튼이 있음
-    const popupPayBtn = page.locator('[class*="confirm"] button:has-text("결제하기"), [class*="modal"] button:has-text("결제하기"), [class*="popup"] button:has-text("결제하기"), [class*="layer"] button:has-text("결제하기"), [class*="dialog"] button:has-text("결제하기")').first();
-    if (await popupPayBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await popupPayBtn.click();
-      console.log("[gmarket-purchase] '이 배송지 맞나요?' 팝업 → 결제하기 클릭");
-      await page.waitForTimeout(2000);
-      return;
-    }
+    // "배송지" + "맞" 텍스트가 보이는 팝업 내의 "결제하기" 버튼만 정확히 클릭
+    // (메인 "결제하기" 버튼을 재클릭하는 오류 방지)
+    for (const frame of [page.mainFrame(), ...page.frames()]) {
+      const result = await frame.evaluate(() => {
+        const candidates = document.querySelectorAll('div, p, span, h1, h2, h3, h4, h5, h6, strong, em, label');
+        for (const el of candidates) {
+          const htmlEl = el as HTMLElement;
+          if (htmlEl.offsetParent === null && htmlEl.style.position !== 'fixed') continue;
+          const text = (el.textContent || "").trim();
+          if (!(text.includes("배송지") && (text.includes("맞나요") || text.includes("맞습니까")))) continue;
 
-    // fallback: "배송지 맞나요" 텍스트가 있는 컨테이너 내의 결제하기 버튼
-    const hasAddressConfirm = await page.evaluate(() => {
-      const els = document.querySelectorAll('div, section, aside');
-      for (const el of els) {
-        const text = el.textContent || "";
-        if (text.includes("배송지 맞나요") || text.includes("배송지가 맞나요")) {
-          const btn = el.querySelector('button');
-          if (btn && (btn.textContent || "").includes("결제하기")) {
-            (btn as HTMLElement).click();
-            return true;
+          // 팝업 텍스트에서 부모를 거슬러 올라가며 "결제하기" 버튼 탐색
+          let container = htmlEl.parentElement;
+          for (let depth = 0; container && depth < 10; depth++) {
+            const btns = container.querySelectorAll('button, a');
+            for (const btn of btns) {
+              const btnEl = btn as HTMLElement;
+              const btnText = (btnEl.textContent || "").trim();
+              if (btnText.includes("결제하기") && btnEl.offsetParent !== null) {
+                btnEl.click();
+                return text.slice(0, 30);
+              }
+            }
+            container = container.parentElement;
           }
         }
-      }
-      return false;
-    }).catch(() => false);
+        return null;
+      }).catch(() => null);
 
-    if (hasAddressConfirm) {
-      console.log("[gmarket-purchase] '이 배송지 맞나요?' 팝업 → JS로 결제하기 클릭");
-      await page.waitForTimeout(2000);
+      if (result) {
+        console.log(`[gmarket-purchase] '이 배송지 맞나요?' 팝업 → 결제하기 클릭: "${result}..."`);
+        await page.waitForTimeout(2000);
+        return;
+      }
     }
+
+    // 팝업이 없는 경우 (정상 흐름)
+    console.log("[gmarket-purchase] '이 배송지 맞나요?' 팝업 미감지 (정상 흐름일 수 있음)");
   } catch {
-    // 팝업이 없으면 무시 (정상 흐름)
+    // 팝업이 없으면 무시
   }
 }
 
