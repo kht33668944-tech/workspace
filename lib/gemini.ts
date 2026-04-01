@@ -552,3 +552,80 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
 
   return cleaned || null;
 }
+
+/**
+ * 쿠팡 필수 구매옵션 추출 (플레이오토 대량등록용)
+ * 상품명에서 용량/수량 정보를 파싱하여 쿠팡 필수 구매옵션 형식 생성
+ * - hasOption=true: optionName(옵션명), optionValue(옵션값)
+ * - hasOption=false: 옵션 없음
+ */
+export async function extractCoupangPurchaseOptions(
+  productNames: string[]
+): Promise<Array<{ hasOption: boolean; optionName: string; optionValue: string }>> {
+  const fallback = productNames.map(() => ({ hasOption: false, optionName: "", optionValue: "" }));
+  if (!process.env.GEMINI_API_KEY || productNames.length === 0) return fallback;
+
+  const numbered = productNames.map((n, i) => `${i + 1}. ${n}`).join("\n");
+  const result = await generateText(
+    `아래 상품명 목록을 분석해서 각 상품의 쿠팡 필수 구매옵션 정보를 추출하세요.
+
+상품명 목록:
+${numbered}
+
+규칙:
+- 식품, 음료, 생활용품(세제, 샴푸, 바디워시, 치약, 물티슈, 화장지 등), 화장품, 건강식품, 반려동물 사료 등 용량/중량/수량이 명시된 상품은 hasOption: true
+- 전자기기, 의류, 가구, 잡화 등 필수 구매옵션 비대상 상품은 hasOption: false
+- 상품명에서 용량/수량 정보를 파악할 수 없으면 hasOption: false
+
+hasOption이 true인 경우:
+  - optionName: 쿠팡 필수 구매옵션명 형식 → "[총 수량=개당 용량]" 패턴
+    - 용량 단위가 있으면: "[총 수량=개당 용량]"
+    - 수량만 있으면: "[총 수량]"
+  - optionValue: 실제 값 → "48개=200ml" 패턴
+    - 총 수량과 개당 용량을 상품명에서 추출하여 조합
+    - 단위: ml, L, g, kg, 매, 개, 입, 정, 캡슐, 포 등
+
+  - 예시:
+    - "삼다수 2L 6입" → hasOption:true, optionName:"[총 수량=개당 용량]", optionValue:"6개=2L"
+    - "비비고 왕교자 350g 4개" → hasOption:true, optionName:"[총 수량=개당 용량]", optionValue:"4개=350g"
+    - "물티슈 100매 10팩" → hasOption:true, optionName:"[총 수량=개당 매수]", optionValue:"10개=100매"
+    - "비타민C 1000mg 180정" → hasOption:true, optionName:"[총 수량=개당 정수]", optionValue:"1개=180정"
+    - "키친타올 150매 6롤" → hasOption:true, optionName:"[총 수량=개당 매수]", optionValue:"6개=150매"
+
+hasOption이 false인 경우: optionName:"", optionValue:""
+
+반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
+[
+  {"hasOption": true, "optionName": "[총 수량=개당 용량]", "optionValue": "48개=200ml"},
+  {"hasOption": false, "optionName": "", "optionValue": ""}
+]
+
+상품 개수: ${productNames.length}개, JSON 배열 항목도 반드시 ${productNames.length}개`
+  );
+
+  if (!result) return fallback;
+
+  try {
+    const jsonMatch = result.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return fallback;
+    const parsed = JSON.parse(jsonMatch[0]) as Array<{
+      hasOption?: boolean;
+      optionName?: string;
+      optionValue?: string;
+    }>;
+    if (!Array.isArray(parsed)) return fallback;
+    return productNames.map((_, i) => {
+      const item = parsed[i];
+      if (!item || !item.hasOption || !item.optionName || !item.optionValue) {
+        return { hasOption: false, optionName: "", optionValue: "" };
+      }
+      return {
+        hasOption: true,
+        optionName: item.optionName,
+        optionValue: item.optionValue,
+      };
+    });
+  } catch {
+    return fallback;
+  }
+}

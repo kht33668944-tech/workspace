@@ -143,7 +143,8 @@ export async function generatePlayAutoProductExcel(
   userConfig?: ExportConfigOverride,
   noticeMap?: Record<string, string[]>,
   options?: { useSavedSellerCodes?: boolean },
-  unitPriceInfoList?: Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }>
+  unitPriceInfoList?: Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }>,
+  coupangPurchaseOptions?: Array<{ hasOption: boolean; optionName: string; optionValue: string }>
 ): Promise<{ buffer: ArrayBuffer; filename: string }> {
   await loadXLSX();
   const now = new Date();
@@ -195,7 +196,10 @@ export async function generatePlayAutoProductExcel(
       공급가: 0,
       원가: 0,
       시중가: 0,
-      옵션조합: "옵션없음",
+      옵션조합: (platform === "coupang" && coupangPurchaseOptions?.[i]?.hasOption) ? "조합형" : "옵션없음",
+      옵션: (platform === "coupang" && coupangPurchaseOptions?.[i]?.hasOption)
+        ? `${coupangPurchaseOptions[i].optionName}\n${coupangPurchaseOptions[i].optionValue}`
+        : "",
       원산지: "기타=상세페이지참조",
       복수원산지여부: "N",
       과세여부: "과세",
@@ -233,7 +237,7 @@ export async function generatePlayAutoProductExcel(
   const ws = XLSX.utils.json_to_sheet(data);
 
   // 멀티라인 필요 컬럼만 wrapText 적용 (상세설명 등 긴 텍스트 컬럼은 제외하여 행 높이 축소)
-  const WRAP_HEADERS = new Set(["쇼핑몰(계정)", "템플릿코드", "머리말/꼬리말 템플릿코드"]);
+  const WRAP_HEADERS = new Set(["쇼핑몰(계정)", "템플릿코드", "머리말/꼬리말 템플릿코드", "옵션"]);
   const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
   const wrapCols = new Set<number>();
   for (let C = range.s.c; C <= range.e.c; C++) {
