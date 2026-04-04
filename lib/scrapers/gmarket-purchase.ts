@@ -986,18 +986,26 @@ async function handleAddressConfirmPopup(page: Page) {
           const htmlEl = el as HTMLElement;
           if (htmlEl.offsetParent === null && htmlEl.style.position !== 'fixed') continue;
           const text = (el.textContent || "").trim();
+          // 텍스트 길이 제한: 전체 페이지 텍스트를 포함하는 상위 요소 제외
+          // 팝업 텍스트는 주소+전화번호 포함해도 200자 이내
+          if (text.length > 300) continue;
           if (!(text.includes("배송지") && (text.includes("맞나요") || text.includes("맞습니까")))) continue;
 
           // 팝업 텍스트에서 부모를 거슬러 올라가며 "결제하기" 버튼 탐색
           let container = htmlEl.parentElement;
           for (let depth = 0; container && depth < 10; depth++) {
+            // 부모도 너무 큰 요소면 건너뛰기 (전체 페이지 컨테이너 방지)
+            if ((container.textContent || "").length > 1000) {
+              container = container.parentElement;
+              continue;
+            }
             const btns = container.querySelectorAll('button, a');
             for (const btn of btns) {
               const btnEl = btn as HTMLElement;
               const btnText = (btnEl.textContent || "").trim();
               if (btnText.includes("결제하기") && btnEl.offsetParent !== null) {
                 btnEl.click();
-                return text.slice(0, 30);
+                return text.slice(0, 50);
               }
             }
             container = container.parentElement;
@@ -1007,8 +1015,8 @@ async function handleAddressConfirmPopup(page: Page) {
       }).catch(() => null);
 
       if (result) {
-        console.log(`[gmarket-purchase] '이 배송지 맞나요?' 팝업 → 결제하기 클릭: "${result}..."`);
-        await page.waitForTimeout(2000);
+        console.log(`[gmarket-purchase] '이 배송지 맞나요?' 팝업 → 결제하기 클릭: "${result}"`);
+        await page.waitForTimeout(3000);
         return;
       }
     }
