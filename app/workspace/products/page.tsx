@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Plus, Trash2, Search, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
-import { useProducts } from "@/hooks/use-products";
+import { useProducts, type PriceChangeFilter } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
 import { buildRateMap } from "@/lib/product-calculations";
 import { useAiTask } from "@/context/AiTaskContext";
@@ -53,6 +53,7 @@ export default function ProductsPage() {
   const [platformCodeDragOver, setPlatformCodeDragOver] = useState(false);
   const [platformCodeResult, setPlatformCodeResult] = useState<{ matched: number; unmatched: string[]; total: number } | null>(null);
   const [priceUpdateExporting, setPriceUpdateExporting] = useState(false);
+  const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(null);
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
   const [scrapeResultModalOpen, setScrapeResultModalOpen] = useState(false);
   const [applyingPrices, setApplyingPrices] = useState(false);
@@ -63,6 +64,7 @@ export default function ProductsPage() {
   const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, refetchPriceChanges } = useProducts({
     search: activeSearch,
     columnFilters,
+    priceChangeFilter,
   });
 
   const rateMap = useMemo(() => buildRateMap(rates), [rates]);
@@ -671,6 +673,8 @@ export default function ProductsPage() {
             rateMap={rateMap as Record<string, Record<CommissionPlatform, number>>}
             categories={categories}
             priceChanges={priceChanges}
+            priceChangeFilter={priceChangeFilter}
+            onPriceChangeFilterChange={setPriceChangeFilter}
           />
         </>
       )}

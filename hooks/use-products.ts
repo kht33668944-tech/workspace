@@ -12,10 +12,16 @@ function urlToStoragePath(publicUrl: string): string {
   return idx >= 0 ? publicUrl.slice(idx + marker.length) : publicUrl;
 }
 
+export interface PriceChangeFilter {
+  minPercent: number | null; // 하한 (예: -3)
+  maxPercent: number | null; // 상한 (예: 5)
+}
+
 interface UseProductsOptions {
   search?: string;
   categoryFilter?: string | null;
   columnFilters?: Record<string, string[]>;
+  priceChangeFilter?: PriceChangeFilter | null;
 }
 
 interface UndoEntry {
@@ -158,6 +164,21 @@ export function useProducts(options: UseProductsOptions = {}) {
   // 카테고리 필터 (서버 쿼리 대신 클라이언트 필터링)
   if (options.categoryFilter) {
     filteredProducts = filteredProducts.filter((p) => p.category === options.categoryFilter);
+  }
+
+  // 전일대비 범위 필터
+  if (options.priceChangeFilter) {
+    let { minPercent, maxPercent } = options.priceChangeFilter;
+    // min > max이면 자동 swap (예: min=-0.5, max=-20 → min=-20, max=-0.5)
+    if (minPercent !== null && maxPercent !== null && minPercent > maxPercent) {
+      [minPercent, maxPercent] = [maxPercent, minPercent];
+    }
+    filteredProducts = filteredProducts.filter((p) => {
+      const change = priceChanges[p.id] ?? 0;
+      if (minPercent !== null && change < minPercent) return false;
+      if (maxPercent !== null && change > maxPercent) return false;
+      return true;
+    });
   }
 
   const insertProducts = async (rows: ProductInsert[]) => {

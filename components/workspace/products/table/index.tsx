@@ -17,7 +17,7 @@ const PAGE_SIZE = 100;
 function ProductTable({
   products: rawProducts, allProducts, loading, selectedIds, onSelectToggle, onSelectAll, onUpdate,
   onUndo, onStartBatchUndo, onEndBatchUndo, columnFilters, onColumnFilterChange,
-  rateMap, categories, priceChanges,
+  rateMap, categories, priceChanges, priceChangeFilter, onPriceChangeFilterChange,
 }: ProductTableProps) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const o: Record<string, number> = {};
@@ -489,7 +489,7 @@ function ProductTable({
                   key={col.key} col={col} width={isMobile ? 0 : colWidths[col.key]}
                   stickyLeft={col.key === "product_name" ? 112 : undefined}
                   onResize={isMobile ? () => {} : (w => setColWidths(p => ({ ...p, [col.key]: w })))}
-                  hasFilter={!!columnFilters[col.key]?.length}
+                  hasFilter={col.key === "price_change" ? !!priceChangeFilter : !!columnFilters[col.key]?.length}
                   filterOpen={filterOpen === col.key}
                   onFilterToggle={() => setFilterOpen(filterOpen === col.key ? null : col.key)}
                   selectedValues={columnFilters[col.key] || []}
@@ -499,6 +499,8 @@ function ProductTable({
                   sort={sort?.key === col.key ? sort.dir : null}
                   onSort={dir => handleSort(col.key, dir)}
                   isMobile={isMobile}
+                  priceChangeFilter={col.key === "price_change" ? priceChangeFilter : undefined}
+                  onPriceChangeFilterChange={col.key === "price_change" ? onPriceChangeFilterChange : undefined}
                 />
               ))}
             </tr>

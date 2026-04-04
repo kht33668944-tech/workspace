@@ -205,18 +205,32 @@ export async function POST(request: NextRequest) {
 
       await browserPool.acquire();
       const browser = await launchBrowser();
-      const ctx = await createGmarketContext(browser);
+      let ctx = await createGmarketContext(browser);
 
       try {
         // 지마켓 로그인
-        if (gmarketProducts.length > 0) {
+        const hasGmarket = gmarketProducts.length > 0;
+        if (hasGmarket) {
           await ensureLogin(ctx, authUser.id);
         }
 
         const CONCURRENCY = 4;
+        const CONTEXT_REFRESH_INTERVAL = 28; // 28개마다 컨텍스트 재생성 (봇 감지 우회)
+        let processedCount = 0;
 
         for (let i = 0; i < allTargets.length; i += CONCURRENCY) {
           if (request.signal.aborted) break;
+
+          // 일정 개수마다 컨텍스트 재생성 (새 세션으로 봇 감지 리셋)
+          if (processedCount > 0 && processedCount % CONTEXT_REFRESH_INTERVAL === 0) {
+            console.log(`[scrape-prices] 컨텍스트 재생성 (${processedCount}개 처리 완료)`);
+            await ctx.close().catch(() => {});
+            ctx = await createGmarketContext(browser);
+            if (hasGmarket) {
+              await ensureLogin(ctx, authUser.id);
+            }
+          }
+
           const batch = allTargets.slice(i, i + CONCURRENCY);
 
           const results = await Promise.all(
@@ -250,6 +264,8 @@ export async function POST(request: NextRequest) {
               total: allTargets.length,
             });
           }
+
+          processedCount += batch.length;
         }
 
         send({ type: "done", updated, failed, unchanged });

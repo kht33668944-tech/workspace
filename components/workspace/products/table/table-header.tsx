@@ -3,9 +3,9 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { Filter, Check, ArrowUp, ArrowDown } from "lucide-react";
 import type { Product } from "@/types/database";
-import type { Col, SortDir } from "./table-utils";
+import type { Col, SortDir, PriceChangeFilter } from "./table-utils";
 
-export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allProducts, columnFilters, sort, onSort, isMobile, stickyLeft }: {
+export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allProducts, columnFilters, sort, onSort, isMobile, stickyLeft, priceChangeFilter, onPriceChangeFilterChange }: {
   col: Col; width: number; onResize: (w: number) => void;
   hasFilter: boolean; filterOpen: boolean; onFilterToggle: () => void;
   selectedValues: string[]; onFilterChange: (v: string[]) => void; allProducts: Product[];
@@ -13,6 +13,8 @@ export const ResizableHeader = memo(function ResizableHeader({ col, width, onRes
   sort: SortDir; onSort: (d: SortDir) => void;
   isMobile?: boolean;
   stickyLeft?: number;
+  priceChangeFilter?: PriceChangeFilter | null;
+  onPriceChangeFilterChange?: (filter: PriceChangeFilter | null) => void;
 }) {
   const sx = useRef(0), sw = useRef(0);
   const onMouseDown = (e: React.MouseEvent) => {
@@ -35,7 +37,10 @@ export const ResizableHeader = memo(function ResizableHeader({ col, width, onRes
           <Filter className="w-3 h-3" />
         </button>
       </div>
-      {filterOpen && <ColumnFilterDropdown columnKey={col.key} allProducts={allProducts} columnFilters={columnFilters} selectedValues={selectedValues} onChange={onFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} />}
+      {filterOpen && (col.key === "price_change" && onPriceChangeFilterChange
+        ? <PriceChangeFilterDropdown filter={priceChangeFilter ?? null} onChange={onPriceChangeFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} />
+        : <ColumnFilterDropdown columnKey={col.key} allProducts={allProducts} columnFilters={columnFilters} selectedValues={selectedValues} onChange={onFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} />
+      )}
       {!isMobile && (
         <div onMouseDown={onMouseDown} className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group/resize z-10 flex items-center justify-center">
           <div className="w-[2px] h-full opacity-0 group-hover/resize:opacity-100 bg-blue-500/60 transition-opacity" />
@@ -141,6 +146,67 @@ function ColumnFilterDropdown({ columnKey, allProducts, columnFilters, selectedV
       <div className="flex items-center gap-2 px-2 py-2 border-t border-[var(--border)]">
         <button onClick={() => { onChange(pending); onClose(); }} className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${changed ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-blue-600/50 text-[var(--text-tertiary)] hover:bg-blue-600 hover:text-[var(--text-primary)]"}`}>확인</button>
         <button onClick={onClose} className="flex-1 px-3 py-1.5 rounded text-xs text-[var(--text-tertiary)] bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors">취소</button>
+      </div>
+    </div>
+  );
+}
+
+function PriceChangeFilterDropdown({ filter, onChange, onClose, sort, onSort }: {
+  filter: PriceChangeFilter | null;
+  onChange: (f: PriceChangeFilter | null) => void;
+  onClose: () => void;
+  sort: SortDir; onSort: (d: SortDir) => void;
+}) {
+  const [min, setMin] = useState(filter?.minPercent?.toString() ?? "");
+  const [max, setMax] = useState(filter?.maxPercent?.toString() ?? "");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [onClose]);
+
+  const apply = () => {
+    const minVal = min.trim() !== "" ? parseFloat(min) : null;
+    const maxVal = max.trim() !== "" ? parseFloat(max) : null;
+    if (minVal === null && maxVal === null) {
+      onChange(null);
+    } else {
+      onChange({ minPercent: minVal, maxPercent: maxVal });
+    }
+    onClose();
+  };
+
+  return (
+    <div ref={ref} className="absolute top-full left-0 mt-1 z-50 bg-[var(--table-header-bg)] border border-[var(--border)] rounded-lg shadow-xl min-w-[220px]" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
+        <button onClick={() => onSort(sort === "asc" ? null : "asc")} className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${sort === "asc" ? "bg-blue-600/20 text-blue-400" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"}`}>
+          <ArrowUp className="w-3 h-3" /> 오름차순
+        </button>
+        <button onClick={() => onSort(sort === "desc" ? null : "desc")} className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${sort === "desc" ? "bg-blue-600/20 text-blue-400" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"}`}>
+          <ArrowDown className="w-3 h-3" /> 내림차순
+        </button>
+      </div>
+      <div className="p-2.5 border-b border-[var(--border)]">
+        <div className="text-xs font-medium text-[var(--text-secondary)] mb-2">변동률 범위 (%)</div>
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus type="number" value={min} onChange={e => setMin(e.target.value)}
+            placeholder="최소" onKeyDown={e => { if (e.key === "Enter") apply(); if (e.key === "Escape") onClose(); }}
+            className="flex-1 bg-[var(--bg-hover)] border border-[var(--border)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-disabled)] w-0"
+          />
+          <span className="text-[var(--text-muted)] text-xs">~</span>
+          <input
+            type="number" value={max} onChange={e => setMax(e.target.value)}
+            placeholder="최대" onKeyDown={e => { if (e.key === "Enter") apply(); if (e.key === "Escape") onClose(); }}
+            className="flex-1 bg-[var(--bg-hover)] border border-[var(--border)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-disabled)] w-0"
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 px-2 py-2">
+        <button onClick={apply} className="flex-1 px-3 py-1.5 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors">확인</button>
+        <button onClick={() => { onChange(null); onClose(); }} className="flex-1 px-3 py-1.5 rounded text-xs text-[var(--text-tertiary)] bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors">초기화</button>
       </div>
     </div>
   );

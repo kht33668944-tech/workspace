@@ -215,6 +215,11 @@ export function formatCell(
   }, String(val));
 }
 
+export interface PriceChangeFilter {
+  minPercent: number | null;
+  maxPercent: number | null;
+}
+
 export interface ProductTableProps {
   products: Product[];
   allProducts: Product[];
@@ -231,4 +236,6 @@ export interface ProductTableProps {
   rateMap: Record<string, Record<CommissionPlatform, number>>;
   categories: string[];
   priceChanges?: Record<string, number>;
+  priceChangeFilter?: PriceChangeFilter | null;
+  onPriceChangeFilterChange?: (filter: PriceChangeFilter | null) => void;
 }
