@@ -84,9 +84,12 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // 같은 플랫폼 계정의 코드가 이미 존재하고 값이 다른 경우만 충돌로 판정
       if (!updates.has(product.id)) {
-        const hadExisting = product.platform_codes !== null && Object.keys(product.platform_codes).length > 0;
-        if (hadExisting) duplicateCount++;
+        const existingCodes = product.platform_codes ?? {};
+        if (existingCodes[account] && existingCodes[account] !== code) {
+          duplicateCount++;
+        }
       }
 
       const existing = updates.get(product.id) ?? {
