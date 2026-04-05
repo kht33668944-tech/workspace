@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   try {
-    const { excelBase64 } = await request.json() as { excelBase64: string };
+    const { excelBase64, overwrite } = await request.json() as { excelBase64: string; overwrite?: boolean };
     if (!excelBase64) return NextResponse.json({ error: "엑셀 데이터가 없습니다." }, { status: 400 });
 
     // 파일 크기 제한 (5MB)
@@ -57,9 +57,10 @@ export async function POST(request: NextRequest) {
       productMap.set(p.product_name, { id: p.id, platform_codes: p.platform_codes, seller_code: p.seller_code });
     }
 
-    // 4. 엑셀 행 처리 — 상품별로 코드 병합
+    // 4. 엑셀 행 처리 — 상품별로 코드 수집
     const updates = new Map<string, { id: string; platform_codes: Record<string, string>; seller_code: string | null }>();
     const unmatchedNames = new Set<string>();
+    let duplicateCount = 0;
 
     for (const row of rows) {
       const productName = String(row[nameCol]).trim();
@@ -75,17 +76,32 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      if (!updates.has(product.id)) {
+        const hadExisting = product.platform_codes !== null && Object.keys(product.platform_codes).length > 0;
+        if (hadExisting) duplicateCount++;
+      }
+
       const existing = updates.get(product.id) ?? {
         id: product.id,
-        platform_codes: { ...(product.platform_codes ?? {}) },
-        seller_code: product.seller_code,
+        platform_codes: overwrite ? {} : { ...(product.platform_codes ?? {}) },
+        seller_code: overwrite ? null : product.seller_code,
       };
       existing.platform_codes[account] = code;
-      // 판매자관리코드는 상품당 하나 (첫 번째 값 사용)
       if (sellerCode && !existing.seller_code) {
         existing.seller_code = sellerCode;
       }
       updates.set(product.id, existing);
+    }
+
+    // overwrite 미지정 + 중복 존재 → 확인 요청 (아직 DB 업데이트 안 함)
+    if (duplicateCount > 0 && !overwrite) {
+      return NextResponse.json({
+        confirmOverwrite: true,
+        duplicateCount,
+        matched: updates.size,
+        unmatched: [...unmatchedNames],
+        total: rows.length,
+      });
     }
 
     // 5. DB 배치 업데이트 (10개씩 병렬)
@@ -110,7 +126,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log(`[import-platform-codes] 완료: ${matched}개 매칭, ${unmatchedNames.size}개 미매칭`);
+    console.log(`[import-platform-codes] 완료: ${matched}개 매칭, ${unmatchedNames.size}개 미매칭${overwrite ? " (덮어쓰기)" : ""}`);
 
     return NextResponse.json({
       matched,

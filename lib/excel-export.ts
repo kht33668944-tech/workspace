@@ -87,7 +87,7 @@ export async function generatePlayAutoTrackingExcel(
 }
 
 /** 플레이오토 내보내기 지원 플랫폼 */
-export type PlayAutoExportPlatform = "smartstore" | "gmarket_auction" | "coupang";
+export type PlayAutoExportPlatform = "smartstore" | "gmarket_auction" | "coupang" | "auction" | "gmarket" | "11st";
 
 /** 플랫폼별 고정값 설정 */
 export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
@@ -110,6 +110,27 @@ export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
     headerFooterTemplateCode: "14672\n14672",
     rateKey: "esm",
     filenameLabel: "지마켓옥션11번가",
+  },
+  auction: {
+    shopAccount: "옥션=계정명",
+    templateCode: "2201548",
+    headerFooterTemplateCode: "14672",
+    rateKey: "esm",
+    filenameLabel: "옥션",
+  },
+  gmarket: {
+    shopAccount: "지마켓=계정명",
+    templateCode: "2201554",
+    headerFooterTemplateCode: "14672",
+    rateKey: "esm",
+    filenameLabel: "지마켓",
+  },
+  "11st": {
+    shopAccount: "11번가=계정명",
+    templateCode: "2208486",
+    headerFooterTemplateCode: "14672",
+    rateKey: "esm",
+    filenameLabel: "11번가",
   },
   coupang: {
     shopAccount: "쿠팡=계정명",

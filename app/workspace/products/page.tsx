@@ -365,7 +365,7 @@ export default function ProductsPage() {
     }
   };
 
-  const handlePlatformCodeFile = async (file: File) => {
+  const handlePlatformCodeFile = async (file: File, overwrite?: boolean) => {
     setImportingCodes(true);
     setPlatformCodeResult(null);
     try {
@@ -377,11 +377,19 @@ export default function ProductsPage() {
       const res = await fetch("/api/products/import-platform-codes", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ excelBase64: base64 }),
+        body: JSON.stringify({ excelBase64: base64, overwrite }),
       });
-      const json = await res.json() as { matched?: number; unmatched?: string[]; total?: number; error?: string };
+      const json = await res.json() as { matched?: number; unmatched?: string[]; total?: number; error?: string; confirmOverwrite?: boolean; duplicateCount?: number };
       if (!res.ok) {
         alert(json.error ?? "가져오기 실패");
+        return;
+      }
+      // 중복 감지 → 사용자 확인 후 덮어쓰기 재요청
+      if (json.confirmOverwrite && json.duplicateCount) {
+        setImportingCodes(false);
+        if (confirm(`${json.duplicateCount}개 상품에 이미 플랫폼 코드가 존재합니다.\n최신 데이터로 덮어쓰시겠습니까?`)) {
+          await handlePlatformCodeFile(file, true);
+        }
         return;
       }
       setPlatformCodeResult({ matched: json.matched ?? 0, unmatched: json.unmatched ?? [], total: json.total ?? 0 });
@@ -406,7 +414,8 @@ export default function ProductsPage() {
     setPriceUpdateExporting(true);
     setExportStep("가격수정 엑셀 생성 중...");
 
-    const platforms: PlayAutoExportPlatform[] = ["smartstore", "gmarket_auction", "coupang"];
+    // 가격수정은 ESM을 옥션/지마켓/11번가 개별 파일로 분리
+    const platforms: PlayAutoExportPlatform[] = ["smartstore", "auction", "gmarket", "11st", "coupang"];
     try {
       const results = await Promise.allSettled(
         platforms.map(async (platform) => {

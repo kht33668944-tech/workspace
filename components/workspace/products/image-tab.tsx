@@ -346,14 +346,11 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
     if (selectedIds.size === 0) return;
     if (!confirm(`${selectedIds.size}개 상품을 삭제하시겠습니까?\n(이미지 파일도 함께 삭제됩니다)`)) return;
     setDeleting(true);
-    const allImagePaths: string[] = [];
-    for (const id of selectedIds) {
-      const p = products.find((x) => x.id === id);
-      if (p?.image_urls?.length) allImagePaths.push(...p.image_urls.map(urlToStoragePath));
+    // Storage 이미지 삭제 + DB 삭제는 onDelete(deleteProducts)에서 일괄 처리
+    const result = await onDelete([...selectedIds]);
+    if (result?.error) {
+      console.error("[image-tab] 상품 삭제 실패:", result.error);
     }
-    if (allImagePaths.length > 0)
-      await supabase.storage.from("product-images").remove(allImagePaths);
-    await onDelete([...selectedIds]);
     setSelectedIds(new Set());
     setDeleting(false);
   };

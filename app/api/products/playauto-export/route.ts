@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { extractProductMetadataBatch, suggestSmartStoreCategoryCodes, extractUnitPriceInfo, extractCoupangPurchaseOptions } from "@/lib/gemini";
-import { generatePlayAutoProductExcel, arrayBufferToBase64, type PlayAutoExportPlatform } from "@/lib/excel-export";
+import { generatePlayAutoProductExcel, arrayBufferToBase64, PLATFORM_CONFIGS, type PlayAutoExportPlatform } from "@/lib/excel-export";
 
 export async function POST(req: NextRequest) {
   try {
@@ -101,7 +101,30 @@ export async function POST(req: NextRequest) {
     ]);
 
     // 사용자 커스텀 설정 (DB에 저장된 값 우선)
-    const userConfig = exportConfigResult.data ?? undefined;
+    let userConfig = exportConfigResult.data ?? undefined;
+
+    // 개별 ESM 플랫폼(auction, gmarket, 11st)은 gmarket_auction 설정에서 계정명 추출
+    const isIndividualEsm = ["auction", "gmarket", "11st"].includes(platform);
+    if (isIndividualEsm && !userConfig) {
+      const { data: esmConfig } = await supabase
+        .from("playauto_export_configs").select("*")
+        .eq("user_id", userId).eq("platform", "gmarket_auction").maybeSingle();
+      if (esmConfig?.shop_account) {
+        const platformConfig = PLATFORM_CONFIGS[platform as PlayAutoExportPlatform];
+        const prefix = platformConfig.filenameLabel; // "옥션", "지마켓", "11번가"
+        const lines = esmConfig.shop_account.split("\n").map((s: string) => s.trim());
+        const matchedLine = lines.find((l: string) => l.startsWith(prefix + "="));
+        if (matchedLine) {
+          const accountName = matchedLine.split("=")[1];
+          userConfig = {
+            shop_account: `${prefix}=${accountName}`,
+            template_code: platformConfig.templateCode,
+            header_footer_template_code: platformConfig.headerFooterTemplateCode,
+            sale_quantity: esmConfig.sale_quantity ?? 2000,
+          };
+        }
+      }
+    }
 
     // 상품정보제공고시 커스텀 값 (schema_code → field_values 맵)
     const noticeMap: Record<string, string[]> = {};

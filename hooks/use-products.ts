@@ -312,18 +312,19 @@ export function useProducts(options: UseProductsOptions = {}) {
     );
   }, [showToast]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const deleteProducts = async (ids: string[]) => {
-    // 삭제 대상 상품의 이미지 경로 수집
+  const deleteProducts = useCallback(async (ids: string[]) => {
+    const idSet = new Set(ids);
+
+    // 삭제 대상 상품의 이미지 경로 수집 (현재 state에서)
     const storagePaths: string[] = [];
-    const toDelete = products.filter((p) => ids.includes(p.id));
-    for (const p of toDelete) {
-      if (p.image_urls?.length) {
-        storagePaths.push(...p.image_urls.map(urlToStoragePath));
+    setProducts((prev) => {
+      for (const p of prev) {
+        if (!idSet.has(p.id)) continue;
+        if (p.image_urls?.length) storagePaths.push(...p.image_urls.map(urlToStoragePath));
+        if (p.detail_image_url) storagePaths.push(urlToStoragePath(p.detail_image_url));
       }
-      if (p.detail_image_url) {
-        storagePaths.push(urlToStoragePath(p.detail_image_url));
-      }
-    }
+      return prev;
+    });
 
     // Storage 이미지 삭제
     if (storagePaths.length > 0) {
@@ -338,13 +339,17 @@ export function useProducts(options: UseProductsOptions = {}) {
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
       const { error } = await supabase.from("products").delete().in("id", batch);
-      if (error) return { error: error.message };
+      if (error) {
+        console.error("[use-products] DB 삭제 실패:", error.message);
+        return { error: error.message };
+      }
     }
-    const idSet = new Set(ids);
+
+    // DB 삭제 성공 후 로컬 state 업데이트
     setProducts((prev) => prev.filter((p) => !idSet.has(p.id)));
     fetchGenRef.current++;
     return { error: null };
-  };
+  }, []);
 
   const updateProductImages = useCallback(
     (id: string, imageUrls: string[], thumbnailUrl: string | null) => {
