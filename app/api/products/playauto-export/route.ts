@@ -132,6 +132,24 @@ export async function POST(req: NextRequest) {
       noticeMap[n.schema_code] = n.field_values;
     });
 
+    // 오늘 날짜의 seller_code 최대 순번 조회
+    const now = new Date();
+    const dateStr = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+    const { data: maxSellerCodeRow } = await supabase
+      .from("products")
+      .select("seller_code")
+      .eq("user_id", userId)
+      .like("seller_code", `${dateStr}%`)
+      .order("seller_code", { ascending: false })
+      .limit(1);
+    const maxIndex = maxSellerCodeRow && maxSellerCodeRow.length > 0
+      ? parseInt(maxSellerCodeRow[0].seller_code.slice(6), 10) || 0
+      : 0;
+
+    // seller_code가 없는 상품 ID 목록 수집 (엑셀 생성 후 DB 저장용)
+    const productsWithoutSellerCode = products.filter((p) => !p.seller_code);
+    const idsWithoutSellerCode = productsWithoutSellerCode.map((p) => p.id);
+
     // 엑셀 생성
     const { buffer, filename } = await generatePlayAutoProductExcel(
       products,
@@ -148,10 +166,21 @@ export async function POST(req: NextRequest) {
         productInfoNotice: "상세페이지 참조",
       } : undefined,
       Object.keys(noticeMap).length > 0 ? noticeMap : undefined,
-      priceUpdate ? { useSavedSellerCodes: true } : undefined,
+      { startIndex: maxIndex },
       unitPriceInfoList ?? undefined,
       coupangPurchaseOptions ?? undefined
     );
+
+    // 새로 생성된 seller_code를 DB에 저장
+    if (idsWithoutSellerCode.length > 0) {
+      let idx = maxIndex + 1;
+      const updates = idsWithoutSellerCode.map((id) => {
+        const sellerCode = `${dateStr}${String(idx).padStart(3, "0")}`;
+        idx++;
+        return supabase.from("products").update({ seller_code: sellerCode }).eq("id", id);
+      });
+      await Promise.all(updates);
+    }
 
     const base64 = arrayBufferToBase64(buffer);
     return NextResponse.json({ base64, filename });

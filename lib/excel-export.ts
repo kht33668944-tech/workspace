@@ -163,7 +163,7 @@ export async function generatePlayAutoProductExcel(
   platform: PlayAutoExportPlatform = "smartstore",
   userConfig?: ExportConfigOverride,
   noticeMap?: Record<string, string[]>,
-  options?: { useSavedSellerCodes?: boolean },
+  options?: { useSavedSellerCodes?: boolean; startIndex?: number },
   unitPriceInfoList?: Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }>,
   coupangPurchaseOptions?: Array<{ hasOption: boolean; optionName: string; optionValue: string }>
 ): Promise<{ buffer: ArrayBuffer; filename: string }> {
@@ -192,6 +192,7 @@ export async function generatePlayAutoProductExcel(
     return Math.max(max, schema.fields.length);
   }, DEFAULT_SCHEMA.fields.length);
 
+  let newCodeCounter = 1;
   const data = products.map((p, i) => {
     const settlementPrice = calcSettlementPrice(p.lowest_price, p.margin_rate);
     const categoryRates = rateMap[p.category] ?? {};
@@ -201,7 +202,7 @@ export async function generatePlayAutoProductExcel(
       : p.lowest_price;
 
     const meta = metadataList[i] ?? { model: "", brand: "", manufacturer: "" };
-    const sellerCode = (options?.useSavedSellerCodes && p.seller_code) ? p.seller_code : `${dateStr}${String(i + 1).padStart(3, "0")}`;
+    const sellerCode = p.seller_code ? p.seller_code : `${dateStr}${String((options?.startIndex ?? 0) + newCodeCounter++).padStart(3, "0")}`;
 
     const playautoCode = categoryMappings[p.category] ?? DEFAULT_SCHEMA.code;
     const schema = getSchemaByCode(playautoCode);
