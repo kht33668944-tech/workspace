@@ -276,11 +276,22 @@ export default function ProductsPage() {
     }
   };
 
+  // seller_code 사전 할당 (병렬 내보내기 전 1회 호출)
+  const assignSellerCodes = async (ids: string[]) => {
+    await fetch("/api/products/assign-seller-codes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify({ productIds: ids }),
+    }).catch(() => {});
+  };
+
   const handlePlayAutoExport = async (platform: PlayAutoExportPlatform) => {
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) return;
     setExportModalOpen(false);
     setExporting(true);
+    setExportStep("판매자관리코드 할당 중...");
+    await assignSellerCodes(ids);
     setExportStep("상품 데이터 조회 중...");
 
     // 단계별 메시지 자동 전환
@@ -329,10 +340,13 @@ export default function ProductsPage() {
     const platforms: PlayAutoExportPlatform[] = ["smartstore", "gmarket_auction", "coupang"];
     setExportModalOpen(false);
     setExporting(true);
-    setExportStep("전체 플랫폼 내보내기 중...");
 
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) { setExporting(false); setExportStep(""); return; }
+
+    setExportStep("판매자관리코드 할당 중...");
+    await assignSellerCodes(ids);
+    setExportStep("전체 플랫폼 내보내기 중...");
 
     try {
       const results = await Promise.allSettled(
@@ -412,6 +426,8 @@ export default function ProductsPage() {
     if (ids.length === 0) return;
     setExportModalOpen(false);
     setPriceUpdateExporting(true);
+    setExportStep("판매자관리코드 할당 중...");
+    await assignSellerCodes(ids);
     setExportStep("가격수정 엑셀 생성 중...");
 
     // 가격수정은 ESM을 옥션/지마켓/11번가 개별 파일로 분리
