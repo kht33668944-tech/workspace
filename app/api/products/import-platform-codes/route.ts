@@ -52,13 +52,21 @@ export async function POST(request: NextRequest) {
     if (fetchErr) throw fetchErr;
 
     // 상품명 → product Map
-    const productMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: string | null }>();
+    const productMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>();
     for (const p of products ?? []) {
-      productMap.set(p.product_name, { id: p.id, platform_codes: p.platform_codes, seller_code: p.seller_code });
+      productMap.set(p.product_name, { id: p.id, platform_codes: p.platform_codes, seller_code: p.seller_code as Record<string, string> | null });
     }
 
+    // 쇼핑몰 계정 → seller_code 그룹 매핑
+    const accountToSellerGroup = (account: string): string => {
+      const lower = account.toLowerCase();
+      if (lower.startsWith("스마트스토어")) return "smartstore";
+      if (lower.startsWith("쿠팡")) return "coupang";
+      return "esm";
+    };
+
     // 4. 엑셀 행 처리 — 상품별로 코드 수집
-    const updates = new Map<string, { id: string; platform_codes: Record<string, string>; seller_code: string | null }>();
+    const updates = new Map<string, { id: string; platform_codes: Record<string, string>; seller_code: Record<string, string> | null }>();
     const unmatchedNames = new Set<string>();
     let duplicateCount = 0;
 
@@ -84,11 +92,16 @@ export async function POST(request: NextRequest) {
       const existing = updates.get(product.id) ?? {
         id: product.id,
         platform_codes: overwrite ? {} : { ...(product.platform_codes ?? {}) },
-        seller_code: overwrite ? null : product.seller_code,
+        seller_code: overwrite ? null : (product.seller_code ? { ...product.seller_code } : null),
       };
       existing.platform_codes[account] = code;
-      if (sellerCode && !existing.seller_code) {
-        existing.seller_code = sellerCode;
+      // 판매자관리코드를 해당 플랫폼 그룹에 저장
+      if (sellerCode) {
+        const group = accountToSellerGroup(account);
+        if (!existing.seller_code) existing.seller_code = {};
+        if (!existing.seller_code[group]) {
+          existing.seller_code[group] = sellerCode;
+        }
       }
       updates.set(product.id, existing);
     }

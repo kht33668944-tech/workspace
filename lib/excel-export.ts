@@ -141,6 +141,13 @@ export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
   },
 };
 
+/** 플랫폼을 seller_code 그룹으로 매핑 */
+export function platformToSellerGroup(platform: PlayAutoExportPlatform): string {
+  if (platform === "smartstore") return "smartstore";
+  if (platform === "coupang") return "coupang";
+  return "esm"; // gmarket_auction, auction, gmarket, 11st
+}
+
 /**
  * 플레이오토 상품 대량등록 엑셀 생성
  * categoryMappings: 내 카테고리 → 플레이오토 코드 매핑 (없으면 기타재화 35)
@@ -193,6 +200,7 @@ export async function generatePlayAutoProductExcel(
   }, DEFAULT_SCHEMA.fields.length);
 
   let newCodeCounter = 1;
+  const sellerGroup = platformToSellerGroup(platform);
   const data = products.map((p, i) => {
     const settlementPrice = calcSettlementPrice(p.lowest_price, p.margin_rate);
     const categoryRates = rateMap[p.category] ?? {};
@@ -202,7 +210,8 @@ export async function generatePlayAutoProductExcel(
       : p.lowest_price;
 
     const meta = metadataList[i] ?? { model: "", brand: "", manufacturer: "" };
-    const sellerCode = p.seller_code ? p.seller_code : `${dateStr}${String((options?.startIndex ?? 0) + newCodeCounter++).padStart(3, "0")}`;
+    const savedCode = (p.seller_code as Record<string, string> | null)?.[sellerGroup];
+    const sellerCode = savedCode ?? `${dateStr}${String((options?.startIndex ?? 0) + newCodeCounter++).padStart(3, "0")}`;
 
     const playautoCode = categoryMappings[p.category] ?? DEFAULT_SCHEMA.code;
     const schema = getSchemaByCode(playautoCode);
