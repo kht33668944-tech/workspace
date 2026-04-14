@@ -36,6 +36,7 @@ function OrderTable({
   const visibleColCount = visibleColumns.length;
 
   const tableRef = useRef<HTMLDivElement>(null);
+  const imeInputRef = useRef<HTMLTextAreaElement>(null);
   const [scrolledRight, setScrolledRight] = useState(false);
 
   useEffect(() => {
@@ -108,7 +109,10 @@ function OrderTable({
     }
     setActiveCell({ row: nr, col: nc });
     setSelection({ r1: nr, c1: nc, r2: nr, c2: nc });
-    setTimeout(() => tableRef.current?.focus(), 0);
+    setTimeout(() => {
+      if (imeInputRef.current) imeInputRef.current.focus();
+      else tableRef.current?.focus();
+    }, 0);
   }, [orders.length, saveValue]);
 
   const handleCellMouseDown = useCallback((row: number, col: number) => {
@@ -143,7 +147,10 @@ function OrderTable({
       }
       dragStartRef.current = null;
       isDraggingRef.current = false;
-      setTimeout(() => tableRef.current?.focus(), 0);
+      setTimeout(() => {
+        if (imeInputRef.current) imeInputRef.current.focus();
+        else tableRef.current?.focus();
+      }, 0);
     };
     document.addEventListener("mouseup", handler);
     return () => document.removeEventListener("mouseup", handler);
@@ -330,13 +337,6 @@ function OrderTable({
         return;
       }
 
-      if (e.key.length === 1 && !ctrl && !e.altKey && EDITABLE_KEYS.has(COLUMNS[col].key)) {
-        e.preventDefault();
-        setEditing(true);
-        setInitialChar(e.key);
-        return;
-      }
-
       return;
     }
 
@@ -365,16 +365,30 @@ function OrderTable({
         }
         onEndBatchUndo?.();
       }
-      if (e.key.length === 1 && !ctrl && !e.altKey) {
-        e.preventDefault();
-        setActiveCell({ row: minR, col: minC });
-        if (EDITABLE_KEYS.has(COLUMNS[minC].key)) {
-          setEditing(true);
-          setInitialChar(e.key);
-        }
-      }
     }
   }, [activeCell, editing, selection, orders, onUndo, onUpdate, handleCopy, handlePaste, onStartBatchUndo, onEndBatchUndo]);
+
+  // IME 입력 처리: 숨겨진 textarea에서 조합 완료된 실제 문자를 받아 편집 시작
+  const handleImeInput = useCallback(() => {
+    const el = imeInputRef.current;
+    if (!el || editing) return;
+    const value = el.value;
+    el.value = "";
+    if (!value || !activeCell) return;
+    const { col } = activeCell;
+    if (EDITABLE_KEYS.has(COLUMNS[col].key)) {
+      setEditing(true);
+      setInitialChar(value);
+    }
+  }, [activeCell, editing]);
+
+  // 셀 활성 시 숨겨진 textarea로 포커스 이동 (IME 입력 수신용)
+  useEffect(() => {
+    if (activeCell && !editing && imeInputRef.current) {
+      imeInputRef.current.value = "";
+      imeInputRef.current.focus();
+    }
+  }, [activeCell, editing]);
 
   useEffect(() => {
     if (!fillDrag) return;
@@ -434,6 +448,18 @@ function OrderTable({
       <div className="relative">
       {!isMobile && !scrolledRight && (
         <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 z-10 rounded-r-xl bg-gradient-to-l from-[var(--bg-main)] to-transparent" />
+      )}
+      {/* IME 입력 캡처용 숨겨진 textarea (한글 등 조합 문자 정상 처리) */}
+      {!isMobile && (
+        <textarea
+          ref={imeInputRef}
+          onInput={handleImeInput}
+          onKeyDown={handleTableKeyDown}
+          className="absolute opacity-0 w-px h-px overflow-hidden pointer-events-none"
+          style={{ top: -9999, left: -9999 }}
+          tabIndex={-1}
+          aria-hidden="true"
+        />
       )}
       <div
         ref={tableRef}

@@ -67,10 +67,20 @@ const MemoRow = memo(function Row({
   }, [rowIdx, editingCol, onEditValueChange]);
 
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter") { e.preventDefault(); onCommit(rowIdx, editingCol, editRef.current, e.shiftKey ? "up" : "down"); }
     else if (e.key === "Tab") { e.preventDefault(); onCommit(rowIdx, editingCol, editRef.current, e.shiftKey ? "left" : "right"); }
     else if (e.key === "Escape") { e.preventDefault(); onCommit(rowIdx, editingCol, null, "none"); }
   }, [rowIdx, editingCol, onCommit]);
+
+  // IME 조합 시작 시, initialChar로 설정된 영문자를 제거
+  const onCompositionStart = useCallback(() => {
+    if (initialChar && initialChar.length === 1 && editRef.current === initialChar) {
+      setEditValue("");
+      editRef.current = "";
+      onEditValueChange(rowIdx, editingCol, "");
+    }
+  }, [initialChar, rowIdx, editingCol, onEditValueChange]);
 
   const onBlur = useCallback(() => {
     if (editingCol >= 0) onBlurSave(rowIdx, editingCol, editRef.current);
@@ -131,6 +141,7 @@ const MemoRow = memo(function Row({
                 value={editValue}
                 onChange={onChange}
                 onKeyDown={onKeyDown}
+                onCompositionStart={onCompositionStart}
                 onBlur={onBlur}
                 onMouseDown={(e) => e.stopPropagation()}
                 placeholder={FORMULA_KEYS.has(col.key) ? "=매출*0.9" : undefined}
