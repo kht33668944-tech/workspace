@@ -40,7 +40,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   const { user, loading } = useAuth();
   const router = useRouter();
   const isMobile = useIsMobile();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   // 한 번이라도 인증된 적이 있으면 일시적 null에 반응하지 않음
   const wasAuthenticatedRef = useRef(false);
 
