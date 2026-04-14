@@ -19,6 +19,7 @@ interface RowProps {
   onEditValueChange: (r: number, c: number, v: string) => void;
   onSelectToggle: (id: string) => void;
   onFillStart: (r: number, c: number, v: unknown) => void;
+  onStartEdit: (r: number, c: number) => void;
   onRowClick?: (order: Order) => void;
   isMobile?: boolean;
   visibleColumns?: Col[];
@@ -28,16 +29,34 @@ const MemoRow = memo(function Row({
   order, rowIdx, colWidths, isChecked, activeCol, editingCol, initialChar,
   selMinC, selMaxC, showFillHandle, fillHandleCol, fillHighlightCol,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onCommit, onBlurSave, onEditValueChange, onSelectToggle, onFillStart,
-  onRowClick, isMobile, visibleColumns,
+  onStartEdit, onRowClick, isMobile, visibleColumns,
 }: RowProps) {
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const editRef = useRef("");
+  const typingStartedRef = useRef(false);
 
   const cols = visibleColumns || COLUMNS;
 
+  // 셀 선택 시 투명 input에 포커스
+  useEffect(() => {
+    if (activeCol >= 0 && editingCol < 0) {
+      setEditValue("");
+      editRef.current = "";
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [activeCol]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 편집 모드 진입 시 초기값 설정
   useEffect(() => {
     if (editingCol >= 0) {
+      if (typingStartedRef.current) {
+        // 투명 input에서 타이핑으로 시작 → 값 이미 설정됨, 리셋하지 않음
+        typingStartedRef.current = false;
+        onEditValueChange(rowIdx, editingCol, editRef.current);
+        return;
+      }
+      // Enter/더블클릭으로 편집 시작
       let initVal: string;
       if (initialChar !== null) {
         initVal = initialChar;
@@ -61,26 +80,29 @@ const MemoRow = memo(function Row({
   }, [editingCol, initialChar]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setEditValue(e.target.value);
-    editRef.current = e.target.value;
-    if (editingCol >= 0) onEditValueChange(rowIdx, editingCol, e.target.value);
-  }, [rowIdx, editingCol, onEditValueChange]);
+    const value = e.target.value;
+    setEditValue(value);
+    editRef.current = value;
+    if (editingCol >= 0) {
+      // 이미 편집 중 — 일반 변경
+      onEditValueChange(rowIdx, editingCol, value);
+    } else if (activeCol >= 0) {
+      // 투명 input에서 타이핑 → 편집 모드로 전환
+      typingStartedRef.current = true;
+      onStartEdit(rowIdx, activeCol);
+    }
+  }, [rowIdx, editingCol, activeCol, onEditValueChange, onStartEdit]);
 
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-    if (e.key === "Enter") { e.preventDefault(); onCommit(rowIdx, editingCol, editRef.current, e.shiftKey ? "up" : "down"); }
-    else if (e.key === "Tab") { e.preventDefault(); onCommit(rowIdx, editingCol, editRef.current, e.shiftKey ? "left" : "right"); }
-    else if (e.key === "Escape") { e.preventDefault(); onCommit(rowIdx, editingCol, null, "none"); }
-  }, [rowIdx, editingCol, onCommit]);
-
-  // IME 조합 시작 시, initialChar로 설정된 영문자를 제거
-  const onCompositionStart = useCallback(() => {
-    if (initialChar && initialChar.length === 1 && editRef.current === initialChar) {
-      setEditValue("");
-      editRef.current = "";
-      onEditValueChange(rowIdx, editingCol, "");
+    if (editingCol >= 0) {
+      // 편집 모드 키 처리
+      if (e.key === "Enter") { e.preventDefault(); onCommit(rowIdx, editingCol, editRef.current, e.shiftKey ? "up" : "down"); }
+      else if (e.key === "Tab") { e.preventDefault(); onCommit(rowIdx, editingCol, editRef.current, e.shiftKey ? "left" : "right"); }
+      else if (e.key === "Escape") { e.preventDefault(); onCommit(rowIdx, editingCol, null, "none"); }
     }
-  }, [initialChar, rowIdx, editingCol, onEditValueChange]);
+    // 투명 input일 때는 이벤트가 테이블로 버블링되어 방향키 등 처리됨
+  }, [rowIdx, editingCol, onCommit]);
 
   const onBlur = useCallback(() => {
     if (editingCol >= 0) onBlurSave(rowIdx, editingCol, editRef.current);
@@ -105,7 +127,6 @@ const MemoRow = memo(function Row({
         />
       </td>
       {cols.map((col) => {
-        // 모바일에서는 visibleColumns의 인덱스가 아닌 COLUMNS에서의 인덱스로 매핑
         const ci = COLUMNS.findIndex(c => c.key === col.key);
         const val = order[col.key as keyof Order];
         const isSelected = ci === activeCol;
@@ -113,6 +134,7 @@ const MemoRow = memo(function Row({
         const inSel = selMinC >= 0 && ci >= selMinC && ci <= selMaxC;
         const isFillHL = ci === fillHighlightCol;
         const isEditable = EDITABLE_KEYS.has(col.key);
+        const showInput = !isMobile && isEditable && (isSelected || isEditing);
 
         return (
           <td
@@ -135,24 +157,31 @@ const MemoRow = memo(function Row({
               >
                 {String(val || "결제전")}
               </button>
-            ) : isEditing && isEditable && !isMobile ? (
-              <input
-                ref={inputRef}
-                value={editValue}
-                onChange={onChange}
-                onKeyDown={onKeyDown}
-                onCompositionStart={onCompositionStart}
-                onBlur={onBlur}
-                onMouseDown={(e) => e.stopPropagation()}
-                placeholder={FORMULA_KEYS.has(col.key) ? "=매출*0.9" : undefined}
-                className="absolute left-0 top-0 h-full min-w-[280px] w-max bg-[var(--bg-card)] border-2 border-blue-500 rounded px-1.5 text-xs text-[var(--text-primary)] outline-none z-30 shadow-lg"
-              />
             ) : (
-              <div className={`text-xs truncate min-h-[22px] leading-[22px] px-1 ${
-                isSelected ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""
-              }`}>
-                {formatCell(col.key, val, col.key === "tracking_no" ? order : undefined)}
-              </div>
+              <>
+                {/* 셀 표시값 — 투명 input 뒤에 보임 */}
+                <div className={`text-xs truncate min-h-[22px] leading-[22px] px-1 ${
+                  isSelected && !isEditing ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""
+                }`}>
+                  {formatCell(col.key, val, col.key === "tracking_no" ? order : undefined)}
+                </div>
+                {/* 셀 선택 시 투명 input 렌더, 편집 시 시각적 input으로 전환 (같은 엘리먼트) */}
+                {showInput && (
+                  <input
+                    ref={inputRef}
+                    value={editValue}
+                    onChange={onChange}
+                    onKeyDown={onKeyDown}
+                    onBlur={onBlur}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    placeholder={isEditing && FORMULA_KEYS.has(col.key) ? "=매출*0.9" : undefined}
+                    className={isEditing
+                      ? "absolute left-0 top-0 h-full min-w-[280px] w-max bg-[var(--bg-card)] border-2 border-blue-500 rounded px-1.5 text-xs text-[var(--text-primary)] outline-none z-30 shadow-lg"
+                      : "absolute inset-0 w-full h-full opacity-0 text-xs outline-none z-20"
+                    }
+                  />
+                )}
+              </>
             )}
             {!isMobile && showFillHandle && ci === fillHandleCol && isEditable && (
               <div

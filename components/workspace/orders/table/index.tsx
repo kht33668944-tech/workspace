@@ -36,7 +36,6 @@ function OrderTable({
   const visibleColCount = visibleColumns.length;
 
   const tableRef = useRef<HTMLDivElement>(null);
-  const imeInputRef = useRef<HTMLTextAreaElement>(null);
   const [scrolledRight, setScrolledRight] = useState(false);
 
   useEffect(() => {
@@ -109,10 +108,7 @@ function OrderTable({
     }
     setActiveCell({ row: nr, col: nc });
     setSelection({ r1: nr, c1: nc, r2: nr, c2: nc });
-    setTimeout(() => {
-      if (imeInputRef.current) imeInputRef.current.focus();
-      else tableRef.current?.focus();
-    }, 0);
+    setTimeout(() => tableRef.current?.focus(), 0);
   }, [orders.length, saveValue]);
 
   const handleCellMouseDown = useCallback((row: number, col: number) => {
@@ -147,10 +143,7 @@ function OrderTable({
       }
       dragStartRef.current = null;
       isDraggingRef.current = false;
-      setTimeout(() => {
-        if (imeInputRef.current) imeInputRef.current.focus();
-        else tableRef.current?.focus();
-      }, 0);
+      setTimeout(() => tableRef.current?.focus(), 0);
     };
     document.addEventListener("mouseup", handler);
     return () => document.removeEventListener("mouseup", handler);
@@ -158,6 +151,12 @@ function OrderTable({
 
   const handleEditValueChange = useCallback((row: number, col: number, value: string) => {
     pendingEditRef.current = { row, col, value };
+  }, []);
+
+  // 투명 input에서 타이핑 시작 → 편집 모드로 전환 (IME 조합 상태 유지)
+  const handleStartEdit = useCallback((row: number, col: number) => {
+    setEditing(true);
+    setInitialChar(null);
   }, []);
 
   const handleCellDoubleClick = useCallback((row: number, col: number) => {
@@ -368,28 +367,6 @@ function OrderTable({
     }
   }, [activeCell, editing, selection, orders, onUndo, onUpdate, handleCopy, handlePaste, onStartBatchUndo, onEndBatchUndo]);
 
-  // IME 입력 처리: 숨겨진 textarea에서 조합 완료된 실제 문자를 받아 편집 시작
-  const handleImeInput = useCallback(() => {
-    const el = imeInputRef.current;
-    if (!el || editing) return;
-    const value = el.value;
-    el.value = "";
-    if (!value || !activeCell) return;
-    const { col } = activeCell;
-    if (EDITABLE_KEYS.has(COLUMNS[col].key)) {
-      setEditing(true);
-      setInitialChar(value);
-    }
-  }, [activeCell, editing]);
-
-  // 셀 활성 시 숨겨진 textarea로 포커스 이동 (IME 입력 수신용)
-  useEffect(() => {
-    if (activeCell && !editing && imeInputRef.current) {
-      imeInputRef.current.value = "";
-      imeInputRef.current.focus();
-    }
-  }, [activeCell, editing]);
-
   useEffect(() => {
     if (!fillDrag) return;
     const onMove = (e: MouseEvent) => {
@@ -449,18 +426,6 @@ function OrderTable({
       {!isMobile && !scrolledRight && (
         <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 z-10 rounded-r-xl bg-gradient-to-l from-[var(--bg-main)] to-transparent" />
       )}
-      {/* IME 입력 캡처용 숨겨진 textarea (한글 등 조합 문자 정상 처리) */}
-      {!isMobile && (
-        <textarea
-          ref={imeInputRef}
-          onInput={handleImeInput}
-          onKeyDown={handleTableKeyDown}
-          className="absolute opacity-0 w-px h-px overflow-hidden pointer-events-none"
-          style={{ top: -9999, left: -9999 }}
-          tabIndex={-1}
-          aria-hidden="true"
-        />
-      )}
       <div
         ref={tableRef}
         className="rounded-xl border border-[var(--border)] overflow-auto focus:outline-none"
@@ -518,6 +483,7 @@ function OrderTable({
                   onCommit={handleCommit} onBlurSave={saveValue}
                   onEditValueChange={handleEditValueChange}
                   onSelectToggle={onSelectToggle} onFillStart={handleFillStart}
+                  onStartEdit={handleStartEdit}
                   onRowClick={onRowClick}
                   isMobile={isMobile}
                   visibleColumns={visibleColumns}
