@@ -488,6 +488,89 @@ function parseDate(value: string | number | undefined): string | null {
   return null;
 }
 
+// 정산 엑셀 파싱 (옥션/지마켓 정산예정금액)
+export interface SettlementRow {
+  recipientName: string;
+  productName: string;
+  saleAmount: number;
+  settlementAmount: number;
+  marketplace: string; // "지마켓" | "옥션"
+}
+
+export async function parseSettlementExcel(file: File): Promise<{ rows: SettlementRow[]; sheetName: string }> {
+  await loadXLSX();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: "array", cellDates: false });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rawData: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true });
+
+        // 헤더 행 찾기
+        let headerRowIdx = -1;
+        let headers: string[] = [];
+        for (let i = 0; i < Math.min(rawData.length, 10); i++) {
+          const row = rawData[i];
+          const strs = row.map((c) => String(c ?? "").trim());
+          if (strs.includes("수령인명") && strs.includes("정산예정금액")) {
+            headerRowIdx = i;
+            headers = strs;
+            break;
+          }
+        }
+
+        if (headerRowIdx === -1) {
+          reject(new Error("정산 엑셀 양식이 아닙니다. '수령인명'과 '정산예정금액' 컬럼이 필요합니다."));
+          return;
+        }
+
+        const idxRecipient = headers.indexOf("수령인명");
+        const idxProduct = headers.indexOf("상품명");
+        const idxSaleAmount = headers.indexOf("판매금액");
+        const idxSettlement = headers.indexOf("정산예정금액");
+        const idxSeller = headers.indexOf("판매아이디");
+
+        const rows: SettlementRow[] = [];
+        for (let i = headerRowIdx + 1; i < rawData.length; i++) {
+          const row = rawData[i];
+          const recipientName = String(row[idxRecipient] ?? "").trim();
+          const settlementRaw = row[idxSettlement];
+          const settlementAmount = typeof settlementRaw === "number"
+            ? Math.round(settlementRaw)
+            : parseInt(String(settlementRaw).replace(/,/g, ""), 10) || 0;
+
+          if (!recipientName || settlementAmount === 0) continue;
+
+          const productName = idxProduct >= 0 ? String(row[idxProduct] ?? "").trim() : "";
+          const saleAmountRaw = idxSaleAmount >= 0 ? row[idxSaleAmount] : 0;
+          const saleAmount = typeof saleAmountRaw === "number"
+            ? Math.round(saleAmountRaw)
+            : parseInt(String(saleAmountRaw).replace(/,/g, ""), 10) || 0;
+
+          // 판매아이디에서 마켓플레이스 추출: "지마켓(redgoom00)" → "지마켓"
+          let marketplace = "";
+          if (idxSeller >= 0) {
+            const seller = String(row[idxSeller] ?? "");
+            if (seller.includes("지마켓")) marketplace = "지마켓";
+            else if (seller.includes("옥션")) marketplace = "옥션";
+          }
+
+          rows.push({ recipientName, productName, saleAmount, settlementAmount, marketplace });
+        }
+
+        resolve({ rows, sheetName });
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error("파일을 읽을 수 없습니다."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 export async function exportOrdersToCSV(orders: Record<string, unknown>[], filename: string) {
   await loadXLSX();
   const ws = XLSX.utils.json_to_sheet(orders);

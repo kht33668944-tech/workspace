@@ -19,6 +19,7 @@ import BulkEditBar from "@/components/workspace/orders/bulk-edit-bar";
 import dynamic from "next/dynamic";
 
 const ExcelImport = dynamic(() => import("@/components/workspace/orders/excel-import"), { ssr: false });
+const SettlementImportModal = dynamic(() => import("@/components/workspace/orders/settlement-import-modal"), { ssr: false });
 const TrackingCollectModal = dynamic(() => import("@/components/workspace/orders/tracking-collect-modal"), { ssr: false });
 const AutoPurchaseModal = dynamic(() => import("@/components/workspace/orders/auto-purchase-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
@@ -92,6 +93,8 @@ function OrdersPageInner() {
   const [search, setSearch] = useState(saved?.search ?? "");
   const [activeSearch, setActiveSearch] = useState(saved?.search ?? "");
   const [showImport, setShowImport] = useState(false);
+  const [showSettlementImport, setShowSettlementImport] = useState(false);
+  const [showImportMenu, setShowImportMenu] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(saved?.columnFilters ?? {});
@@ -104,6 +107,7 @@ function OrdersPageInner() {
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const autoMenuRef = useRef<HTMLDivElement>(null);
+  const importMenuRef = useRef<HTMLDivElement>(null);
   const urlTab = searchParams.get("tab") as "logs" | "tracking-logs" | null;
   const activeBatchId = searchParams.get("batch");
   const [activeTab, setActiveTab] = useState<"orders" | "logs" | "tracking-logs">(
@@ -151,10 +155,13 @@ function OrdersPageInner() {
       if (autoMenuRef.current && !autoMenuRef.current.contains(e.target as Node)) {
         setShowAutoMenu(false);
       }
+      if (importMenuRef.current && !importMenuRef.current.contains(e.target as Node)) {
+        setShowImportMenu(false);
+      }
     };
-    if (showExportMenu || showAutoMenu) document.addEventListener("mousedown", handleClick);
+    if (showExportMenu || showAutoMenu || showImportMenu) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [showExportMenu, showAutoMenu]);
+  }, [showExportMenu, showAutoMenu, showImportMenu]);
 
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") setActiveSearch(search);
@@ -238,6 +245,7 @@ function OrdersPageInner() {
       }
       const topMonth = Object.entries(monthCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
       setSelectedMonth(topMonth || null);
+      await refetch();
     }
     return result;
   };
@@ -588,13 +596,34 @@ function OrdersPageInner() {
               </div>
             )}
           </div>
-          <button
-            onClick={() => setShowImport(true)}
-            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-green-100 text-green-700 border border-green-200 hover:bg-green-200 dark:bg-green-600/20 dark:text-green-400 dark:border-transparent dark:hover:bg-green-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span className="hidden md:inline">엑셀 가져오기</span>
-          </button>
+          <div className="relative" ref={importMenuRef}>
+            <button
+              onClick={() => setShowImportMenu(!showImportMenu)}
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-green-100 text-green-700 border border-green-200 hover:bg-green-200 dark:bg-green-600/20 dark:text-green-400 dark:border-transparent dark:hover:bg-green-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span className="hidden md:inline">엑셀 가져오기</span>
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+            {showImportMenu && (
+              <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl py-1 whitespace-nowrap">
+                <button
+                  onClick={() => { setShowImportMenu(false); setShowImport(true); }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-green-400" />
+                  발주서 가져오기
+                </button>
+                <button
+                  onClick={() => { setShowImportMenu(false); setShowSettlementImport(true); }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Download className="w-4 h-4 text-blue-400" />
+                  정산금액 가져오기
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -651,6 +680,16 @@ function OrdersPageInner() {
 
       {showImport && (
         <ExcelImport onImport={handleImport} onClose={() => setShowImport(false)} checkDuplicates={checkDuplicates} />
+      )}
+      {showSettlementImport && (
+        <SettlementImportModal
+          orders={orders}
+          onUpdate={updateOrder}
+          onClose={() => setShowSettlementImport(false)}
+          startBatchUndo={startBatchUndo}
+          endBatchUndo={endBatchUndo}
+          refetch={refetch}
+        />
       )}
       {showAddModal && (
         <OrderModal onSave={handleAddOrder} onClose={() => setShowAddModal(false)} />
