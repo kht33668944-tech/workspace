@@ -12,6 +12,7 @@ interface Props {
   onClose: () => void;
   onImport: (rows: Omit<ProductInsert, "user_id">[]) => Promise<{ error: string | null }>;
   categories: string[];
+  existingUrls?: Set<string>;
 }
 
 type Stage = "input" | "loading" | "preview";
@@ -21,7 +22,7 @@ interface PreviewItem extends GmarketProductResult {
   selectedCategory: string;
 }
 
-export default function GmarketImportModal({ onClose, onImport, categories }: Props) {
+export default function GmarketImportModal({ onClose, onImport, categories, existingUrls }: Props) {
   const { session } = useAuth();
   const [stage, setStage] = useState<Stage>("input");
   const [urlFields, setUrlFields] = useState<string[]>([""]);
@@ -292,7 +293,7 @@ export default function GmarketImportModal({ onClose, onImport, categories }: Pr
   }, [items, consumeSSEStream]);
 
   const handleImport = async () => {
-    const successItems = items.filter((i) => !i.error);
+    const successItems = items.filter((i) => !i.error && !duplicateUrls.has(i.url));
     if (successItems.length === 0) return;
 
     setSaving(true);
@@ -324,8 +325,14 @@ export default function GmarketImportModal({ onClose, onImport, categories }: Pr
     onClose();
   };
 
-  const successCount = items.filter((i) => !i.error).length;
+  const duplicateUrls = useMemo(() => {
+    if (!existingUrls) return new Set<string>();
+    return new Set(items.filter((i) => !i.error && existingUrls.has(i.url)).map((i) => i.url));
+  }, [items, existingUrls]);
+
+  const successCount = items.filter((i) => !i.error && !duplicateUrls.has(i.url)).length;
   const failCount = items.filter((i) => !!i.error).length;
+  const dupDbCount = duplicateUrls.size;
   const isRetrying = retryingIndexes.size > 0;
   // loading 단계 진행률
   const loadingPercent = loadingTotal > 0 ? Math.round((items.length / loadingTotal) * 100) : 0;
@@ -359,7 +366,7 @@ export default function GmarketImportModal({ onClose, onImport, categories }: Pr
             <p className="text-xs text-[var(--text-muted)] mt-0.5">
               {stage === "input" && "URL을 하나씩 입력하거나 여러 개를 한 번에 붙여넣으세요"}
               {stage === "loading" && loadingStatus}
-              {stage === "preview" && `성공 ${successCount}개${failCount > 0 ? ` / 실패 ${failCount}개` : ""}`}
+              {stage === "preview" && `성공 ${successCount}개${dupDbCount > 0 ? ` / 중복 ${dupDbCount}개 제외` : ""}${failCount > 0 ? ` / 실패 ${failCount}개` : ""}`}
             </p>
           </div>
           <button
@@ -531,12 +538,16 @@ export default function GmarketImportModal({ onClose, onImport, categories }: Pr
               {error && (
                 <p className="text-xs text-red-400 mb-2">{error}</p>
               )}
-              {items.map((item, idx) => (
+              {items.map((item, idx) => {
+                const isDuplicate = !item.error && duplicateUrls.has(item.url);
+                return (
                 <div
                   key={idx}
                   className={`rounded-xl border p-4 flex gap-4 ${
                     item.error
                       ? "border-red-500/40 bg-red-500/5"
+                      : isDuplicate
+                      ? "border-amber-500/40 bg-amber-500/5 opacity-60"
                       : "border-[var(--border)] bg-[var(--bg-main)]"
                   }`}
                 >
@@ -641,8 +652,12 @@ export default function GmarketImportModal({ onClose, onImport, categories }: Pr
 
                   {/* 상태 아이콘 (에러가 아닌 경우만) */}
                   {!item.error && (
-                    <div className="shrink-0">
-                      {retryingIndexes.has(idx) ? (
+                    <div className="shrink-0 flex flex-col items-center gap-1">
+                      {isDuplicate ? (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400">
+                          중복
+                        </span>
+                      ) : retryingIndexes.has(idx) ? (
                         <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
                       ) : (
                         <CheckCircle className="w-5 h-5 text-green-400" />
@@ -650,7 +665,8 @@ export default function GmarketImportModal({ onClose, onImport, categories }: Pr
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

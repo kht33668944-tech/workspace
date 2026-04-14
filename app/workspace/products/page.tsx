@@ -839,6 +839,7 @@ export default function ProductsPage() {
           onClose={() => setImportModalOpen(false)}
           onImport={handleImport}
           categories={categories}
+          existingUrls={new Set(allProducts.map(p => p.purchase_url).filter(Boolean))}
         />
       )}
 
