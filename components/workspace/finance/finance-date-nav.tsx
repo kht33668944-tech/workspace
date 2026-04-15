@@ -28,12 +28,12 @@ export default function FinanceDateNav({
   saveStatus,
 }: FinanceDateNavProps) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
       {/* 날짜 네비게이션 */}
       <div className="flex items-center gap-1">
         <button
           onClick={onPrevDay}
-          className="p-2 rounded-lg hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-muted)]"
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-muted)]"
           title="전일"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -44,13 +44,13 @@ export default function FinanceDateNav({
             type="date"
             value={selectedDate}
             onChange={(e) => onDateChange(e.target.value)}
-            className="px-3 py-1.5 text-sm bg-[var(--bg-main)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] outline-none focus:border-blue-400 [color-scheme:dark]"
+            className="px-3 min-h-[44px] text-sm bg-[var(--bg-main)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] outline-none focus:border-blue-400 [color-scheme:dark]"
           />
         </div>
 
         <button
           onClick={onNextDay}
-          className="p-2 rounded-lg hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-muted)]"
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-muted)]"
           title="다음날"
         >
           <ChevronRight className="w-4 h-4" />
@@ -59,7 +59,7 @@ export default function FinanceDateNav({
         {!isToday && (
           <button
             onClick={onToday}
-            className="px-3 py-1.5 text-xs rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors flex items-center gap-1"
+            className="px-3 min-h-[44px] text-xs rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors flex items-center gap-1"
           >
             <Calendar className="w-3 h-3" />
             오늘
@@ -68,7 +68,7 @@ export default function FinanceDateNav({
       </div>
 
       {/* 액션 버튼 */}
-      <div className="flex items-center gap-2 ml-auto">
+      <div className="flex items-center gap-2 sm:ml-auto">
         {/* 저장 상태 */}
         {hasSnapshot && (
           <span
@@ -96,14 +96,14 @@ export default function FinanceDateNav({
           <>
             <button
               onClick={() => onCreateSnapshot(true)}
-              className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors flex items-center gap-1"
+              className="px-3 min-h-[44px] text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors flex items-center gap-1"
             >
               <Copy className="w-3 h-3" />
               전날 복사로 생성
             </button>
             <button
               onClick={() => onCreateSnapshot(false)}
-              className="px-3 py-1.5 text-xs rounded-lg bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors flex items-center gap-1"
+              className="px-3 min-h-[44px] text-xs rounded-lg bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors flex items-center gap-1"
             >
               <Plus className="w-3 h-3" />
               빈 스냅샷
@@ -112,7 +112,7 @@ export default function FinanceDateNav({
         ) : (
           <button
             onClick={onDeleteSnapshot}
-            className="px-3 py-1.5 text-xs rounded-lg text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-1"
+            className="px-3 min-h-[44px] text-xs rounded-lg text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-1"
           >
             <Trash2 className="w-3 h-3" />
             삭제

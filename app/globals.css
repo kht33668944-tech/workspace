@@ -103,3 +103,12 @@ body {
 .toast-in {
   animation: toast-in 0.2s ease-out;
 }
+
+/* 모바일 바텀 시트 슬라이드 업 */
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+.animate-sheet-up {
+  animation: sheet-up 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}

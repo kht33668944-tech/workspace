@@ -18,7 +18,7 @@ const STATUS_COLORS: Record<string, string> = {
 function StatusBadge({ status }: { status: string }) {
   const cls = STATUS_COLORS[status] ?? "text-[var(--text-muted)]";
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
+    <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium whitespace-nowrap ${cls}`}>
       {status}
     </span>
   );

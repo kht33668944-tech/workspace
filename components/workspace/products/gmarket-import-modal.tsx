@@ -13,6 +13,8 @@ interface Props {
   onImport: (rows: Omit<ProductInsert, "user_id">[]) => Promise<{ error: string | null }>;
   categories: string[];
   existingUrls?: Set<string>;
+  /** MobileSheet 내부에 임베드될 때 true — 자체 fixed 오버레이/래퍼 제거 */
+  embedded?: boolean;
 }
 
 type Stage = "input" | "loading" | "preview";
@@ -22,7 +24,7 @@ interface PreviewItem extends GmarketProductResult {
   selectedCategory: string;
 }
 
-export default function GmarketImportModal({ onClose, onImport, categories, existingUrls }: Props) {
+export default function GmarketImportModal({ onClose, onImport, categories, existingUrls, embedded = false }: Props) {
   const { session } = useAuth();
   const [stage, setStage] = useState<Stage>("input");
   const [urlFields, setUrlFields] = useState<string[]>([""]);
@@ -337,10 +339,10 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
   // loading 단계 진행률
   const loadingPercent = loadingTotal > 0 ? Math.round((items.length / loadingTotal) * 100) : 0;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col shadow-2xl">
-        {/* Header */}
+  const inner = (
+    <div className={embedded ? "flex flex-col" : "bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col shadow-2xl"}>
+        {/* Header — embedded 모드에서는 MobileSheet 타이틀이 대신함 */}
+        {!embedded && (
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -376,6 +378,7 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
             <X className="w-5 h-5" />
           </button>
         </div>
+        )}
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
@@ -740,6 +743,13 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
           </div>
         </div>
       </div>
+  );
+
+  if (embedded) return inner;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      {inner}
     </div>
   );
 }

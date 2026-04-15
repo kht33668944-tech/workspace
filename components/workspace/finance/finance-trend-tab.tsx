@@ -104,7 +104,7 @@ export default function FinanceTrendTab({ fetchTrendData }: FinanceTrendTabProps
           <button
             key={p.value}
             onClick={() => setPeriod(p.value)}
-            className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+            className={`px-3 min-h-[44px] text-xs rounded-lg transition-colors ${
               period === p.value
                 ? "bg-blue-600 text-white"
                 : "bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"

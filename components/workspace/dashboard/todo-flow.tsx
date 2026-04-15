@@ -27,7 +27,7 @@ function Step({ label, count, sub, countColor, borderColor, loading, filter }: S
     <Link
       href="/workspace/orders"
       onClick={() => { if (filter) setOrdersFilter(filter); }}
-      className={`flex-1 bg-[var(--bg-card)] border rounded-xl px-5 py-4 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer min-w-0 ${borderColor ?? "border-[var(--border)] hover:border-blue-500/50"}`}
+      className={`flex-1 bg-[var(--bg-card)] border rounded-xl px-5 py-4 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer min-w-0 min-h-[44px] ${borderColor ?? "border-[var(--border)] hover:border-blue-500/50"}`}
     >
       <p className="text-xs text-[var(--text-muted)] mb-2">{label}</p>
       {loading ? (

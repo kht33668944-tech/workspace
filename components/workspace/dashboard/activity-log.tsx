@@ -90,7 +90,7 @@ export default function ActivityLog({ activityLogs, loading }: ActivityLogProps)
                   <button
                     key={batch.batchId}
                     onClick={() => handleClick(batch)}
-                    className="w-full flex items-start gap-3 px-3 py-2 rounded-lg hover:bg-[var(--bg-elevated)] transition-colors text-left group"
+                    className="w-full flex items-start gap-3 px-3 py-2 rounded-lg hover:bg-[var(--bg-elevated)] transition-colors text-left group min-h-[44px]"
                   >
                     <StatusDot successCount={batch.successCount} failedCount={batch.failedCount} />
                     <span className="text-xs text-[var(--text-muted)] w-11 flex-shrink-0 pt-px">

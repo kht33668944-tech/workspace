@@ -6,7 +6,7 @@ import MemoRow from "./table-row";
 import { ResizableHeader } from "./table-header";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
-  COLUMNS, COL_COUNT, EDITABLE_KEYS, NUMERIC_KEYS, MOBILE_COLUMNS,
+  COLUMNS, COL_COUNT, EDITABLE_KEYS, NUMERIC_KEYS,
   norm, processValue,
   type OrderTableProps, type CellPos, type SelRange, type SortDir,
 } from "./table-utils";
@@ -32,7 +32,8 @@ function OrderTable({
   const [page, setPage] = useState(0);
 
   const isMobile = useIsMobile();
-  const visibleColumns = isMobile ? MOBILE_COLUMNS : COLUMNS;
+  // 모바일에서도 전체 컬럼 표시 (가로 스크롤로 접근)
+  const visibleColumns = COLUMNS;
   const visibleColCount = visibleColumns.length;
 
   const tableRef = useRef<HTMLDivElement>(null);
@@ -40,7 +41,7 @@ function OrderTable({
 
   useEffect(() => {
     const el = tableRef.current;
-    if (!el || isMobile) return;
+    if (!el) return;
     const check = () => setScrolledRight(el.scrollLeft + el.clientWidth >= el.scrollWidth - 4);
     check();
     el.addEventListener("scroll", check, { passive: true });
@@ -423,7 +424,7 @@ function OrderTable({
   return (
     <div className="space-y-2">
       <div className="relative">
-      {!isMobile && !scrolledRight && (
+      {!scrolledRight && (
         <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 z-10 rounded-r-xl bg-gradient-to-l from-[var(--bg-main)] to-transparent" />
       )}
       <div
@@ -436,7 +437,7 @@ function OrderTable({
         tabIndex={isMobile ? -1 : 0}
         onKeyDown={isMobile ? undefined : handleTableKeyDown}
       >
-        <table className={`text-sm border-collapse ${isMobile ? "w-full table-fixed" : "w-max min-w-full"}`}>
+        <table className="text-sm border-collapse w-max min-w-full">
           <thead className="bg-[var(--table-header-bg)] sticky top-0 z-20">
             <tr>
               <th className={`px-2 py-2.5 sticky left-0 bg-[var(--table-header-bg)] z-30 border-r border-[var(--border-subtle)] ${isMobile ? "w-11" : "w-10"}`}>

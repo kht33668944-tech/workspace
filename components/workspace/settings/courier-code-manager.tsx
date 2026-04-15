@@ -110,7 +110,7 @@ export default function CourierCodeManager() {
       {/* Header - 항상 보임 */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-6 py-4 hover:bg-[var(--bg-subtle)] transition-colors rounded-2xl"
+        className="w-full flex items-center justify-between px-6 min-h-[44px] hover:bg-[var(--bg-subtle)] transition-colors rounded-2xl"
       >
         <div className="flex items-center gap-2">
           <Truck className="w-5 h-5 text-purple-400" />
@@ -134,19 +134,19 @@ export default function CourierCodeManager() {
           ) : (
             <>
               {/* 상단 액션 */}
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1 max-w-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative flex-1 min-w-[160px]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
                   <input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="택배사명 또는 코드 검색..."
-                    className="w-full pl-9 pr-3 py-1.5 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-purple-500/50"
+                    className="w-full pl-9 pr-3 min-h-[44px] bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-purple-500/50"
                   />
                 </div>
                 <button
                   onClick={() => { loadDefaults(); }}
-                  className="flex items-center gap-1 px-2.5 py-1.5 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-muted)] hover:text-[var(--text-tertiary)] transition-colors"
+                  className="flex items-center gap-1 px-2.5 min-h-[44px] bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-muted)] hover:text-[var(--text-tertiary)] transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   기본값 복원
@@ -154,7 +154,7 @@ export default function CourierCodeManager() {
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-1 px-3 min-h-[44px] bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors"
                 >
                   {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                   저장

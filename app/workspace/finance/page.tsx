@@ -44,12 +44,12 @@ function FinancePageInner() {
       />
 
       {/* 탭 */}
-      <div className="flex gap-4 border-b border-[var(--border)]">
+      <div className="flex gap-4 border-b border-[var(--border)] overflow-x-auto no-scrollbar">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap min-h-[44px] ${
               activeTab === tab.key
                 ? "border-blue-500 text-blue-400"
                 : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"

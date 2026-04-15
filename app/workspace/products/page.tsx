@@ -1,14 +1,17 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { Plus, Trash2, Search, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags } from "lucide-react";
+import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts, type PriceChangeFilter } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
 import { buildRateMap } from "@/lib/product-calculations";
 import { useAiTask } from "@/context/AiTaskContext";
 import { useAuth } from "@/context/AuthContext";
+import { useIsMobile } from "@/hooks/use-mobile";
 import ProductTable from "@/components/workspace/products/product-table";
+import FilterBar from "@/components/ui/filter-bar";
+import MobileSheet from "@/components/ui/mobile-sheet";
 import dynamic from "next/dynamic";
 
 const CommissionTab = dynamic(() => import("@/components/workspace/products/commission-tab"), { ssr: false });
@@ -28,6 +31,7 @@ type ActiveTab = "products" | "images" | "commission" | "smartstore-category" | 
 export default function ProductsPage() {
   usePreventBrowserSave();
 
+  const isMobile = useIsMobile();
   const { session } = useAuth();
   const {
     batchItems, batchActive, batchVisible,
@@ -57,6 +61,8 @@ export default function ProductsPage() {
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
   const [scrapeResultModalOpen, setScrapeResultModalOpen] = useState(false);
   const [applyingPrices, setApplyingPrices] = useState(false);
+  const [scrapeLog, setScrapeLog] = useState<string[]>([]);
+  const scrapeLogRef = useRef<HTMLDivElement>(null);
   const scrapeAbortRef = useRef<AbortController | null>(null);
   const platformCodeFileRef = useRef<HTMLInputElement>(null);
 
@@ -73,6 +79,13 @@ export default function ProductsPage() {
     [scrapeResults]
   );
   const changedScrapeCount = useMemo(() => scrapeResults.filter(r => r.price !== r.previous).length, [scrapeResults]);
+
+  // 최저가 수집 로그 자동 스크롤
+  useEffect(() => {
+    if (scrapeLogRef.current) {
+      scrapeLogRef.current.scrollTop = scrapeLogRef.current.scrollHeight;
+    }
+  }, [scrapeLog]);
 
   // products 탭에서 배치 완료 시 로컬 캐시 동기화
   useEffect(() => {
@@ -105,6 +118,7 @@ export default function ProductsPage() {
     return { count, avgMargin: avgMargin.toFixed(1), withCategory, total: products.length };
   }, [products]);
 
+  const handleSearchSubmit = () => setActiveSearch(search);
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") setActiveSearch(search);
   };
@@ -162,6 +176,7 @@ export default function ProductsPage() {
     scrapeAbortRef.current = abortController;
     setScrapingPrices(true);
     setScrapeProgress("최저가 수집 준비 중...");
+    setScrapeLog(["최저가 수집 준비 중..."]);
     setScrapeResults([]);
 
     const collectedChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
@@ -206,14 +221,20 @@ export default function ProductsPage() {
                   ? `${event.previous_price.toLocaleString()}→${event.price.toLocaleString()}원`
                   : `${event.price.toLocaleString()}원 (변동없음)`
                 : "실패";
-              setScrapeProgress(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
+              const msg = `(${event.index}/${event.total}) ${event.name} → ${priceText}`;
+              setScrapeProgress(msg);
+              setScrapeLog(prev => [...prev, msg]);
               if (event.price > 0) {
                 collectedChanges.push({ id: event.id, name: event.name, previous: event.previous_price, price: event.price });
               }
             } else if (event.type === "done") {
-              setScrapeProgress(`완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패`);
+              const msg = `완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패`;
+              setScrapeProgress(msg);
+              setScrapeLog(prev => [...prev, msg]);
             } else if (event.type === "error") {
-              setScrapeProgress(`오류: ${event.message}`);
+              const msg = `오류: ${event.message}`;
+              setScrapeProgress(msg);
+              setScrapeLog(prev => [...prev, msg]);
             }
           } catch {}
         }
@@ -221,9 +242,13 @@ export default function ProductsPage() {
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         stopped = true;
-        setScrapeProgress(`중단됨: ${collectedChanges.length}개 수집 완료`);
+        const msg = `중단됨: ${collectedChanges.length}개 수집 완료`;
+        setScrapeProgress(msg);
+        setScrapeLog(prev => [...prev, msg]);
       } else {
-        setScrapeProgress("최저가 수집 중 오류 발생");
+        const msg = "최저가 수집 중 오류 발생";
+        setScrapeProgress(msg);
+        setScrapeLog(prev => [...prev, msg]);
       }
     } finally {
       scrapeAbortRef.current = null;
@@ -234,7 +259,7 @@ export default function ProductsPage() {
         setScrapeResultModalOpen(true);
       }
       if (!stopped && collectedChanges.length === 0) {
-        setTimeout(() => setScrapeProgress(""), 3000);
+        setTimeout(() => { setScrapeProgress(""); setScrapeLog([]); }, 3000);
       }
     }
   };
@@ -473,7 +498,8 @@ export default function ProductsPage() {
   return (
     <div className="space-y-4 md:space-y-6">
       {/* 탭 */}
-      <div className="flex items-center gap-1 border-b border-[var(--border)]">
+      <div className="overflow-x-auto scrollbar-hide border-b border-[var(--border)]">
+      <div className="flex items-center gap-1 min-w-max">
         <button onClick={() => setActiveTab("products")} className={TAB_CLASSES("products")}>
           <Package className="w-4 h-4" />
           상품 목록
@@ -499,6 +525,7 @@ export default function ProductsPage() {
           플토 양식
         </button>
       </div>
+      </div>
 
       {activeTab === "commission" && <CommissionTab />}
 
@@ -515,26 +542,18 @@ export default function ProductsPage() {
       {activeTab === "products" && (
         <>
           {/* 액션 바 */}
-          <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
+          <div className="flex flex-col gap-3">
             {/* 검색 */}
-            <div className="relative flex-1 max-w-md w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="상품명, 카테고리 검색... (Enter)"
-                className="w-full pl-10 pr-8 py-2 text-sm bg-[var(--bg-main)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-blue-400"
-              />
-              {search && (
-                <button onClick={handleSearchClear} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-                  &times;
-                </button>
-              )}
-            </div>
+            <FilterBar
+              search={search}
+              onSearchChange={setSearch}
+              onSearchSubmit={handleSearchSubmit}
+              onSearchClear={handleSearchClear}
+              placeholder="상품명, 카테고리 검색..."
+            />
 
             {/* 버튼 그룹 */}
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 flex-wrap">
               {selectedIds.size > 0 && (
                 <>
                   <button
@@ -835,12 +854,29 @@ export default function ProductsPage() {
 
       {/* 지마켓 가져오기 모달 */}
       {importModalOpen && (
-        <GmarketImportModal
-          onClose={() => setImportModalOpen(false)}
-          onImport={handleImport}
-          categories={categories}
-          existingUrls={new Set(allProducts.map(p => p.purchase_url).filter(Boolean))}
-        />
+        isMobile ? (
+          <MobileSheet
+            open={importModalOpen}
+            onClose={() => setImportModalOpen(false)}
+            title="지마켓 상품 가져오기"
+            maxHeight="90vh"
+          >
+            <GmarketImportModal
+              onClose={() => setImportModalOpen(false)}
+              onImport={handleImport}
+              categories={categories}
+              existingUrls={new Set(allProducts.map(p => p.purchase_url).filter(Boolean))}
+              embedded
+            />
+          </MobileSheet>
+        ) : (
+          <GmarketImportModal
+            onClose={() => setImportModalOpen(false)}
+            onImport={handleImport}
+            categories={categories}
+            existingUrls={new Set(allProducts.map(p => p.purchase_url).filter(Boolean))}
+          />
+        )
       )}
 
       {/* 상세페이지 일괄 생성 모달 */}
@@ -848,19 +884,34 @@ export default function ProductsPage() {
         <BatchDetailModal items={batchItems} onClose={dismissBatch} onClear={clearBatch} />
       )}
 
-      {/* 최저가 수집 진행 상태 바 */}
+      {/* 최저가 수집 진행 로그 */}
       {(scrapingPrices || scrapeProgress) && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-lg">
-          {scrapingPrices && <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />}
-          <span className="text-sm text-[var(--text-primary)]">{scrapeProgress}</span>
-          {scrapingPrices && (
-            <button
-              onClick={handleStopScrape}
-              className="ml-2 px-2.5 py-1 text-xs font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors"
-            >
-              중단
-            </button>
-          )}
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[min(480px,calc(100vw-24px))] bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-lg overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border)]">
+            <div className="flex items-center gap-2">
+              {scrapingPrices && <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />}
+              <span className="text-sm font-medium text-[var(--text-primary)]">최저가 수집</span>
+            </div>
+            {scrapingPrices && (
+              <button
+                onClick={handleStopScrape}
+                className="px-2.5 py-1 min-h-[32px] text-xs font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors shrink-0"
+              >
+                중단
+              </button>
+            )}
+          </div>
+          <div
+            ref={scrapeLogRef}
+            className="max-h-[40vh] overflow-y-auto px-4 py-2 space-y-0.5"
+          >
+            {scrapeLog.map((line, i) => (
+              <p key={i} className="text-xs text-[var(--text-secondary)] leading-relaxed">{line}</p>
+            ))}
+            {scrapeLog.length === 0 && scrapeProgress && (
+              <p className="text-xs text-[var(--text-secondary)]">{scrapeProgress}</p>
+            )}
+          </div>
         </div>
       )}
 

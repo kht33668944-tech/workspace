@@ -134,7 +134,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
           </button>
 
           {bellOpen && (
-            <div className="absolute right-0 top-full mt-2 w-80 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl z-50 overflow-hidden">
+            <div className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-24px)] bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl z-50 overflow-hidden">
               {/* 드롭다운 헤더 */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
                 <h3 className="text-sm font-semibold text-[var(--text-primary)]">알림</h3>
@@ -191,7 +191,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
           </button>
 
           {userMenuOpen && (
-            <div className="absolute right-0 top-full mt-2 w-56 py-2 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl z-50">
+            <div className="absolute right-0 top-full mt-2 w-56 max-w-[calc(100vw-24px)] py-2 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl z-50">
               <div className="px-4 py-2 border-b border-[var(--border)]">
                 <p className="text-sm text-[var(--text-primary)] font-medium truncate">{user?.email}</p>
               </div>

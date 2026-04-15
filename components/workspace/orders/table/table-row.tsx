@@ -152,7 +152,7 @@ const MemoRow = memo(function Row({
               <button
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); onRowClick?.(order); }}
-                className={`inline-block px-2 py-0.5 rounded text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity ${DELIVERY_STATUS_COLORS[String(val)] || "bg-gray-500/20 text-gray-400"} ${isMobile ? "min-h-[28px] flex items-center" : ""}`}
+                className={`inline-block rounded font-medium cursor-pointer hover:opacity-80 transition-opacity whitespace-nowrap ${isMobile ? "text-[11px] px-1.5 py-0.5" : "px-2 py-0.5 text-xs"} ${DELIVERY_STATUS_COLORS[String(val)] || "bg-gray-500/20 text-gray-400"}`}
                 title="클릭하여 상담내역 열기"
               >
                 {String(val || "결제전")}

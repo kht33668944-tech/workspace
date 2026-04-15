@@ -45,7 +45,7 @@ export default function QuickActions() {
             key={action.label}
             href="/workspace/orders"
             onClick={() => { if (action.filter) setOrdersFilter(action.filter); }}
-            className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 flex flex-col items-center justify-center gap-2 text-center hover:border-blue-500/50 hover:bg-[var(--bg-hover)] transition-colors"
+            className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 flex flex-col items-center justify-center gap-2 text-center hover:border-blue-500/50 hover:bg-[var(--bg-hover)] transition-colors min-h-[44px]"
           >
             <span className="text-3xl">{action.icon}</span>
             <span className="text-sm font-medium text-[var(--text-primary)]">{action.label}</span>

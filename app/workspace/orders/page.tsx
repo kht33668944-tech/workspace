@@ -3,19 +3,22 @@
 import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
-import { FileSpreadsheet, Trash2, Download, Search, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap } from "lucide-react";
+import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
 import { useOrders } from "@/hooks/use-orders";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { exportOrdersToCSV } from "@/lib/excel-parser";
-import { generateOrderExcel, generatePlayAutoTrackingExcel, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
+import { generatePlayAutoTrackingExcel, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import OrderTable from "@/components/workspace/orders/order-table";
 import OrderModal from "@/components/workspace/orders/order-modal";
-import OrderSidePanel from "@/components/workspace/orders/order-side-panel";
+import OrderSidePanel, { OrderSidePanelContent } from "@/components/workspace/orders/order-side-panel";
 import BulkEditBar from "@/components/workspace/orders/bulk-edit-bar";
+import FilterBar from "@/components/ui/filter-bar";
+import MobileSheet from "@/components/ui/mobile-sheet";
+import { useIsMobile } from "@/hooks/use-mobile";
 import dynamic from "next/dynamic";
 
 const ExcelImport = dynamic(() => import("@/components/workspace/orders/excel-import"), { ssr: false });
@@ -84,6 +87,9 @@ function OrdersPageInner() {
   const { session } = useAuth();
   const { showToast } = useToast();
   const searchParams = useSearchParams();
+  const isMobile = useIsMobile();
+  const activeMonthRef = useRef<HTMLButtonElement>(null);
+  const monthScrollRef = useRef<HTMLDivElement>(null);
   // 필터 상태를 sessionStorage에서 복원 (페이지 이동 후 돌아와도 유지)
   const saved = useMemo(() => loadFilterState(), []);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(saved?.month ?? getCurrentMonth());
@@ -126,6 +132,13 @@ function OrdersPageInner() {
     });
   }, [selectedMonth, selectedMarketplace, activeSearch, selectedDateFrom, selectedDateTo, columnFilters]);
 
+  // 선택된 월 변경 시 탭을 뷰포트 중앙으로 스크롤
+  useEffect(() => {
+    if (activeMonthRef.current) {
+      activeMonthRef.current.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+  }, [selectedMonth]);
+
   const monthOptions = useMemo(() => generateMonthOptions(), []);
 
   // 택배사 코드 로드
@@ -163,9 +176,6 @@ function OrdersPageInner() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [showExportMenu, showAutoMenu, showImportMenu]);
 
-  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") setActiveSearch(search);
-  };
   const handleSearchClear = () => {
     setSearch("");
     setActiveSearch("");
@@ -425,10 +435,15 @@ function OrdersPageInner() {
       {/* 발주서 탭 */}
       {activeTab === "orders" && (<>
       {/* 월별 탭 */}
-      <div className="flex items-center gap-1 md:gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+      <div
+        ref={monthScrollRef}
+        className="flex items-center gap-1 md:gap-1.5 overflow-x-auto pb-1 scrollbar-hide flex-nowrap scroll-smooth"
+        style={{ scrollSnapType: "x mandatory" }}
+      >
         <button
+          ref={!selectedMonth ? activeMonthRef : undefined}
           onClick={() => handleMonthChange(null)}
-          className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors min-h-[36px] flex items-center ${
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors min-h-[36px] flex items-center shrink-0 scroll-snap-align-start ${
             !selectedMonth ? "bg-blue-600/20 text-blue-400" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
           }`}
         >
@@ -436,12 +451,14 @@ function OrdersPageInner() {
         </button>
         {allMonths.map((m) => {
           const hasData = months.includes(m);
+          const isActive = selectedMonth === m;
           return (
             <button
               key={m}
+              ref={isActive ? activeMonthRef : undefined}
               onClick={() => handleMonthChange(m === selectedMonth ? null : m)}
-              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors min-h-[36px] flex items-center ${
-                selectedMonth === m
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors min-h-[36px] flex items-center shrink-0 ${
+                isActive
                   ? "bg-blue-600/20 text-blue-400"
                   : hasData
                     ? "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
@@ -452,7 +469,7 @@ function OrdersPageInner() {
             </button>
           );
         })}
-        <div className="relative">
+        <div className="relative shrink-0">
           <button
             onClick={() => setShowMonthPicker(!showMonthPicker)}
             className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-tertiary)]"
@@ -476,28 +493,18 @@ function OrdersPageInner() {
 
       {/* 액션 바 */}
       <div className="space-y-2">
-        {/* 줄 1: 검색 + 필터 */}
-        <div className="flex items-center gap-2 md:gap-3">
-          <div className="relative flex-1 min-w-0 md:min-w-48 md:max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="검색어 입력 후 Enter..."
-              className="w-full pl-9 pr-8 py-2 min-h-[44px] md:min-h-0 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-blue-500/50"
-            />
-            {search && (
-              <button onClick={handleSearchClear} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-                <span className="text-xs">✕</span>
-              </button>
-            )}
-          </div>
-
+        {/* 줄 1: 검색 + 필터 (FilterBar: 모바일에서 검색 1행, 필터 2행으로 자동 스택) */}
+        <FilterBar
+          search={search}
+          onSearchChange={setSearch}
+          onSearchSubmit={() => setActiveSearch(search)}
+          onSearchClear={handleSearchClear}
+          placeholder="검색어 입력..."
+        >
           <select
             value={selectedMarketplace || "전체"}
             onChange={(e) => setSelectedMarketplace(e.target.value === "전체" ? null : e.target.value)}
-            className="px-2 md:px-3 py-2 min-h-[44px] md:min-h-0 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] outline-none"
+            className="px-2 md:px-3 py-2 min-h-[44px] sm:min-h-0 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] outline-none"
           >
             {MARKETPLACE_OPTIONS.map((opt) => (
               <option key={opt} value={opt}>{opt}</option>
@@ -505,7 +512,7 @@ function OrdersPageInner() {
           </select>
 
           {/* 날짜 범위 필터 */}
-          <div className={`flex items-center gap-1 px-2 py-1.5 min-h-[44px] md:min-h-0 border rounded-lg transition-colors ${selectedDateFrom || selectedDateTo ? "bg-blue-600/10 border-blue-500/40" : "bg-[var(--bg-hover)] border-[var(--border)]"}`}>
+          <div className={`flex items-center gap-1 px-2 py-1.5 min-h-[44px] sm:min-h-0 border rounded-lg transition-colors ${selectedDateFrom || selectedDateTo ? "bg-blue-600/10 border-blue-500/40" : "bg-[var(--bg-hover)] border-[var(--border)]"}`}>
             <Calendar className={`w-3.5 h-3.5 shrink-0 ${selectedDateFrom || selectedDateTo ? "text-blue-400" : "text-[var(--text-muted)]"}`} />
             <input
               type="date"
@@ -525,7 +532,7 @@ function OrdersPageInner() {
               <button onClick={clearDateFilter} className="text-blue-400/60 hover:text-blue-300 text-xs leading-none ml-0.5 shrink-0">✕</button>
             )}
           </div>
-        </div>
+        </FilterBar>
 
         {/* 줄 2: 액션 버튼들 */}
         <div className="flex items-center gap-2 flex-wrap">
@@ -694,12 +701,27 @@ function OrdersPageInner() {
       {showAddModal && (
         <OrderModal onSave={handleAddOrder} onClose={() => setShowAddModal(false)} />
       )}
-      {sidePanelOrder && (
+      {sidePanelOrder && !isMobile && (
         <OrderSidePanel
           order={orders.find((o) => o.id === sidePanelOrder.id) || sidePanelOrder}
           onUpdate={updateOrder}
           onClose={() => setSidePanelOrder(null)}
         />
+      )}
+      {isMobile && (
+        <MobileSheet
+          open={!!sidePanelOrder}
+          onClose={() => setSidePanelOrder(null)}
+          title="주문 상세"
+        >
+          {sidePanelOrder && (
+            <OrderSidePanelContent
+              order={orders.find((o) => o.id === sidePanelOrder.id) || sidePanelOrder}
+              onUpdate={updateOrder}
+              onClose={() => setSidePanelOrder(null)}
+            />
+          )}
+        </MobileSheet>
       )}
       {showAutoPurchase && (
         <AutoPurchaseModal

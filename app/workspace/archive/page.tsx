@@ -160,7 +160,7 @@ export default function ArchivePage() {
           <button
             onClick={handleBulkDelete}
             disabled={deleting}
-            className="flex items-center gap-1.5 px-3 py-2 bg-red-600/20 text-red-400 hover:bg-red-600/30 disabled:opacity-50 text-sm rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] bg-red-600/20 text-red-400 hover:bg-red-600/30 disabled:opacity-50 text-sm rounded-lg transition-colors"
           >
             <Trash2 className="w-4 h-4" />
             {deleting ? "삭제 중..." : `${selectedIds.size}개 삭제`}
@@ -169,10 +169,11 @@ export default function ArchivePage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-[var(--border-subtle)]">
+      <div className="overflow-x-auto scrollbar-hide border-b border-[var(--border-subtle)]">
+      <div className="flex gap-1 min-w-max">
         <button
           onClick={() => handleTabChange("playauto_tracking")}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
             activeTab === "playauto_tracking"
               ? "border-purple-400 text-purple-400"
               : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
@@ -188,7 +189,7 @@ export default function ArchivePage() {
         </button>
         <button
           onClick={() => handleTabChange("order_export")}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
             activeTab === "order_export"
               ? "border-blue-400 text-blue-400"
               : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
@@ -204,7 +205,7 @@ export default function ArchivePage() {
         </button>
         <button
           onClick={() => handleTabChange("playauto_product")}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
             activeTab === "playauto_product"
               ? "border-violet-400 text-violet-400"
               : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
@@ -218,6 +219,7 @@ export default function ArchivePage() {
             </span>
           )}
         </button>
+      </div>
       </div>
 
       {/* Content */}
@@ -238,7 +240,8 @@ export default function ArchivePage() {
           </p>
         </div>
       ) : (
-        <div className="space-y-1">
+        <div className="overflow-x-auto scrollbar-hide">
+        <div className="space-y-1 min-w-[600px]">
           {/* 전체 선택 헤더 */}
           <div className="flex items-center gap-3 px-4 py-2 text-xs text-[var(--text-muted)]">
             <input
@@ -272,6 +275,7 @@ export default function ArchivePage() {
               <ArchiveRow key={archive.id} archive={archive} activeTab={activeTab} selectedIds={selectedIds} downloading={downloading} onToggle={handleSelectToggle} onDownload={handleDownload} formatDate={formatDate} getRemainingDays={getRemainingDays} />
             ))
           )}
+        </div>
         </div>
       )}
     </div>
@@ -322,7 +326,7 @@ function ArchiveRow({ archive, activeTab, selectedIds, downloading, onToggle, on
       <button
         onClick={() => onDownload(archive.id, archive.file_name)}
         disabled={downloading === archive.id}
-        className="w-20 ml-auto flex items-center justify-center gap-1 px-2 py-1.5 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-active)] disabled:opacity-50 transition-colors"
+        className="w-20 ml-auto flex items-center justify-center gap-1 px-2 py-1.5 min-h-[44px] bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-active)] disabled:opacity-50 transition-colors"
       >
         {downloading === archive.id ? (
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
