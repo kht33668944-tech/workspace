@@ -49,7 +49,6 @@ export default function ProductsPage() {
   const [exportStep, setExportStep] = useState("");
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [scrapingPrices, setScrapingPrices] = useState(false);
-  const [scrapeProgress, setScrapeProgress] = useState("");
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const [importingCodes, setImportingCodes] = useState(false);
@@ -80,12 +79,18 @@ export default function ProductsPage() {
   );
   const changedScrapeCount = useMemo(() => scrapeResults.filter(r => r.price !== r.previous).length, [scrapeResults]);
 
-  // 최저가 수집 로그 자동 스크롤
   useEffect(() => {
     if (scrapeLogRef.current) {
       scrapeLogRef.current.scrollTop = scrapeLogRef.current.scrollHeight;
     }
   }, [scrapeLog]);
+
+  const pushScrapeLog = useCallback((msg: string) => {
+    setScrapeLog(prev => {
+      const next = [...prev, msg];
+      return next.length > 200 ? next.slice(-200) : next;
+    });
+  }, []);
 
   // products 탭에서 배치 완료 시 로컬 캐시 동기화
   useEffect(() => {
@@ -119,9 +124,6 @@ export default function ProductsPage() {
   }, [products]);
 
   const handleSearchSubmit = () => setActiveSearch(search);
-  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") setActiveSearch(search);
-  };
   const handleSearchClear = () => {
     setSearch("");
     setActiveSearch("");
@@ -175,7 +177,6 @@ export default function ProductsPage() {
     const abortController = new AbortController();
     scrapeAbortRef.current = abortController;
     setScrapingPrices(true);
-    setScrapeProgress("최저가 수집 준비 중...");
     setScrapeLog(["최저가 수집 준비 중..."]);
     setScrapeResults([]);
 
@@ -222,19 +223,14 @@ export default function ProductsPage() {
                   : `${event.price.toLocaleString()}원 (변동없음)`
                 : "실패";
               const msg = `(${event.index}/${event.total}) ${event.name} → ${priceText}`;
-              setScrapeProgress(msg);
-              setScrapeLog(prev => [...prev, msg]);
+              pushScrapeLog(msg);
               if (event.price > 0) {
                 collectedChanges.push({ id: event.id, name: event.name, previous: event.previous_price, price: event.price });
               }
             } else if (event.type === "done") {
-              const msg = `완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패`;
-              setScrapeProgress(msg);
-              setScrapeLog(prev => [...prev, msg]);
+              pushScrapeLog(`완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패`);
             } else if (event.type === "error") {
-              const msg = `오류: ${event.message}`;
-              setScrapeProgress(msg);
-              setScrapeLog(prev => [...prev, msg]);
+              pushScrapeLog(`오류: ${event.message}`);
             }
           } catch {}
         }
@@ -242,24 +238,19 @@ export default function ProductsPage() {
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         stopped = true;
-        const msg = `중단됨: ${collectedChanges.length}개 수집 완료`;
-        setScrapeProgress(msg);
-        setScrapeLog(prev => [...prev, msg]);
+        pushScrapeLog(`중단됨: ${collectedChanges.length}개 수집 완료`);
       } else {
-        const msg = "최저가 수집 중 오류 발생";
-        setScrapeProgress(msg);
-        setScrapeLog(prev => [...prev, msg]);
+        pushScrapeLog("최저가 수집 중 오류 발생");
       }
     } finally {
       scrapeAbortRef.current = null;
       setScrapingPrices(false);
-      // 수집 결과가 있으면 모달 표시
       if (collectedChanges.length > 0) {
         setScrapeResults([...collectedChanges]);
         setScrapeResultModalOpen(true);
       }
       if (!stopped && collectedChanges.length === 0) {
-        setTimeout(() => { setScrapeProgress(""); setScrapeLog([]); }, 3000);
+        setTimeout(() => setScrapeLog([]), 3000);
       }
     }
   };
@@ -293,7 +284,7 @@ export default function ProductsPage() {
       refetchPriceChanges();
       setScrapeResultModalOpen(false);
       setScrapeResults([]);
-      setScrapeProgress("");
+      setScrapeLog([]);
     } catch {
       alert("가격 적용 중 오류가 발생했습니다.");
     } finally {
@@ -833,7 +824,7 @@ export default function ProductsPage() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => { setScrapeResultModalOpen(false); setScrapeResults([]); setScrapeProgress(""); }}
+                onClick={() => { setScrapeResultModalOpen(false); setScrapeResults([]); setScrapeLog([]); }}
                 className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
               >
                 닫기
@@ -884,8 +875,7 @@ export default function ProductsPage() {
         <BatchDetailModal items={batchItems} onClose={dismissBatch} onClear={clearBatch} />
       )}
 
-      {/* 최저가 수집 진행 로그 */}
-      {(scrapingPrices || scrapeProgress) && (
+      {(scrapingPrices || scrapeLog.length > 0) && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[min(480px,calc(100vw-24px))] bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-lg overflow-hidden">
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border)]">
             <div className="flex items-center gap-2">
@@ -908,9 +898,6 @@ export default function ProductsPage() {
             {scrapeLog.map((line, i) => (
               <p key={i} className="text-xs text-[var(--text-secondary)] leading-relaxed">{line}</p>
             ))}
-            {scrapeLog.length === 0 && scrapeProgress && (
-              <p className="text-xs text-[var(--text-secondary)]">{scrapeProgress}</p>
-            )}
           </div>
         </div>
       )}

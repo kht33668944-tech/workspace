@@ -34,11 +34,6 @@ export const COLUMNS: Col[] = [
 ];
 export const COL_COUNT = COLUMNS.length;
 
-export const MOBILE_VISIBLE_KEYS = new Set([
-  "product_name", "lowest_price", "margin_rate", "category",
-]);
-export const MOBILE_COLUMNS = COLUMNS.filter(c => MOBILE_VISIBLE_KEYS.has(c.key));
-
 export type SortDir = "asc" | "desc" | null;
 export interface CellPos { row: number; col: number }
 export interface SelRange { r1: number; c1: number; r2: number; c2: number }

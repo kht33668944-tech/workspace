@@ -22,10 +22,6 @@ interface OrderSidePanelProps {
   onClose: () => void;
 }
 
-/**
- * 패널 내부 콘텐츠만 렌더 (MobileSheet 안에서 사용).
- * fixed 래퍼 없이 flex-col 레이아웃만 포함.
- */
 export function OrderSidePanelContent({ order, onUpdate, onClose }: OrderSidePanelProps) {
   const [logInput, setLogInput] = useState("");
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -168,9 +164,6 @@ export function OrderSidePanelContent({ order, onUpdate, onClose }: OrderSidePan
   );
 }
 
-/**
- * 데스크톱용 사이드 패널 (fixed right-side overlay).
- */
 export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);

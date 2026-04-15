@@ -132,11 +132,13 @@ function OrdersPageInner() {
     });
   }, [selectedMonth, selectedMarketplace, activeSearch, selectedDateFrom, selectedDateTo, columnFilters]);
 
-  // 선택된 월 변경 시 탭을 뷰포트 중앙으로 스크롤
+  const monthMountedRef = useRef(false);
   useEffect(() => {
-    if (activeMonthRef.current) {
-      activeMonthRef.current.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    if (!monthMountedRef.current) {
+      monthMountedRef.current = true;
+      return;
     }
+    activeMonthRef.current?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   }, [selectedMonth]);
 
   const monthOptions = useMemo(() => generateMonthOptions(), []);
@@ -493,7 +495,7 @@ function OrdersPageInner() {
 
       {/* 액션 바 */}
       <div className="space-y-2">
-        {/* 줄 1: 검색 + 필터 (FilterBar: 모바일에서 검색 1행, 필터 2행으로 자동 스택) */}
+        {/* 줄 1: 검색 + 필터 */}
         <FilterBar
           search={search}
           onSearchChange={setSearch}
