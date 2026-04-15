@@ -17,6 +17,10 @@ interface ProgressCallback {
   (orderId: string, status: "processing" | "success" | "failed", message: string, purchaseOrderNo?: string): void;
 }
 
+interface OrderCompleteCallback {
+  (orderId: string, purchaseOrderNo: string, cost?: number, paymentMethod?: string): Promise<void> | void;
+}
+
 /**
  * 지마켓 자동구매 스크래퍼
  * 1. 로그인 → 2. 각 주문건 순차 처리 (상품 URL → 쿠폰 → 구매 → 배송지 → 결제 → 주문번호 추출)
@@ -27,7 +31,8 @@ export async function purchaseGmarket(
   paymentPin: string,
   orders: PurchaseOrderInfo[],
   onProgress?: ProgressCallback,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onOrderComplete?: OrderCompleteCallback
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
@@ -118,6 +123,15 @@ export async function purchaseGmarket(
         result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod });
         onProgress?.(order.orderId, "success", `주문번호: ${lastOrderNo}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${lastPaymentMethod ? ` [${lastPaymentMethod}]` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`, lastOrderNo);
         console.log(`[gmarket-purchase] 주문 성공: ${order.orderId} → ${lastOrderNo} (총 원가: ${finalCost ?? "미확인"}, ${totalQty}개, 카드: ${lastPaymentMethod ?? "미확인"})`);
+
+        // 성공 즉시 DB 반영 (취소/예외로 배치가 중단돼도 데이터 유실 방지)
+        if (onOrderComplete) {
+          try {
+            await onOrderComplete(order.orderId, lastOrderNo, finalCost, lastPaymentMethod);
+          } catch (cbErr) {
+            console.error(`[gmarket-purchase] onOrderComplete 콜백 오류 (${order.orderId}):`, cbErr instanceof Error ? cbErr.message : String(cbErr));
+          }
+        }
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         const failMsg = totalQty > 1 ? `${reason} (${successCount}/${totalQty}개 구매 후 실패)` : reason;

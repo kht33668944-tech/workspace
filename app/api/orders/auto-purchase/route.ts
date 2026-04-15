@@ -201,7 +201,7 @@ export async function POST(request: NextRequest) {
           let result;
           try {
             if (platform === "gmarket") {
-              result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, body.orders, onProgress, signal);
+              result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, body.orders, onProgress, signal, onOrderComplete);
             } else {
               result = await purchaseOhouse(loginId, loginPw, body.orders, onProgress, supabase, signal, body.paymentPin, naverLoginId, naverLoginPw);
             }
