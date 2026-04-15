@@ -257,6 +257,9 @@ async function processSingleOrder(
   // 4. 쿠폰 적용 후 오버레이/inert 최종 정리
   await dismissCouponOverlays(activePage).catch(() => {});
 
+  // 4-1. 옵션선택 드롭다운이 있으면 옵션 선택 (없으면 스킵)
+  await selectProductOption(activePage, order);
+
   // 5. 구매하기 클릭
   await clickPurchaseButton(activePage);
 
@@ -579,6 +582,67 @@ async function dismissCouponOverlays(page: Page) {
 // ═══════════════════════════════════
 // 구매하기 버튼 클릭
 // ═══════════════════════════════════
+/**
+ * 옵션선택 드롭다운이 있는 상품 처리.
+ * - 드롭다운 없으면 즉시 반환 (단일 상품)
+ * - order.optionName 있으면 텍스트 매칭 (공백/특수문자 무시), 없으면 첫 번째 옵션
+ * - 여러 옵션 레벨(#optOrderSel_0, #optOrderSel_1 ...) 지원. "Wing"(사이드 스티키) 제외
+ */
+async function selectProductOption(page: Page, order: PurchaseOrderInfo) {
+  try {
+    const result = await page.evaluate((wantedOptionName: string | undefined) => {
+      const normalize = (s: string) => s.replace(/\s+/g, "").replace(/[^가-힣a-zA-Z0-9]/g, "").toLowerCase();
+      const wanted = wantedOptionName ? normalize(wantedOptionName) : null;
+
+      const boxes = Array.from(document.querySelectorAll('[id^="optOrderSel_"]'))
+        .filter((el) => !el.id.includes("Wing"));
+
+      if (boxes.length === 0) {
+        return { found: false, message: "옵션 드롭다운 없음 (단일 상품)" };
+      }
+
+      const picked: string[] = [];
+      for (const box of boxes) {
+        const openBtn = box.querySelector<HTMLButtonElement>(".uxeselect_btn");
+        if (openBtn) openBtn.click();
+
+        const options = Array.from(box.querySelectorAll<HTMLAnchorElement>(".uxeselect_dropdown li a"));
+        if (options.length === 0) continue;
+
+        let target: HTMLAnchorElement | undefined;
+        if (wanted) {
+          target = options.find((a) => normalize(a.textContent || "").includes(wanted));
+        }
+        if (!target) target = options[0];
+
+        target.click();
+        picked.push(target.textContent?.trim() || "");
+
+        const hiddenNo = box.querySelector<HTMLInputElement>('input[id^="optOrderSelOptNo_"]');
+        if (!hiddenNo?.value) {
+          return { found: true, error: `옵션 선택 실패 (hidden input 미세팅): ${picked.join(" / ")}` };
+        }
+      }
+
+      return { found: true, picked };
+    }, order.optionName);
+
+    if (!result.found) {
+      console.log(`[gmarket-purchase] ${result.message}`);
+      return;
+    }
+    if ("error" in result && result.error) {
+      throw new Error(result.error);
+    }
+    console.log(`[gmarket-purchase] 옵션 선택 완료: ${(result as { picked: string[] }).picked.join(", ")}`);
+    await page.waitForTimeout(800);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`[gmarket-purchase] 옵션 선택 실패: ${msg}`);
+    throw new Error(`옵션 선택 실패: ${msg}`);
+  }
+}
+
 async function clickPurchaseButton(page: Page) {
   // 구매 버튼 클릭 전 모든 오버레이/쿠폰 팝업 정리
   await page.evaluate(() => {

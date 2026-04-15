@@ -41,6 +41,7 @@ export interface PurchaseOrderInfo {
   deliveryMemo: string;   // 배송메모
   quantity: number;       // 수량
   productName?: string;   // 상품명 (구매 로그 기록용)
+  optionName?: string;    // 옵션명 (옵션선택 드롭다운이 있는 상품용; 미지정 시 첫 번째 옵션 선택)
 }
 
 export interface PurchaseResult {
