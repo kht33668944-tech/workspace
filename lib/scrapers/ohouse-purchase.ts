@@ -8,6 +8,8 @@ const LOGIN_URL = "https://ohou.se/users/sign_in";
 
 // 환경변수에서 읽기 (.env.local)
 const FIXED_PHONE_SUFFIX = process.env.OHOUSE_PHONE_SUFFIX ?? "";
+const TOSSPAY_PHONE = process.env.OHOUSE_TOSSPAY_PHONE ?? "";   // 예: 010-3366-8944
+const TOSSPAY_BIRTH = process.env.OHOUSE_TOSSPAY_BIRTH ?? "";   // 예: 980309
 const PAYMENT_WAIT_MS = 60000;          // 결제 승인 대기 시간 (60초)
 
 interface ProgressCallback {
@@ -133,6 +135,7 @@ export async function purchaseOhouse(
       onProgress?.(order.orderId, "processing", "구매 진행 중...");
 
       let lastOrderNo = "";
+      let lastPaymentMethod: string | undefined;
       let totalCost = 0;
       let costExtractedCount = 0;
       let successCount = 0;
@@ -145,11 +148,12 @@ export async function purchaseOhouse(
           }
 
           const singleOrder = { ...order, quantity: 1 };
-          const { purchaseOrderNo, cost } = await processSingleOrder(
+          const { purchaseOrderNo, cost, paymentMethod } = await processSingleOrder(
             page, activeContext, singleOrder, q > 1, onProgress, paymentPin, naverLoginId, naverLoginPw
           );
 
           lastOrderNo = purchaseOrderNo;
+          if (paymentMethod) lastPaymentMethod = paymentMethod;
           if (cost) { totalCost += cost; costExtractedCount++; }
           successCount++;
 
@@ -165,7 +169,7 @@ export async function purchaseOhouse(
             ? Math.round(totalCost / costExtractedCount) * totalQty
             : totalCost;
         }
-        result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost });
+        result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod });
         onProgress?.(order.orderId, "success",
           `주문번호: ${lastOrderNo}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`,
           lastOrderNo
@@ -241,6 +245,7 @@ async function login(context: BrowserContext, loginId: string, loginPw: string) 
 interface SingleOrderResult {
   purchaseOrderNo: string;
   cost?: number;
+  paymentMethod?: string;
 }
 
 async function processSingleOrder(
@@ -275,16 +280,19 @@ async function processSingleOrder(
 
   // 6. 결제수단 선택 (간편결제 할인 비교 → 네이버페이 fallback) + 결제
   onProgress?.(order.orderId, "waiting_payment", "결제 처리 중...");
-  await selectPaymentAndRequest(page, paymentPin, naverLoginId, naverLoginPw);
+  const selectedPayName = await selectPaymentAndRequest(page, paymentPin, naverLoginId, naverLoginPw);
 
   // 7. 결제 완료 대기
   console.log(`[ohouse-purchase] 결제 완료 대기 중... (${PAYMENT_WAIT_MS / 1000}초)`);
   await waitForPaymentCompletion(page);
 
-  // 8. 주문 완료 후 주문번호 + 원가 추출
+  // 8. 주문 완료 후 주문번호 + 원가 + 카드사 추출 (주문상세 페이지에서 추출)
   const orderInfo = await extractOrderInfo(page);
 
-  return orderInfo;
+  // 카드사(삼성/국민 등) 추출 성공 시 그 값 사용, 실패 시 선택한 간편결제 이름으로 fallback
+  const paymentMethod = orderInfo.paymentMethod ?? selectedPayName;
+
+  return { ...orderInfo, paymentMethod };
 }
 
 // ═══════════════════════════════════
@@ -610,10 +618,13 @@ async function parseEasyPayOptions(page: Page): Promise<EasyPayOption[]> {
         const el = candidates[i] as HTMLElement;
         const text = el.textContent?.trim() || "";
 
-        // 결제수단 이름 포함 + 텍스트 길이 제한 (너무 큰 컨테이너 제외)
         if (!text.includes(name) || text.length > 100) continue;
 
-        // 이미 찾은 이름이면 스킵
+        // 여러 결제수단 이름을 동시에 포함 = 간편결제 바깥 패널 → 제외
+        // (각 결제수단 '행'은 자기 이름만 포함해야 함)
+        const othersInText = paymentNames.filter(n => n !== name && text.includes(n));
+        if (othersInText.length > 0) continue;
+
         if (results.some(r => r.name === name)) break;
 
         // % 할인율 파싱 (예: "최대 15% 할인", "최대15%할인")
@@ -644,10 +655,14 @@ async function parseEasyPayOptions(page: Page): Promise<EasyPayOption[]> {
 /** evaluate를 사용하여 결제수단을 JS로 직접 클릭 (pointer event interception 우회) */
 async function clickPaymentOptionByName(page: Page, name: string): Promise<boolean> {
   return page.evaluate((targetName) => {
+    const paymentNames = ["카카오페이", "토스페이", "네이버페이", "페이코"];
     const candidates = document.querySelectorAll("label, button, div, li, a, span, [role='radio'], [role='button']");
     for (const el of candidates) {
       const text = el.textContent?.trim() || "";
-      if (text.includes(targetName) && text.length < 100 && el instanceof HTMLElement) {
+      if (!text.includes(targetName) || text.length >= 100) continue;
+      // 여러 결제수단 이름 포함 시 바깥 패널 → 제외
+      if (paymentNames.some(n => n !== targetName && text.includes(n))) continue;
+      if (el instanceof HTMLElement) {
         const rect = el.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
           el.click();
@@ -659,7 +674,7 @@ async function clickPaymentOptionByName(page: Page, name: string): Promise<boole
   }, name).catch(() => false);
 }
 
-async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLoginId?: string, naverLoginPw?: string) {
+async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLoginId?: string, naverLoginPw?: string): Promise<string | undefined> {
   try {
     // 결제 영역으로 스크롤
     await page.keyboard.press("End");
@@ -747,11 +762,14 @@ async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLog
     let paymentClicked = false;
 
     // 방법 1: Playwright locator로 직접 클릭 (force:true로 pointer interception 우회)
+    // :has-text는 조상도 매치되므로 다른 결제수단 이름을 포함하지 않는 행만 선택
+    const others = ["카카오페이", "토스페이", "네이버페이", "페이코"].filter(n => n !== selectedOption.name);
+    const notOthers = others.map(n => `:not(:has-text("${n}"))`).join("");
     const paymentLocators = [
-      page.locator(`label:has-text("${selectedOption.name}")`).first(),
-      page.locator(`button:has-text("${selectedOption.name}")`).first(),
-      page.locator(`li:has-text("${selectedOption.name}")`).first(),
-      page.locator(`div:has-text("${selectedOption.name}")`).first(),
+      page.locator(`label:has-text("${selectedOption.name}")${notOthers}`).first(),
+      page.locator(`button:has-text("${selectedOption.name}")${notOthers}`).first(),
+      page.locator(`li:has-text("${selectedOption.name}")${notOthers}`).first(),
+      page.locator(`[role="radio"]:has-text("${selectedOption.name}")${notOthers}`).first(),
     ];
 
     for (const loc of paymentLocators) {
@@ -810,11 +828,17 @@ async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLog
       console.log("[ohouse-purchase] 결제하기 버튼 클릭 (네이버페이)");
 
       await handleNaverPayFlow(page, popupPromise, pagePopupPromise, paymentPin, naverLoginId, naverLoginPw);
+    } else if (selectedOption.name === "토스페이") {
+      await payBtn.click({ force: true });
+      console.log("[ohouse-purchase] 결제하기 버튼 클릭 (토스페이)");
+      await handleTossPayFlow(page);
     } else {
       await payBtn.click({ force: true });
       console.log("[ohouse-purchase] 결제하기 버튼 클릭");
       console.log(`[ohouse-purchase] ${selectedOption.name} 결제 - 사용자 승인 대기`);
     }
+
+    return selectedOption.name;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[ohouse-purchase] 결제 처리 오류:", msg);
@@ -1153,6 +1177,129 @@ X,2,X
 // ═══════════════════════════════════
 // 결제 완료 대기
 // ═══════════════════════════════════
+// ═══════════════════════════════════
+// 토스페이 결제 플로우
+// ═══════════════════════════════════
+
+/** 토스페이 결제 처리:
+ *  1) 모달에서 "휴대폰번호" 탭 클릭 (기본은 QR코드 탭)
+ *  2) 휴대폰번호 + 생년월일 6자리 입력
+ *  3) 다음/확인 버튼 있으면 클릭
+ *  4) "토스 앱으로 온 알림을 눌러..." 화면 감지 후 종료
+ *     (이후 waitForPaymentCompletion이 order_result URL을 폴링하며 앱 승인 대기)
+ */
+async function handleTossPayFlow(page: Page) {
+  if (!TOSSPAY_PHONE || !TOSSPAY_BIRTH) {
+    throw new Error("토스페이 자동결제에 필요한 OHOUSE_TOSSPAY_PHONE / OHOUSE_TOSSPAY_BIRTH 환경변수가 설정되지 않았습니다.");
+  }
+
+  console.log("[ohouse-purchase] 토스페이 모달/iframe 대기 중...");
+
+  // 1. 토스페이 iframe 찾기 (pay.toss.im / tosspayments / tosspay 도메인)
+  //    최대 20초 폴링
+  const startWait = Date.now();
+  let tossFrame: import("playwright").Frame | Page | null = null;
+  while (Date.now() - startWait < 20000) {
+    for (const frame of page.frames()) {
+      const url = frame.url();
+      if (url.includes("toss") || url.includes("tosspay") || url.includes("pay.toss")) {
+        tossFrame = frame;
+        console.log(`[ohouse-purchase] 토스페이 iframe 감지: ${url}`);
+        break;
+      }
+    }
+    if (tossFrame) break;
+
+    // iframe 이 아니라 page 자체에 모달이 떠있을 수도 있으니 fallback
+    const inPage = await page.locator('text=휴대폰번호').first().isVisible({ timeout: 500 }).catch(() => false);
+    if (inPage) {
+      tossFrame = page;
+      console.log("[ohouse-purchase] 토스페이 모달이 page 루트에 있음");
+      break;
+    }
+
+    await page.waitForTimeout(500);
+  }
+
+  if (!tossFrame) {
+    throw new Error("토스페이 모달/iframe을 찾을 수 없습니다");
+  }
+
+  // tossFrame: Frame이면 locator(selector)만, Page면 locator(selector) 동일 API 사용 가능
+  const f = tossFrame as { locator: Page["locator"] };
+
+  await page.waitForTimeout(1000);
+
+  // 2. "휴대폰번호" 탭 클릭 (기본이 QR코드 탭)
+  const phoneTab = f.locator('text=휴대폰번호').first();
+  await phoneTab.waitFor({ state: "visible", timeout: 10000 });
+  try {
+    await phoneTab.click({ force: true });
+    console.log("[ohouse-purchase] '휴대폰번호' 탭 클릭");
+  } catch {
+    // 이미 활성일 수 있음
+  }
+  await page.waitForTimeout(800);
+
+  // 3. 휴대폰번호 입력
+  const phoneInput = f.locator(
+    'input[placeholder*="010"], input[placeholder*="휴대폰"], input[name*="phone"], input[type="tel"]'
+  ).first();
+  await phoneInput.waitFor({ state: "visible", timeout: 10000 });
+  await phoneInput.click();
+  await phoneInput.fill("");
+  await page.keyboard.type(TOSSPAY_PHONE, { delay: 40 });
+  console.log(`[ohouse-purchase] 토스페이 휴대폰번호 입력: ${TOSSPAY_PHONE}`);
+
+  // 4. 생년월일 6자리 입력
+  const birthInput = f.locator(
+    'input[placeholder*="910101"], input[placeholder*="생년월일"], input[name*="birth"]'
+  ).first();
+  await birthInput.waitFor({ state: "visible", timeout: 10000 });
+  await birthInput.click();
+  await birthInput.fill("");
+  await page.keyboard.type(TOSSPAY_BIRTH, { delay: 40 });
+  console.log("[ohouse-purchase] 토스페이 생년월일 입력 완료");
+
+  await page.waitForTimeout(800);
+
+  // 5. 하단 확인/다음 버튼 클릭 (있는 경우)
+  const nextBtnSelectors = [
+    'button:has-text("확인")',
+    'button:has-text("다음")',
+    'button:has-text("결제 알림")',
+    'button:has-text("알림 받기")',
+    'button:has-text("결제하기")',
+  ];
+  let nextClicked = false;
+  for (const sel of nextBtnSelectors) {
+    const btn = f.locator(sel).last();
+    if (await btn.isVisible({ timeout: 500 }).catch(() => false)) {
+      try {
+        await btn.click({ force: true });
+        nextClicked = true;
+        console.log(`[ohouse-purchase] 토스페이 '${sel}' 버튼 클릭`);
+        break;
+      } catch {
+        // 다음 셀렉터 시도
+      }
+    }
+  }
+  if (!nextClicked) {
+    await page.keyboard.press("Enter");
+    console.log("[ohouse-purchase] 토스페이 다음 버튼 미발견, Enter 전송");
+  }
+
+  // 6. "토스 앱으로 온 알림..." 안내 감지
+  const appNotice = f.locator('text=토스 앱').first();
+  const noticeVisible = await appNotice.isVisible({ timeout: 10000 }).catch(() => false);
+  if (noticeVisible) {
+    console.log("[ohouse-purchase] 토스 앱 푸시 대기 화면 진입 — 사용자 앱 승인 대기");
+  } else {
+    console.log("[ohouse-purchase] 토스 앱 안내 화면 미감지 (이미 진행됐거나 UI 변경) — 계속 진행");
+  }
+}
+
 async function waitForPaymentCompletion(page: Page) {
   // 결제 승인 후 자동으로 order_result?success=true 페이지로 리다이렉트됨
   const startTime = Date.now();
@@ -1199,7 +1346,32 @@ async function waitForPaymentCompletion(page: Page) {
 }
 
 // ═══════════════════════════════════
-// 주문 정보 추출 (주문번호 + 원가)
+// 카드사 키워드 → 표준 카드사명 매핑
+// ═══════════════════════════════════
+function extractCardBrand(text: string): string | undefined {
+  const cardBrands: [string[], string][] = [
+    [["삼성", "samsung"], "삼성"],
+    [["국민", "kb"], "국민"],
+    [["신한", "shinhan"], "신한"],
+    [["현대", "hyundai"], "현대"],
+    [["롯데", "lotte"], "롯데"],
+    [["하나", "hana", "외환"], "하나"],
+    [["우리", "woori"], "우리"],
+    [["비씨", "bc"], "비씨"],
+    [["농협", "nh"], "농협"],
+    [["씨티", "citi"], "씨티"],
+    [["카카오", "kakao"], "카카오"],
+    [["토스", "toss"], "토스"],
+  ];
+  const lower = text.toLowerCase();
+  for (const [keywords, brand] of cardBrands) {
+    if (keywords.some(k => lower.includes(k))) return brand;
+  }
+  return undefined;
+}
+
+// ═══════════════════════════════════
+// 주문 정보 추출 (주문번호 + 원가 + 결제수단 카드사)
 // ═══════════════════════════════════
 async function extractOrderInfo(page: Page): Promise<SingleOrderResult> {
   try {
@@ -1251,11 +1423,55 @@ async function extractOrderInfo(page: Page): Promise<SingleOrderResult> {
       throw new Error("주문번호를 추출할 수 없습니다");
     }
 
-    console.log(`[ohouse-purchase] 주문번호: ${orderNo}, 원가: ${cost ?? "미확인"}`);
+    // 4. 주문상세 페이지로 이동하여 결제 카드사 추출
+    //    (order_result 페이지에는 카드사 정보가 없으므로 /orders/{id} 상세 페이지로 이동)
+    let paymentMethod: string | undefined;
+    try {
+      const detailUrl = `https://ohou.se/orders/${orderNo}`;
+      console.log(`[ohouse-purchase] 주문상세 페이지 이동: ${detailUrl}`);
+      await page.goto(detailUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+      await page.waitForTimeout(2500);
+
+      const detailText = await page.locator("body").textContent().catch(() => "") || "";
+
+      // "결제수단" 또는 "결제방법" 라벨 다음에 나오는 텍스트에서 카드사 추출
+      // 예: "결제수단 삼성카드 일시불", "결제방법 KB국민카드"
+      const labelPatterns = [
+        /결제\s*수단\s*([^\n]{1,40})/,
+        /결제\s*방법\s*([^\n]{1,40})/,
+        /결제\s*방식\s*([^\n]{1,40})/,
+      ];
+      let paymentLineText = "";
+      for (const pat of labelPatterns) {
+        const m = detailText.match(pat);
+        if (m) {
+          paymentLineText = m[1];
+          console.log(`[ohouse-purchase] 결제수단 라인 매칭: "${paymentLineText}"`);
+          break;
+        }
+      }
+
+      if (paymentLineText) {
+        paymentMethod = extractCardBrand(paymentLineText);
+        if (paymentMethod) {
+          console.log(`[ohouse-purchase] 결제 카드사: ${paymentMethod}`);
+        } else {
+          console.log(`[ohouse-purchase] 카드사 매칭 실패 (원본: "${paymentLineText}")`);
+        }
+      } else {
+        console.log("[ohouse-purchase] '결제수단/결제방법' 라벨을 찾지 못함");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[ohouse-purchase] 주문상세 결제수단 추출 실패 (주문번호는 확보됨): ${msg}`);
+    }
+
+    console.log(`[ohouse-purchase] 주문번호: ${orderNo}, 원가: ${cost ?? "미확인"}, 결제수단: ${paymentMethod ?? "미확인"}`);
 
     return {
       purchaseOrderNo: orderNo,
       cost,
+      paymentMethod,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
