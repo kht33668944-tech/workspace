@@ -5,6 +5,17 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import type { CommissionRate, CommissionPlatform } from "@/types/database";
 
+/** 총수수료 자동 계산: vat/coupon_burden 제외 합산 후 vat 승수 적용 */
+export function calcTotalRate(details: Record<string, number>): number {
+  const exclude = new Set(["vat", "coupon_burden"]);
+  let sum = 0;
+  for (const [key, val] of Object.entries(details)) {
+    if (!exclude.has(key)) sum += val;
+  }
+  const total = details.vat !== undefined ? sum * details.vat : sum;
+  return Math.round(total * 100) / 100;
+}
+
 // 플랫폼별 수수료 항목 정의
 export const PLATFORM_FEE_FIELDS: Record<CommissionPlatform, { key: string; label: string }[]> = {
   smartstore: [

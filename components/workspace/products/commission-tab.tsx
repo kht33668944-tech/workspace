@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect } from "react";
 import { Plus, Trash2, Sparkles, Save } from "lucide-react";
-import { useCommissions, PLATFORM_FEE_FIELDS } from "@/hooks/use-commissions";
+import { useCommissions, PLATFORM_FEE_FIELDS, calcTotalRate } from "@/hooks/use-commissions";
 import { useAuth } from "@/context/AuthContext";
 import type { CommissionPlatform, CommissionRate } from "@/types/database";
 import { COMMISSION_PLATFORM_LABELS } from "@/types/database";
@@ -113,9 +113,8 @@ export default function CommissionTab() {
       updateRate(rate.id, { total_rate: numVal });
     } else {
       const newDetails = { ...rate.rate_details, [editingCell.field]: numVal };
-      // 개별 항목 수정 시 총수수료는 건드리지 않음
-      // (coupon_burden은 쿠폰부담률%, vat는 승수이므로 단순 합산 불가)
-      updateRate(rate.id, { rate_details: newDetails });
+      const newTotal = calcTotalRate(newDetails);
+      updateRate(rate.id, { rate_details: newDetails, total_rate: newTotal });
     }
     setEditingCell(null);
   };
