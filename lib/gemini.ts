@@ -8,7 +8,7 @@
  */
 
 import { GoogleGenerativeAI, type GenerateContentResult, type Part } from "@google/generative-ai";
-import { COUPANG_CATEGORIES, getCoupangCategoryByCode, buildCategoryListForPrompt, type CoupangRequiredOption } from "./coupang-category-options";
+import { COUPANG_OPTION_IDS, getCoupangCategoryByCode, buildCategoryListForPrompt, type CoupangRequiredOption } from "./coupang-category-options";
 
 // ── 모델 설정 ─────────────────────────────────────────────────────────────────
 const DEFAULT_MODEL = "gemini-2.5-flash";
@@ -634,26 +634,25 @@ ${numbered}
   });
 }
 
-/** 단위 타입 → 매칭되는 쿠팡 옵션 ID 매핑 */
+/** 단위 타입 → 매칭되는 쿠팡 옵션 ID 후보군 (우선순위 순) */
 const UNIT_TYPE_TO_OPTION_ID: Record<string, number[]> = {
-  g: [7637, 939],       // 개당 중량, 최소 중량
-  kg: [7637, 939],      // 개당 중량, 최소 중량
-  ml: [7823, 14326, 11147], // 개당 용량, 최소 용량, 용량
-  L: [7823, 14326, 11147],  // 개당 용량, 최소 용량, 용량
-  매: [7935, 10921],    // 개당 수량, 평량
-  장: [7935],           // 개당 수량
-  시트: [7935],         // 개당 수량
-  롤: [7935],           // 개당 수량
-  정: [14264],          // 개당 캡슐/정
-  캡슐: [14264],        // 개당 캡슐/정
-  포: [14264],          // 개당 캡슐/정
-  알: [14264],          // 개당 캡슐/정
+  g: [COUPANG_OPTION_IDS.PER_UNIT_WEIGHT, COUPANG_OPTION_IDS.MIN_WEIGHT],
+  kg: [COUPANG_OPTION_IDS.PER_UNIT_WEIGHT, COUPANG_OPTION_IDS.MIN_WEIGHT],
+  ml: [COUPANG_OPTION_IDS.PER_UNIT_CAPACITY, COUPANG_OPTION_IDS.MIN_CAPACITY, COUPANG_OPTION_IDS.CAPACITY],
+  L: [COUPANG_OPTION_IDS.PER_UNIT_CAPACITY, COUPANG_OPTION_IDS.MIN_CAPACITY, COUPANG_OPTION_IDS.CAPACITY],
+  매: [COUPANG_OPTION_IDS.PER_UNIT_COUNT, COUPANG_OPTION_IDS.GRAMMAGE],
+  장: [COUPANG_OPTION_IDS.PER_UNIT_COUNT],
+  시트: [COUPANG_OPTION_IDS.PER_UNIT_COUNT],
+  롤: [COUPANG_OPTION_IDS.PER_UNIT_COUNT],
+  정: [COUPANG_OPTION_IDS.PER_UNIT_CAPSULE],
+  캡슐: [COUPANG_OPTION_IDS.PER_UNIT_CAPSULE],
+  포: [COUPANG_OPTION_IDS.PER_UNIT_CAPSULE],
+  알: [COUPANG_OPTION_IDS.PER_UNIT_CAPSULE],
 };
 
-/** 수량 계열 옵션 ID */
-const QUANTITY_OPTION_IDS = new Set([7652, 7663]); // 수량(7652), 총 수량(7663)
+const QUANTITY_OPTION_IDS = new Set<number>([COUPANG_OPTION_IDS.QUANTITY, COUPANG_OPTION_IDS.TOTAL_QUANTITY]);
 
-/** 카테고리 필수옵션 데이터를 기반으로 옵션 형식 생성 */
+/** 카테고리 필수옵션 데이터를 기반으로 [옵션명]/값 형식 생성 */
 function buildCoupangOptionFromCategory(
   options: CoupangRequiredOption[],
   qty: number,
@@ -661,29 +660,14 @@ function buildCoupangOptionFromCategory(
   unitVal: number | null | undefined,
   unitType: string | null | undefined
 ): { hasOption: boolean; optionName: string; optionValue: string } {
-  const noOption = { hasOption: false, optionName: "", optionValue: "" };
-
-  // 수량 옵션 찾기 (수량 or 총 수량)
   const qtyOption = options.find(o => QUANTITY_OPTION_IDS.has(o.id));
-  if (!qtyOption) return noOption;
+  if (!qtyOption) return { hasOption: false, optionName: "", optionValue: "" };
 
-  // 단위 옵션 찾기 (수량 계열 제외)
-  const unitOptions = options.filter(o => !QUANTITY_OPTION_IDS.has(o.id));
+  const matchingIds = unitType ? (UNIT_TYPE_TO_OPTION_ID[unitType] ?? []) : [];
+  const matchedUnitOption = (unitVal && matchingIds.length > 0)
+    ? options.find(o => !QUANTITY_OPTION_IDS.has(o.id) && matchingIds.includes(o.id))
+    : undefined;
 
-  // 단위 옵션이 없거나, 상품에 단위 정보가 없으면 수량만
-  if (unitOptions.length === 0 || !unitVal || !unitType) {
-    return {
-      hasOption: true,
-      optionName: `[${qtyOption.name}]`,
-      optionValue: `${qty}${qtyUnit}`,
-    };
-  }
-
-  // 단위 타입에 맞는 옵션 찾기
-  const matchingIds = UNIT_TYPE_TO_OPTION_ID[unitType] ?? [];
-  const matchedUnitOption = unitOptions.find(o => matchingIds.includes(o.id));
-
-  // 매칭되는 단위 옵션이 없으면 수량만
   if (!matchedUnitOption) {
     return {
       hasOption: true,
@@ -692,7 +676,6 @@ function buildCoupangOptionFromCategory(
     };
   }
 
-  // 수량 + 단위 조합
   return {
     hasOption: true,
     optionName: `[${qtyOption.name}=${matchedUnitOption.name}]`,
