@@ -4,13 +4,14 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Search, X, Copy, Check, ImageOff, Upload, Trash2, Loader2,
   Sparkles, FileText, ExternalLink, Play, ChevronDown, ChevronUp,
-  Star, Link2, Code2, Layers,
+  Star, Link2, Code2, Layers, ShieldAlert,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useAiTask } from "@/context/AiTaskContext";
 import type { Product, ProductUpdate } from "@/types/database";
 import BatchDetailModal from "./batch-detail-modal";
+import ForbiddenWordsModal from "./forbidden-words-modal";
 
 interface Props {
   products: Product[];
@@ -211,6 +212,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [expandedImages, setExpandedImages] = useState<Set<string>>(new Set());
+  const [forbiddenOpen, setForbiddenOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
@@ -423,6 +425,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
       {batchVisible && (
         <BatchDetailModal items={batchItems} onClose={dismissBatch} onClear={clearBatch} />
       )}
+      <ForbiddenWordsModal open={forbiddenOpen} onClose={() => setForbiddenOpen(false)} />
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
 
       {/* 툴바 */}
@@ -458,6 +461,14 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
           <input type="checkbox" checked={showEmpty} onChange={(e) => setShowEmpty(e.target.checked)} className="rounded" />
           이미지 없는 상품 포함
         </label>
+        <button
+          onClick={() => setForbiddenOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-700/40 text-zinc-300 hover:bg-zinc-700/60 rounded-lg transition-colors"
+          title="상세페이지 생성 시 제외할 단어 관리"
+        >
+          <ShieldAlert className="w-3.5 h-3.5" />
+          금지어 관리
+        </button>
         {selectedIds.size > 0 && (
           <div className="flex items-center gap-2">
             <button

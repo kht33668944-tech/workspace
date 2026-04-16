@@ -67,6 +67,38 @@ function countFilledFields(specs: ProductSpecs): number {
   return Object.values(specs).filter((v) => !isPlaceholder(v as SpecValue)).length;
 }
 
+/** 금지어 포함 문장/항목 제거. 문자열은 문장 단위, 배열은 항목 단위, 객체는 값 단위로 필터링 */
+function filterForbidden(specs: ProductSpecs, words: string[]): ProductSpecs {
+  if (words.length === 0) return specs;
+  const contains = (s: string) => words.some((w) => s.includes(w));
+  const splitSentences = (s: string) =>
+    s.split(/(?<=[.!?。！？])\s+|\n+|(?<=\s)(?=[•·])|(?<=[,;])\s+/);
+
+  const result: ProductSpecs = {};
+  for (const [key, value] of Object.entries(specs)) {
+    if (!value) continue;
+    if (Array.isArray(value)) {
+      const kept = value.filter((v) => !contains(String(v)));
+      if (kept.length > 0) result[key] = kept;
+    } else if (typeof value === "object") {
+      const kept: Record<string, string | number> = {};
+      for (const [k, v] of Object.entries(value)) {
+        if (!contains(String(k)) && !contains(String(v))) kept[k] = v;
+      }
+      if (Object.keys(kept).length > 0) result[key] = kept;
+    } else {
+      const str = String(value);
+      if (!contains(str)) {
+        result[key] = value;
+      } else {
+        const kept = splitSentences(str).filter((s) => s.trim() && !contains(s));
+        if (kept.length > 0) result[key] = kept.join(" ");
+      }
+    }
+  }
+  return result;
+}
+
 /** Gemini 응답에서 JSON 파싱 → placeholder 제거 후 ProductSpecs 반환 */
 function parseGroundedSpecs(raw: string): ProductSpecs | null {
   try {
@@ -170,6 +202,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "productId와 productName 필요" }, { status: 400 });
   }
 
+  // ── 0. 금지어 목록 조회 ─────────────────────────────────────────────────
+  const serviceForForbidden = getServiceSupabaseClient();
+  const { data: forbiddenRows } = await serviceForForbidden
+    .from("forbidden_words")
+    .select("word");
+  const forbiddenWords: string[] = (forbiddenRows ?? [])
+    .map((r: { word: string }) => r.word)
+    .filter((w): w is string => typeof w === "string" && w.trim().length > 0);
+  const forbiddenClause = forbiddenWords.length > 0
+    ? `\n- 다음 단어가 포함된 문구/항목은 절대 포함하지 마세요 (해당 문장 전체 제외): ${forbiddenWords.join(", ")}`
+    : "";
+
   // ── 1. Gemini 웹 검색 Grounding으로 상품 정보 검색 ────────────────────────
   const groundingPrompt = `아래 제품의 정확한 상품 정보를 검색해서 알려주세요.
 
@@ -207,7 +251,7 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
 - 영양성분은 "열량 XXkcal, 나트륨 XXmg(X%), 탄수화물 XXg(X%)" 형태로 한 줄 정리
 - 원재료는 실제 제품 라벨에 표기된 전체 내용 기입
 - "상세페이지 참조" 같은 의미없는 값은 절대 넣지 마세요
-- 추가 설명 없이 JSON만 출력`;
+- 추가 설명 없이 JSON만 출력${forbiddenClause}`;
 
   // 1차 Gemini 검색 + 썸네일 base64 변환을 병렬 실행
   console.log("[detail] Gemini Grounding 검색 시작:", productName);
@@ -217,12 +261,13 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
   ]);
 
   let specs: ProductSpecs = parseGroundedSpecs(groundedResult ?? "") ?? {};
-  console.log("[detail] Gemini Grounding 결과:", countFilledFields(specs), "개 필드");
+  specs = filterForbidden(specs, forbiddenWords);
+  console.log("[detail] Gemini Grounding 결과:", countFilledFields(specs), "개 필드 (금지어", forbiddenWords.length, "개 적용)");
 
   // ── 2. 결과 부족 시 2차 검색 (다른 각도로) ─────────────────────────────────
   if (countFilledFields(specs) < 3) {
     console.log("[detail] 1차 결과 부족, 2차 검색 시도");
-    const fallbackPrompt = `"${productName}" 제품의 뒷면 라벨 정보를 검색해주세요.
+    const fallbackPrompt = `"${productName}" 제품의 뒷면 라벨 정보를 검색해주세요.${forbiddenClause}
 
 쿠팡, 네이버 쇼핑, 11번가 등에서 이 제품의 상품정보제공고시(상품정보 테이블)를 찾아주세요.
 
@@ -249,7 +294,8 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
 - 확인할 수 없는 항목은 빈 문자열
 - 추가 설명 없이 JSON만 출력`;
 
-    const fallbackSpecs = parseGroundedSpecs(await groundedSearch(fallbackPrompt) ?? "");
+    const fallbackRaw = parseGroundedSpecs(await groundedSearch(fallbackPrompt) ?? "");
+    const fallbackSpecs = fallbackRaw ? filterForbidden(fallbackRaw, forbiddenWords) : null;
     if (fallbackSpecs) {
       for (const [key, value] of Object.entries(fallbackSpecs)) {
         if (isPlaceholder(specs[key])) {
