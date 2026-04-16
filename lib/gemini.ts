@@ -582,15 +582,19 @@ ${numbered}
 각 상품에 대해:
 - categoryCode: 위 목록에서 가장 적합한 카테고리코드 (숫자)
 - quantity: 총 수량 숫자 (예: 24). 상품명에서 파악 불가하면 1
-- quantityUnit: 수량 단위 (개, 팩, 박스 등). 기본값 "개"
+- quantityUnit: 수량 단위. 반드시 "개", "박스", "세트", "팩" 중 하나만 사용!
+  * 캔/병/봉/봉지/통/입 → 무조건 "개"로 변환
+  * 팩은 컵라면/음료 번들일 때만 사용, 일반 식품은 "개"
 - unitValue: 개당 용량/중량/매수 등의 숫자값 (예: 86, 2, 100). 없으면 null
 - unitType: 단위 (g, kg, ml, L, 매, 장, 정, 캡슐, 포 등). 없으면 null
 
 예시:
 - "육개장사발면 86g 24개" → {"categoryCode":58647,"quantity":24,"quantityUnit":"개","unitValue":86,"unitType":"g"}
+- "참치 150g 12캔" → {"categoryCode":해당코드,"quantity":12,"quantityUnit":"개","unitValue":150,"unitType":"g"}
+- "떡갈비 450g 6팩" → {"categoryCode":해당코드,"quantity":6,"quantityUnit":"개","unitValue":450,"unitType":"g"}
+- "비빔면 130g 80봉" → {"categoryCode":해당코드,"quantity":80,"quantityUnit":"개","unitValue":130,"unitType":"g"}
 - "삼다수 2L 6입" → {"categoryCode":해당코드,"quantity":6,"quantityUnit":"개","unitValue":2,"unitType":"L"}
 - "물티슈 100매 10팩" → {"categoryCode":해당코드,"quantity":10,"quantityUnit":"개","unitValue":100,"unitType":"매"}
-- "비타민C 180정" → {"categoryCode":해당코드,"quantity":1,"quantityUnit":"개","unitValue":180,"unitType":"정"}
 - "무선이어폰" → {"categoryCode":해당코드,"quantity":1,"quantityUnit":"개","unitValue":null,"unitType":null}
 
 반드시 JSON 배열로만 출력 (설명 없이). 상품 개수: ${productNames.length}개`
@@ -652,6 +656,23 @@ const UNIT_TYPE_TO_OPTION_ID: Record<string, number[]> = {
 
 const QUANTITY_OPTION_IDS = new Set<number>([COUPANG_OPTION_IDS.QUANTITY, COUPANG_OPTION_IDS.TOTAL_QUANTITY]);
 
+/**
+ * 쿠팡 수량 단위 화이트리스트 (옵션별 허용 단위)
+ * - 수량: 개, 박스, 세트
+ * - 총 수량: 개, 박스, 세트, 팩
+ * 외 단위(캔, 봉, 병 등)는 "개"로 강제 변환
+ */
+const ALLOWED_QTY_UNITS: Record<number, Set<string>> = {
+  [COUPANG_OPTION_IDS.QUANTITY]: new Set(["개", "박스", "세트"]),
+  [COUPANG_OPTION_IDS.TOTAL_QUANTITY]: new Set(["개", "박스", "세트", "팩"]),
+};
+
+function normalizeQtyUnit(qtyUnit: string, qtyOptionId: number): string {
+  const allowed = ALLOWED_QTY_UNITS[qtyOptionId];
+  if (!allowed || allowed.has(qtyUnit)) return qtyUnit;
+  return "개";
+}
+
 /** 카테고리 필수옵션 데이터를 기반으로 [옵션명]/값 형식 생성 */
 function buildCoupangOptionFromCategory(
   options: CoupangRequiredOption[],
@@ -663,6 +684,8 @@ function buildCoupangOptionFromCategory(
   const qtyOption = options.find(o => QUANTITY_OPTION_IDS.has(o.id));
   if (!qtyOption) return { hasOption: false, optionName: "", optionValue: "" };
 
+  const safeQtyUnit = normalizeQtyUnit(qtyUnit, qtyOption.id);
+
   const matchingIds = unitType ? (UNIT_TYPE_TO_OPTION_ID[unitType] ?? []) : [];
   const matchedUnitOption = (unitVal && matchingIds.length > 0)
     ? options.find(o => !QUANTITY_OPTION_IDS.has(o.id) && matchingIds.includes(o.id))
@@ -672,13 +695,13 @@ function buildCoupangOptionFromCategory(
     return {
       hasOption: true,
       optionName: `[${qtyOption.name}]`,
-      optionValue: `${qty}${qtyUnit}`,
+      optionValue: `${qty}${safeQtyUnit}`,
     };
   }
 
   return {
     hasOption: true,
     optionName: `[${qtyOption.name}=${matchedUnitOption.name}]`,
-    optionValue: `${qty}${qtyUnit}=${unitVal}${unitType}`,
+    optionValue: `${qty}${safeQtyUnit}=${unitVal}${unitType}`,
   };
 }
