@@ -578,25 +578,35 @@ ${numbered}
 - 상품명에서 용량/수량 정보를 파악할 수 없으면 hasOption: false
 
 hasOption이 true인 경우:
-  - optionName: 쿠팡 필수 구매옵션명 형식 → "[총 수량=개당 용량]" 패턴
-    - 용량 단위가 있으면: "[총 수량=개당 용량]"
-    - 수량만 있으면: "[총 수량]"
+  - optionName: 쿠팡 공식 필수 구매옵션명만 사용! (단위에 따라 반드시 구분)
+    - 부피 단위(ml, L): "[수량=개당 용량]"
+    - 무게 단위(g, kg): "[수량=개당 중량]"
+    - 매수/장(매, 장, 시트, 롤): "[수량=개당 수량]"
+    - 정/캡슐(정, 캡슐, 포, 알): "[수량=개당 캡슐/정]"
+    - 화장지/티슈 평량(gsm): "[수량=평량]"
+    - 수량만 있고 개당 단위정보 없으면: "[수량]"
   - optionValue: 실제 값 → "48개=200ml" 패턴
-    - 총 수량과 개당 용량을 상품명에서 추출하여 조합
-    - 단위: ml, L, g, kg, 매, 개, 입, 정, 캡슐, 포 등
+    - 수량과 개당 단위값을 상품명에서 추출하여 조합
 
   - 예시:
-    - "삼다수 2L 6입" → hasOption:true, optionName:"[총 수량=개당 용량]", optionValue:"6개=2L"
-    - "비비고 왕교자 350g 4개" → hasOption:true, optionName:"[총 수량=개당 용량]", optionValue:"4개=350g"
-    - "물티슈 100매 10팩" → hasOption:true, optionName:"[총 수량=개당 매수]", optionValue:"10개=100매"
-    - "비타민C 1000mg 180정" → hasOption:true, optionName:"[총 수량=개당 정수]", optionValue:"1개=180정"
-    - "키친타올 150매 6롤" → hasOption:true, optionName:"[총 수량=개당 매수]", optionValue:"6개=150매"
+    - "삼다수 2L 6입" → hasOption:true, optionName:"[수량=개당 용량]", optionValue:"6개=2L"
+    - "비비고 왕교자 350g 4개" → hasOption:true, optionName:"[수량=개당 중량]", optionValue:"4개=350g"
+    - "프로틴바 40g 12개" → hasOption:true, optionName:"[수량=개당 중량]", optionValue:"12개=40g"
+    - "물티슈 100매 10팩" → hasOption:true, optionName:"[수량=개당 수량]", optionValue:"10개=100매"
+    - "비타민C 1000mg 180정" → hasOption:true, optionName:"[수량=개당 캡슐/정]", optionValue:"1개=180정"
+    - "키친타올 150매 6롤" → hasOption:true, optionName:"[수량=개당 수량]", optionValue:"6개=150매"
+    - "핸드크림 50ml 3개" → hasOption:true, optionName:"[수량=개당 용량]", optionValue:"3개=50ml"
+
+  주의:
+  - g, kg 단위는 반드시 "개당 중량"! "개당 용량"은 ml, L 부피 단위 전용!
+  - "개당 매수", "개당 정수"는 쿠팡에 없는 옵션명! 사용 금지!
+  - 매/장/시트는 "개당 수량", 정/캡슐은 "개당 캡슐/정" 사용!
 
 hasOption이 false인 경우: optionName:"", optionValue:""
 
 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
 [
-  {"hasOption": true, "optionName": "[총 수량=개당 용량]", "optionValue": "48개=200ml"},
+  {"hasOption": true, "optionName": "[수량=개당 중량]", "optionValue": "4개=350g"},
   {"hasOption": false, "optionName": "", "optionValue": ""}
 ]
 
