@@ -8,6 +8,7 @@
  */
 
 import { GoogleGenerativeAI, type GenerateContentResult, type Part } from "@google/generative-ai";
+import { COUPANG_CATEGORIES, getCoupangCategoryByCode, buildCategoryListForPrompt, type CoupangRequiredOption } from "./coupang-category-options";
 
 // ── 모델 설정 ─────────────────────────────────────────────────────────────────
 const DEFAULT_MODEL = "gemini-2.5-flash";
@@ -554,10 +555,11 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
 }
 
 /**
- * 쿠팡 필수 구매옵션 추출 (플레이오토 대량등록용)
- * 상품명에서 용량/수량 정보를 파싱하여 쿠팡 필수 구매옵션 형식 생성
- * - hasOption=true: optionName(옵션명), optionValue(옵션값)
- * - hasOption=false: 옵션 없음
+ * 쿠팡 필수 구매옵션 추출 (카테고리 데이터 기반)
+ *
+ * 1단계: Gemini가 상품명을 쿠팡 카테고리로 분류 + 수량/단위 값 추출
+ * 2단계: 카테고리 데이터에서 필수옵션 조회
+ * 3단계: 코드가 정확한 옵션 형식 자동 생성
  */
 export async function extractCoupangPurchaseOptions(
   productNames: string[]
@@ -565,77 +567,135 @@ export async function extractCoupangPurchaseOptions(
   const fallback = productNames.map(() => ({ hasOption: false, optionName: "", optionValue: "" }));
   if (!process.env.GEMINI_API_KEY || productNames.length === 0) return fallback;
 
+  // 1단계: Gemini에게 카테고리 분류 + 값 추출 요청
+  const categoryList = buildCategoryListForPrompt();
   const numbered = productNames.map((n, i) => `${i + 1}. ${n}`).join("\n");
   const result = await generateText(
-    `아래 상품명 목록을 분석해서 각 상품의 쿠팡 필수 구매옵션 정보를 추출하세요.
+    `아래 쿠팡 카테고리 목록을 참고하여, 각 상품명에 가장 적합한 쿠팡 카테고리를 분류하고 수량/단위 정보를 추출하세요.
 
-상품명 목록:
+[쿠팡 카테고리 목록] (코드:경로)
+${categoryList}
+
+[상품명 목록]
 ${numbered}
 
-규칙:
-- 식품, 음료, 생활용품(세제, 샴푸, 바디워시, 치약, 물티슈, 화장지 등), 화장품, 건강식품, 반려동물 사료 등 용량/중량/수량이 명시된 상품은 hasOption: true
-- 전자기기, 의류, 가구, 잡화 등 필수 구매옵션 비대상 상품은 hasOption: false
-- 상품명에서 용량/수량 정보를 파악할 수 없으면 hasOption: false
+각 상품에 대해:
+- categoryCode: 위 목록에서 가장 적합한 카테고리코드 (숫자)
+- quantity: 총 수량 숫자 (예: 24). 상품명에서 파악 불가하면 1
+- quantityUnit: 수량 단위 (개, 팩, 박스 등). 기본값 "개"
+- unitValue: 개당 용량/중량/매수 등의 숫자값 (예: 86, 2, 100). 없으면 null
+- unitType: 단위 (g, kg, ml, L, 매, 장, 정, 캡슐, 포 등). 없으면 null
 
-hasOption이 true인 경우:
-  - optionName: 쿠팡 공식 필수 구매옵션명만 사용! (단위에 따라 반드시 구분)
-    - 부피 단위(ml, L): "[수량=개당 용량]"
-    - 무게 단위(g, kg): "[수량=개당 중량]"
-    - 매수/장(매, 장, 시트, 롤): "[수량=개당 수량]"
-    - 정/캡슐(정, 캡슐, 포, 알): "[수량=개당 캡슐/정]"
-    - 화장지/티슈 평량(gsm): "[수량=평량]"
-    - 수량만 있고 개당 단위정보 없으면: "[수량]"
-  - optionValue: 실제 값 → "48개=200ml" 패턴
-    - 수량과 개당 단위값을 상품명에서 추출하여 조합
+예시:
+- "육개장사발면 86g 24개" → {"categoryCode":58647,"quantity":24,"quantityUnit":"개","unitValue":86,"unitType":"g"}
+- "삼다수 2L 6입" → {"categoryCode":해당코드,"quantity":6,"quantityUnit":"개","unitValue":2,"unitType":"L"}
+- "물티슈 100매 10팩" → {"categoryCode":해당코드,"quantity":10,"quantityUnit":"개","unitValue":100,"unitType":"매"}
+- "비타민C 180정" → {"categoryCode":해당코드,"quantity":1,"quantityUnit":"개","unitValue":180,"unitType":"정"}
+- "무선이어폰" → {"categoryCode":해당코드,"quantity":1,"quantityUnit":"개","unitValue":null,"unitType":null}
 
-  - 예시:
-    - "삼다수 2L 6입" → hasOption:true, optionName:"[수량=개당 용량]", optionValue:"6개=2L"
-    - "비비고 왕교자 350g 4개" → hasOption:true, optionName:"[수량=개당 중량]", optionValue:"4개=350g"
-    - "프로틴바 40g 12개" → hasOption:true, optionName:"[수량=개당 중량]", optionValue:"12개=40g"
-    - "물티슈 100매 10팩" → hasOption:true, optionName:"[수량=개당 수량]", optionValue:"10개=100매"
-    - "비타민C 1000mg 180정" → hasOption:true, optionName:"[수량=개당 캡슐/정]", optionValue:"1개=180정"
-    - "키친타올 150매 6롤" → hasOption:true, optionName:"[수량=개당 수량]", optionValue:"6개=150매"
-    - "핸드크림 50ml 3개" → hasOption:true, optionName:"[수량=개당 용량]", optionValue:"3개=50ml"
-
-  주의:
-  - g, kg 단위는 반드시 "개당 중량"! "개당 용량"은 ml, L 부피 단위 전용!
-  - "개당 매수", "개당 정수"는 쿠팡에 없는 옵션명! 사용 금지!
-  - 매/장/시트는 "개당 수량", 정/캡슐은 "개당 캡슐/정" 사용!
-
-hasOption이 false인 경우: optionName:"", optionValue:""
-
-반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
-[
-  {"hasOption": true, "optionName": "[수량=개당 중량]", "optionValue": "4개=350g"},
-  {"hasOption": false, "optionName": "", "optionValue": ""}
-]
-
-상품 개수: ${productNames.length}개, JSON 배열 항목도 반드시 ${productNames.length}개`
+반드시 JSON 배열로만 출력 (설명 없이). 상품 개수: ${productNames.length}개`
   );
 
   if (!result) return fallback;
 
+  let parsed: Array<{
+    categoryCode?: number;
+    quantity?: number;
+    quantityUnit?: string;
+    unitValue?: number | null;
+    unitType?: string | null;
+  }>;
+
   try {
     const jsonMatch = result.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return fallback;
-    const parsed = JSON.parse(jsonMatch[0]) as Array<{
-      hasOption?: boolean;
-      optionName?: string;
-      optionValue?: string;
-    }>;
+    parsed = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(parsed)) return fallback;
-    return productNames.map((_, i) => {
-      const item = parsed[i];
-      if (!item || !item.hasOption || !item.optionName || !item.optionValue) {
-        return { hasOption: false, optionName: "", optionValue: "" };
-      }
-      return {
-        hasOption: true,
-        optionName: item.optionName,
-        optionValue: item.optionValue,
-      };
-    });
   } catch {
     return fallback;
   }
+
+  // 2단계 + 3단계: 카테고리 데이터 기반 옵션 형식 생성
+  return productNames.map((_, i) => {
+    const item = parsed[i];
+    if (!item?.categoryCode) return { hasOption: false, optionName: "", optionValue: "" };
+
+    const category = getCoupangCategoryByCode(item.categoryCode);
+    if (!category || category.options.length === 0) {
+      return { hasOption: false, optionName: "", optionValue: "" };
+    }
+
+    const qty = item.quantity ?? 1;
+    const qtyUnit = item.quantityUnit ?? "개";
+    const unitVal = item.unitValue;
+    const unitType = item.unitType;
+
+    return buildCoupangOptionFromCategory(category.options, qty, qtyUnit, unitVal, unitType);
+  });
+}
+
+/** 단위 타입 → 매칭되는 쿠팡 옵션 ID 매핑 */
+const UNIT_TYPE_TO_OPTION_ID: Record<string, number[]> = {
+  g: [7637, 939],       // 개당 중량, 최소 중량
+  kg: [7637, 939],      // 개당 중량, 최소 중량
+  ml: [7823, 14326, 11147], // 개당 용량, 최소 용량, 용량
+  L: [7823, 14326, 11147],  // 개당 용량, 최소 용량, 용량
+  매: [7935, 10921],    // 개당 수량, 평량
+  장: [7935],           // 개당 수량
+  시트: [7935],         // 개당 수량
+  롤: [7935],           // 개당 수량
+  정: [14264],          // 개당 캡슐/정
+  캡슐: [14264],        // 개당 캡슐/정
+  포: [14264],          // 개당 캡슐/정
+  알: [14264],          // 개당 캡슐/정
+};
+
+/** 수량 계열 옵션 ID */
+const QUANTITY_OPTION_IDS = new Set([7652, 7663]); // 수량(7652), 총 수량(7663)
+
+/** 카테고리 필수옵션 데이터를 기반으로 옵션 형식 생성 */
+function buildCoupangOptionFromCategory(
+  options: CoupangRequiredOption[],
+  qty: number,
+  qtyUnit: string,
+  unitVal: number | null | undefined,
+  unitType: string | null | undefined
+): { hasOption: boolean; optionName: string; optionValue: string } {
+  const noOption = { hasOption: false, optionName: "", optionValue: "" };
+
+  // 수량 옵션 찾기 (수량 or 총 수량)
+  const qtyOption = options.find(o => QUANTITY_OPTION_IDS.has(o.id));
+  if (!qtyOption) return noOption;
+
+  // 단위 옵션 찾기 (수량 계열 제외)
+  const unitOptions = options.filter(o => !QUANTITY_OPTION_IDS.has(o.id));
+
+  // 단위 옵션이 없거나, 상품에 단위 정보가 없으면 수량만
+  if (unitOptions.length === 0 || !unitVal || !unitType) {
+    return {
+      hasOption: true,
+      optionName: `[${qtyOption.name}]`,
+      optionValue: `${qty}${qtyUnit}`,
+    };
+  }
+
+  // 단위 타입에 맞는 옵션 찾기
+  const matchingIds = UNIT_TYPE_TO_OPTION_ID[unitType] ?? [];
+  const matchedUnitOption = unitOptions.find(o => matchingIds.includes(o.id));
+
+  // 매칭되는 단위 옵션이 없으면 수량만
+  if (!matchedUnitOption) {
+    return {
+      hasOption: true,
+      optionName: `[${qtyOption.name}]`,
+      optionValue: `${qty}${qtyUnit}`,
+    };
+  }
+
+  // 수량 + 단위 조합
+  return {
+    hasOption: true,
+    optionName: `[${qtyOption.name}=${matchedUnitOption.name}]`,
+    optionValue: `${qty}${qtyUnit}=${unitVal}${unitType}`,
+  };
 }
