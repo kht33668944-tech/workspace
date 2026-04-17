@@ -437,7 +437,7 @@ export default function ProductsPage() {
     if (file) handlePlatformCodeFile(file);
   };
 
-  const handlePriceUpdateExport = async () => {
+  const handlePriceUpdateExport = async (target: PlayAutoExportPlatform | "all") => {
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) return;
     setExportModalOpen(false);
@@ -446,8 +446,10 @@ export default function ProductsPage() {
     await assignSellerCodes(ids);
     setExportStep("가격수정 엑셀 생성 중...");
 
-    // 가격수정은 ESM을 옥션/지마켓/11번가 개별 파일로 분리
-    const platforms: PlayAutoExportPlatform[] = ["smartstore", "auction", "gmarket", "11st", "coupang"];
+    // 가격수정은 ESM을 옥션/지마켓/11번가 개별 파일로 분리 (전체 선택 시 5개 병렬 다운로드)
+    const platforms: PlayAutoExportPlatform[] = target === "all"
+      ? ["smartstore", "auction", "gmarket", "11st", "coupang"]
+      : [target];
     try {
       const results = await Promise.allSettled(
         platforms.map(async (platform) => {
@@ -645,13 +647,57 @@ export default function ProductsPage() {
                         </button>
                       </div>
                       <div className="border-t border-[var(--border)]">
+                        <div className="px-3 py-2 flex items-center gap-1.5 text-xs font-medium text-orange-400">
+                          <TrendingUp className="w-3 h-3" />
+                          가격수정 내보내기
+                        </div>
                         <button
-                          onClick={handlePriceUpdateExport}
+                          onClick={() => handlePriceUpdateExport("smartstore")}
                           disabled={priceUpdateExporting}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-orange-400 hover:bg-orange-600/10 transition-colors font-medium"
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-green-400" />
+                          스마트스토어
+                        </button>
+                        <button
+                          onClick={() => handlePriceUpdateExport("auction")}
+                          disabled={priceUpdateExporting}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-yellow-400" />
+                          옥션
+                        </button>
+                        <button
+                          onClick={() => handlePriceUpdateExport("gmarket")}
+                          disabled={priceUpdateExporting}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-yellow-400" />
+                          지마켓
+                        </button>
+                        <button
+                          onClick={() => handlePriceUpdateExport("11st")}
+                          disabled={priceUpdateExporting}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-yellow-400" />
+                          11번가
+                        </button>
+                        <button
+                          onClick={() => handlePriceUpdateExport("coupang")}
+                          disabled={priceUpdateExporting}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-red-400" />
+                          쿠팡
+                        </button>
+                        <button
+                          onClick={() => handlePriceUpdateExport("all")}
+                          disabled={priceUpdateExporting}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-orange-400 hover:bg-orange-600/10 transition-colors font-medium disabled:opacity-50 border-t border-[var(--border)]"
                         >
                           <TrendingUp className="w-3.5 h-3.5" />
-                          {priceUpdateExporting ? "생성 중..." : "가격수정 내보내기"}
+                          {priceUpdateExporting ? "생성 중..." : "전체 다운로드"}
                         </button>
                       </div>
                     </div>
