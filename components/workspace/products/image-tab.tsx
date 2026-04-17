@@ -207,6 +207,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
 
   const [search, setSearch] = useState("");
   const [showEmpty, setShowEmpty] = useState(false);
+  const [onlyMissingDetail, setOnlyMissingDetail] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -278,9 +279,15 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
   const filtered = products.filter((p) => {
     const hasImages = p.image_urls && p.image_urls.length > 0;
     if (!showEmpty && !hasImages) return false;
+    if (onlyMissingDetail && (p.detail_html || p.detail_image_url)) return false;
     if (search) return p.product_name.toLowerCase().includes(search.toLowerCase());
     return true;
   });
+
+  const visibleSelectedCount = filtered.reduce(
+    (acc, p) => (selectedIds.has(p.id) ? acc + 1 : acc),
+    0
+  );
 
   // 날짜별 그룹화 (최신순)
   const groupedByDate = useMemo(() => {
@@ -339,21 +346,45 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
   };
 
   const toggleSelectAll = () => {
-    setSelectedIds((prev) =>
-      prev.size === filtered.length ? new Set() : new Set(filtered.map((p) => p.id))
-    );
+    setSelectedIds((prev) => {
+      const allSelected = filtered.length > 0 && filtered.every((p) => prev.has(p.id));
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const p of filtered) next.delete(p.id);
+      } else {
+        for (const p of filtered) next.add(p.id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectGroup = (groupProducts: Product[]) => {
+    setSelectedIds((prev) => {
+      const allSelected = groupProducts.every((p) => prev.has(p.id));
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const p of groupProducts) next.delete(p.id);
+      } else {
+        for (const p of groupProducts) next.add(p.id);
+      }
+      return next;
+    });
   };
 
   const handleDeleteSelected = async () => {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`${selectedIds.size}개 상품을 삭제하시겠습니까?\n(이미지 파일도 함께 삭제됩니다)`)) return;
+    const targets = filtered.filter((p) => selectedIds.has(p.id)).map((p) => p.id);
+    if (targets.length === 0) return;
+    if (!confirm(`${targets.length}개 상품을 삭제하시겠습니까?\n(이미지 파일도 함께 삭제됩니다)`)) return;
     setDeleting(true);
-    // Storage 이미지 삭제 + DB 삭제는 onDelete(deleteProducts)에서 일괄 처리
-    const result = await onDelete([...selectedIds]);
+    const result = await onDelete(targets);
     if (result?.error) {
       console.error("[image-tab] 상품 삭제 실패:", result.error);
     }
-    setSelectedIds(new Set());
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of targets) next.delete(id);
+      return next;
+    });
     setDeleting(false);
   };
 
@@ -432,13 +463,13 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
       <div className="flex items-center gap-3 flex-wrap">
         <input
           type="checkbox"
-          checked={filtered.length > 0 && selectedIds.size === filtered.length}
+          checked={filtered.length > 0 && visibleSelectedCount === filtered.length}
           ref={(el) => {
-            if (el) el.indeterminate = selectedIds.size > 0 && selectedIds.size < filtered.length;
+            if (el) el.indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < filtered.length;
           }}
           onChange={toggleSelectAll}
           className="w-4 h-4 rounded cursor-pointer"
-          title="전체 선택"
+          title={onlyMissingDetail ? "미생성 전체 선택" : "전체 선택"}
         />
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
@@ -461,6 +492,15 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
           <input type="checkbox" checked={showEmpty} onChange={(e) => setShowEmpty(e.target.checked)} className="rounded" />
           이미지 없는 상품 포함
         </label>
+        <label className="flex items-center gap-2 text-xs text-[var(--text-muted)] cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={onlyMissingDetail}
+            onChange={(e) => setOnlyMissingDetail(e.target.checked)}
+            className="rounded"
+          />
+          상세 미생성만
+        </label>
         <button
           onClick={() => setForbiddenOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-700/40 text-zinc-300 hover:bg-zinc-700/60 rounded-lg transition-colors"
@@ -469,7 +509,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
           <ShieldAlert className="w-3.5 h-3.5" />
           금지어 관리
         </button>
-        {selectedIds.size > 0 && (
+        {visibleSelectedCount > 0 && (
           <div className="flex items-center gap-2">
             <button
               onClick={handleStartBatchDetail}
@@ -477,7 +517,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 rounded-lg transition-colors disabled:opacity-50"
             >
               <Play className="w-4 h-4" />
-              {batchActive ? "생성 중..." : `${selectedIds.size}개 상세페이지 일괄 생성`}
+              {batchActive ? "생성 중..." : `${visibleSelectedCount}개 상세페이지 일괄 생성`}
             </button>
             <button
               onClick={handleDeleteSelected}
@@ -485,7 +525,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors disabled:opacity-50"
             >
               <Trash2 className="w-4 h-4" />
-              {deleting ? "삭제 중..." : `${selectedIds.size}개 삭제`}
+              {deleting ? "삭제 중..." : `${visibleSelectedCount}개 삭제`}
             </button>
           </div>
         )}
@@ -511,20 +551,39 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
         <div className="space-y-4">
           {groupedByDate.map(([dateLabel, groupProducts]) => {
             const isCollapsed = collapsedGroups.has(dateLabel);
+            const groupSelectedCount = groupProducts.reduce(
+              (acc, p) => (selectedIds.has(p.id) ? acc + 1 : acc),
+              0
+            );
+            const groupAllSelected = groupSelectedCount === groupProducts.length;
+            const groupSomeSelected = groupSelectedCount > 0 && !groupAllSelected;
             return (
               <div key={dateLabel}>
                 {/* 날짜 그룹 헤더 */}
-                <button
-                  onClick={() => toggleGroup(dateLabel)}
-                  className="w-full flex items-center gap-2 px-1 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors group"
-                >
-                  <span className="font-medium text-[var(--text-secondary)]">{dateLabel}</span>
-                  <span className="text-[var(--text-disabled)]">· {groupProducts.length}건</span>
-                  <span className="flex-1 h-px bg-[var(--border)] mx-1" />
-                  {isCollapsed
-                    ? <ChevronDown className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100" />
-                    : <ChevronUp className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100" />}
-                </button>
+                <div className="w-full flex items-center gap-2 px-1 py-1 text-xs text-[var(--text-muted)] group">
+                  <input
+                    type="checkbox"
+                    checked={groupAllSelected}
+                    ref={(el) => { if (el) el.indeterminate = groupSomeSelected; }}
+                    onChange={() => toggleSelectGroup(groupProducts)}
+                    className="w-4 h-4 rounded cursor-pointer shrink-0"
+                    title={`${dateLabel} 전체 선택`}
+                  />
+                  <button
+                    onClick={() => toggleGroup(dateLabel)}
+                    className="flex-1 flex items-center gap-2 hover:text-[var(--text-primary)] transition-colors text-left"
+                  >
+                    <span className="font-medium text-[var(--text-secondary)]">{dateLabel}</span>
+                    <span className="text-[var(--text-disabled)]">· {groupProducts.length}건</span>
+                    {groupSelectedCount > 0 && (
+                      <span className="text-[var(--text-disabled)]">({groupSelectedCount} 선택)</span>
+                    )}
+                    <span className="flex-1 h-px bg-[var(--border)] mx-1" />
+                    {isCollapsed
+                      ? <ChevronDown className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100" />
+                      : <ChevronUp className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100" />}
+                  </button>
+                </div>
 
                 {/* 상품 목록 */}
                 {!isCollapsed && (
