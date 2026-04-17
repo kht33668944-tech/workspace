@@ -384,7 +384,7 @@ async function scrapeGmarketProduct(
 
     // ── LLM 호출 병렬화 + 이미지 업로드 동시 실행 ───────────
     const regexName = normalizeProductName(rawName);
-    const limitedImageUrls = rawImageUrls.slice(0, 3).map(toHighResImageUrl);
+    const limitedImageUrls = rawImageUrls.slice(0, 5).map(toHighResImageUrl);
     const timestamp = Date.now();
 
     const VALID_IMG_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"]);
