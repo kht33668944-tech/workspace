@@ -9,6 +9,7 @@
 
 import { GoogleGenerativeAI, type GenerateContentResult, type Part } from "@google/generative-ai";
 import { COUPANG_OPTION_IDS, getCoupangCategoryByCode, buildCategoryListForPrompt, type CoupangRequiredOption } from "./coupang-category-options";
+import { getServiceSupabaseClient } from "./api-helpers";
 
 // ── 모델 설정 ─────────────────────────────────────────────────────────────────
 const DEFAULT_MODEL = "gemini-2.5-flash";
@@ -20,6 +21,51 @@ function getModel(modelOverride?: string) {
   const genAI = new GoogleGenerativeAI(apiKey);
   const modelName = modelOverride ?? process.env.GEMINI_MODEL ?? DEFAULT_MODEL;
   return genAI.getGenerativeModel({ model: modelName });
+}
+
+function resolveModelName(modelOverride?: string): string {
+  return modelOverride ?? process.env.GEMINI_MODEL ?? DEFAULT_MODEL;
+}
+
+// ── 사용량 추적 ───────────────────────────────────────────────────────────────
+export interface GeminiCallOptions {
+  /** 호출처 식별 태그 (예: "product_name_normalize", "thumbnail_gen") */
+  callSource?: string;
+  /** 호출한 사용자 ID (RLS용) */
+  userId?: string;
+  /** 모델 오버라이드 */
+  modelOverride?: string;
+}
+
+/**
+ * Gemini 호출 결과를 Supabase에 비동기 기록 (fire-and-forget)
+ * 실패는 로그만 남기고 본 작업에 영향 없음
+ */
+function recordUsage(params: {
+  callSource?: string;
+  userId?: string;
+  model: string;
+  result?: GenerateContentResult;
+  imageCount?: number;
+  isImage?: boolean;
+}): void {
+  void (async () => {
+    try {
+      const usage = params.result?.response.usageMetadata;
+      const supabase = getServiceSupabaseClient();
+      await supabase.from("gemini_usage").insert({
+        user_id: params.userId ?? null,
+        call_source: params.callSource ?? "unknown",
+        model: params.model,
+        prompt_tokens: usage?.promptTokenCount ?? 0,
+        candidate_tokens: usage?.candidatesTokenCount ?? 0,
+        is_image: params.isImage ?? false,
+        image_count: params.imageCount ?? 0,
+      });
+    } catch (e) {
+      console.error("[gemini-usage]", e instanceof Error ? e.message : String(e));
+    }
+  })();
 }
 
 // ── 응답 파싱 ─────────────────────────────────────────────────────────────────
@@ -95,12 +141,23 @@ function parseResponse(result: GenerateContentResult): GeminiResponse {
  */
 export async function generateText(
   prompt: string,
-  modelOverride?: string
+  optionsOrModel?: GeminiCallOptions | string
 ): Promise<string | null> {
   if (!process.env.GEMINI_API_KEY) return null;
+  const options: GeminiCallOptions =
+    typeof optionsOrModel === "string"
+      ? { modelOverride: optionsOrModel }
+      : (optionsOrModel ?? {});
+  const modelName = resolveModelName(options.modelOverride);
   try {
-    const model = getModel(modelOverride);
+    const model = getModel(options.modelOverride);
     const result = await model.generateContent(prompt);
+    recordUsage({
+      callSource: options.callSource,
+      userId: options.userId,
+      model: modelName,
+      result,
+    });
     return parseResponse(result).text || null;
   } catch (e) {
     console.warn("[gemini] generateText 실패:", e instanceof Error ? e.message : String(e));
@@ -114,13 +171,27 @@ export async function generateText(
  */
 export async function generateContent(
   prompt: string,
-  modelOverride?: string
+  optionsOrModel?: GeminiCallOptions | string
 ): Promise<GeminiResponse | null> {
   if (!process.env.GEMINI_API_KEY) return null;
+  const options: GeminiCallOptions =
+    typeof optionsOrModel === "string"
+      ? { modelOverride: optionsOrModel }
+      : (optionsOrModel ?? {});
+  const modelName = resolveModelName(options.modelOverride);
   try {
-    const model = getModel(modelOverride);
+    const model = getModel(options.modelOverride);
     const result = await model.generateContent(prompt);
-    return parseResponse(result);
+    const parsed = parseResponse(result);
+    recordUsage({
+      callSource: options.callSource,
+      userId: options.userId,
+      model: modelName,
+      result,
+      imageCount: parsed.images.length,
+      isImage: parsed.images.length > 0,
+    });
+    return parsed;
   } catch (e) {
     console.warn("[gemini] generateContent 실패:", e instanceof Error ? e.message : String(e));
     return null;
@@ -168,9 +239,14 @@ ${categories.map((c, i) => `${i + 1}. ${c}`).join("\n")}
 export async function analyzeImageFromUrl(
   imageUrl: string,
   prompt: string,
-  modelOverride?: string
+  optionsOrModel?: GeminiCallOptions | string
 ): Promise<string | null> {
   if (!process.env.GEMINI_API_KEY) return null;
+  const options: GeminiCallOptions =
+    typeof optionsOrModel === "string"
+      ? { modelOverride: optionsOrModel }
+      : (optionsOrModel ?? {});
+  const modelName = resolveModelName(options.modelOverride);
   try {
     const res = await fetch(imageUrl, {
       headers: { "User-Agent": "Mozilla/5.0" },
@@ -180,11 +256,17 @@ export async function analyzeImageFromUrl(
     const base64 = Buffer.from(arrayBuffer).toString("base64");
     const mimeType = (res.headers.get("content-type") ?? "image/jpeg").split(";")[0];
 
-    const model = getModel(modelOverride);
+    const model = getModel(options.modelOverride);
     const result = await model.generateContent([
       { inlineData: { data: base64, mimeType } },
       { text: prompt },
     ]);
+    recordUsage({
+      callSource: options.callSource,
+      userId: options.userId,
+      model: modelName,
+      result,
+    });
     return parseResponse(result).text || null;
   } catch (e) {
     console.warn("[gemini] analyzeImageFromUrl 실패:", e instanceof Error ? e.message : String(e));
@@ -199,7 +281,8 @@ export async function analyzeImageFromUrl(
 export async function generateImageFromPrompt(
   prompt: string,
   referenceImageBase64?: string,
-  mimeType = "image/jpeg"
+  mimeType = "image/jpeg",
+  options?: GeminiCallOptions
 ): Promise<GeminiImageResult | null> {
   if (!process.env.GEMINI_API_KEY) return null;
   const IMAGE_GEN_MODEL =
@@ -221,6 +304,14 @@ export async function generateImageFromPrompt(
 
     const result = await model.generateContent(parts);
     const parsed = parseResponse(result);
+    recordUsage({
+      callSource: options?.callSource,
+      userId: options?.userId,
+      model: IMAGE_GEN_MODEL,
+      result,
+      isImage: true,
+      imageCount: parsed.images.length,
+    });
     return parsed.images[0] ?? null;
   } catch (e) {
     console.warn("[gemini] generateImageFromPrompt 실패:", e instanceof Error ? e.message : String(e));
@@ -232,18 +323,28 @@ export async function generateImageFromPrompt(
  * Google Search Grounding — 웹 검색으로 제품 정보 보완
  * gemini-2.5-flash + googleSearch tool 사용
  */
-export async function groundedSearch(prompt: string): Promise<string | null> {
+export async function groundedSearch(
+  prompt: string,
+  options?: GeminiCallOptions
+): Promise<string | null> {
   if (!process.env.GEMINI_API_KEY) return null;
+  const modelName = resolveModelName(options?.modelOverride);
   try {
     const genAI = new (await import("@google/generative-ai")).GoogleGenerativeAI(
       process.env.GEMINI_API_KEY
     );
     const model = genAI.getGenerativeModel({
-      model: process.env.GEMINI_MODEL ?? DEFAULT_MODEL,
+      model: modelName,
       // @ts-expect-error: googleSearch tool supported
       tools: [{ googleSearch: {} }],
     });
     const result = await model.generateContent(prompt);
+    recordUsage({
+      callSource: options?.callSource,
+      userId: options?.userId,
+      model: modelName,
+      result,
+    });
     return parseResponse(result).text || null;
   } catch (e) {
     console.warn("[gemini] groundedSearch 실패:", e instanceof Error ? e.message : String(e));

@@ -2,6 +2,7 @@
 
 import CredentialManager from "@/components/workspace/settings/credential-manager";
 import CourierCodeManager from "@/components/workspace/settings/courier-code-manager";
+import GeminiUsageDashboard from "@/components/workspace/settings/gemini-usage-dashboard";
 
 export default function SettingsPage() {
   return (
@@ -13,6 +14,7 @@ export default function SettingsPage() {
 
       <CredentialManager />
       <CourierCodeManager />
+      <GeminiUsageDashboard />
     </div>
   );
 }
