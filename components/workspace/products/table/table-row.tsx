@@ -2,8 +2,13 @@
 
 import React, { useState, useRef, useEffect, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
+import { Lock } from "lucide-react";
 import type { Product, CommissionPlatform } from "@/types/database";
-import { COLUMNS, EDITABLE_KEYS, COMPUTED_KEYS, formatCell, type Col } from "./table-utils";
+import {
+  COLUMNS, EDITABLE_KEYS, COMPUTED_KEYS, formatCell,
+  PLATFORM_FIXED_KEY_MAP, isPlatformPriceLocked, getComputedValue,
+  type Col,
+} from "./table-utils";
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
 import { fetchProductDetailHtml } from "@/hooks/use-products";
 
@@ -22,6 +27,7 @@ interface RowProps {
   onSelectToggle: (id: string) => void;
   onFillStart: (r: number, c: number, v: unknown) => void;
   onStatusChange: (id: string, status: string) => void;
+  onUnlockFixedPrice: (id: string, priceKey: string) => void;
   isMobile?: boolean;
   visibleColumns?: Col[];
   rateMap: Record<string, Record<CommissionPlatform, number>>;
@@ -33,7 +39,7 @@ const MemoRow = memo(function Row({
   product, rowIdx, colWidths, isChecked, activeCol, editingCol, initialChar,
   selMinC, selMaxC, showFillHandle, fillHandleCol, fillHighlightCol,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onCommit, onBlurSave, onEditValueChange, onSelectToggle, onFillStart,
-  onStatusChange, isMobile, visibleColumns, rateMap, categories, priceChanges,
+  onStatusChange, onUnlockFixedPrice, isMobile, visibleColumns, rateMap, categories, priceChanges,
 }: RowProps) {
   const [editValue, setEditValue] = useState("");
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
@@ -61,6 +67,10 @@ const MemoRow = memo(function Row({
       let initVal: string;
       if (initialChar !== null) {
         initVal = initialChar;
+      } else if (PLATFORM_FIXED_KEY_MAP[colKey]) {
+        // 플랫폼 판매가: 현재 표시값(고정값 또는 자동계산값)을 초기값으로
+        const disp = getComputedValue(product, colKey, rateMap, priceChanges);
+        initVal = disp > 0 ? String(disp) : "";
       } else {
         const val = product[colKey as keyof Product];
         initVal = val == null ? "" : String(val);
@@ -256,6 +266,17 @@ const MemoRow = memo(function Row({
                 className="absolute -bottom-1 -right-1 w-3 h-3 bg-blue-500 border-2 border-white rounded-sm cursor-crosshair z-10"
               />
             )}
+            {PLATFORM_FIXED_KEY_MAP[col.key] && isPlatformPriceLocked(product, col.key) && !isEditing && (
+              <button
+                onMouseDown={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); onUnlockFixedPrice(product.id, col.key); }}
+                title="고정 판매가 해제 (자동계산으로 복귀)"
+                className="absolute top-0.5 right-0.5 p-0.5 text-blue-400 hover:text-red-400 transition-colors z-[5]"
+              >
+                <Lock className="w-2.5 h-2.5" />
+              </button>
+            )}
           </td>
         );
       })}
@@ -278,7 +299,8 @@ const MemoRow = memo(function Row({
   prev.rateMap === next.rateMap &&
   prev.categories === next.categories &&
   prev.priceChanges === next.priceChanges &&
-  prev.onStatusChange === next.onStatusChange
+  prev.onStatusChange === next.onStatusChange &&
+  prev.onUnlockFixedPrice === next.onUnlockFixedPrice
 );
 
 export default MemoRow;

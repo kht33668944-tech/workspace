@@ -5,14 +5,37 @@ import { calcSettlementPrice, calcNetMargin, calcPlatformPrice } from "@/lib/pro
 export const EDITABLE_KEYS = new Set([
   "product_name", "lowest_price",
   "margin_rate", "category", "purchase_url",
+  // 플랫폼 판매가: 편집하면 고정값으로 저장됨 (fixed_price_*)
+  "price_smartstore", "price_esm", "price_coupang",
 ]);
 export const NUMERIC_KEYS = new Set(["lowest_price", "margin_rate"]);
-// 자동 계산 컬럼 (편집 불가)
+// 자동 계산 컬럼 (display만 — price_smartstore/esm/coupang은 fixed 값이 있으면 그 값 사용)
 export const COMPUTED_KEYS = new Set([
   "name_length", "net_margin", "settlement_price",
   "price_smartstore", "price_esm", "price_coupang",
   "price_change", "platform_codes",
 ]);
+
+/** 플랫폼 판매가 키 → 저장되는 고정값 DB 컬럼 키 매핑 */
+export const PLATFORM_FIXED_KEY_MAP: Record<string, keyof Product> = {
+  price_smartstore: "fixed_price_smartstore",
+  price_esm: "fixed_price_esm",
+  price_coupang: "fixed_price_coupang",
+};
+
+/** 해당 플랫폼 판매가 셀이 고정값으로 잠겨있는지 */
+export function isPlatformPriceLocked(product: Product, key: string): boolean {
+  const fixedKey = PLATFORM_FIXED_KEY_MAP[key];
+  return fixedKey ? product[fixedKey] != null : false;
+}
+
+/** 사용자 입력값을 fixed_price로 파싱 — 공백/0이면 null (잠금 해제) */
+export function parseFixedPriceInput(raw: string): number | null {
+  const t = raw.trim();
+  if (!t) return null;
+  const n = parseInt(t.replace(/,/g, ""), 10);
+  return isNaN(n) || n <= 0 ? null : n;
+}
 
 export interface Col { key: string; label: string; minWidth: number; align?: "right"; }
 export const COLUMNS: Col[] = [
@@ -73,9 +96,12 @@ function getComputedAll(
     name_length: product_name.length,
     net_margin: calcNetMargin(lowest_price, margin_rate),
     settlement_price: sp,
-    price_smartstore: catRates?.smartstore ? calcPlatformPrice(sp, catRates.smartstore) : 0,
-    price_esm: catRates?.esm ? calcPlatformPrice(sp, catRates.esm) : 0,
-    price_coupang: catRates?.coupang ? calcPlatformPrice(sp, catRates.coupang) : 0,
+    price_smartstore: product.fixed_price_smartstore
+      ?? (catRates?.smartstore ? calcPlatformPrice(sp, catRates.smartstore) : 0),
+    price_esm: product.fixed_price_esm
+      ?? (catRates?.esm ? calcPlatformPrice(sp, catRates.esm) : 0),
+    price_coupang: product.fixed_price_coupang
+      ?? (catRates?.coupang ? calcPlatformPrice(sp, catRates.coupang) : 0),
   };
 
   computedCache.set(product, { rateMap, values });
@@ -142,6 +168,13 @@ export function formatCell(
     }
     if (computed === 0) {
       return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
+    }
+    // 플랫폼 판매가가 고정값으로 잠겨있으면 눈에 띄게 표시
+    if (PLATFORM_FIXED_KEY_MAP[key] && isPlatformPriceLocked(product, key)) {
+      return React.createElement("span", {
+        className: "text-blue-400 text-xs font-semibold",
+        title: "고정 판매가 (최저가 갱신에 영향받지 않음)",
+      }, computed.toLocaleString());
     }
     return React.createElement("span", { className: "text-[var(--text-secondary)] text-xs" }, computed.toLocaleString());
   }

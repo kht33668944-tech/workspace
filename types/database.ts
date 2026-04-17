@@ -175,11 +175,15 @@ export interface Product {
   registration_status: string; // 상품 등록 상태
   platform_codes: Record<string, string> | null; // 플랫폼별 쇼핑몰 상품번호 {"옥션=redgoom00": "F445675075", ...}
   seller_code: Record<string, string> | null; // 플레이오토 판매자관리코드 (가격수정 시 필수)
+  // 플랫폼별 고정 판매가 — null이면 자동계산, 값이 있으면 해당 값 우선 사용 (최저가 갱신에 영향받지 않음)
+  fixed_price_smartstore: number | null;
+  fixed_price_esm: number | null;
+  fixed_price_coupang: number | null;
   created_at: string;
   updated_at: string;
 }
 
-export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at" | "platform_codes" | "seller_code" | "has_detail_html">;
+export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at" | "platform_codes" | "seller_code" | "has_detail_html" | "fixed_price_smartstore" | "fixed_price_esm" | "fixed_price_coupang">;
 export type ProductUpdate = Partial<Omit<Product, "id" | "user_id" | "created_at" | "updated_at" | "has_detail_html">>;
 
 // ─── 플레이오토 카테고리 매핑 ───

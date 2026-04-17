@@ -39,7 +39,7 @@ const MAX_UNDO = 20;
 
 // detail_html은 payload가 크므로 목록 조회 시 제외. 필요 시 fetchProductDetailHtml로 단건 조회.
 const PRODUCT_LIST_COLUMNS =
-  "id, user_id, product_name, lowest_price, margin_rate, category, source_category, purchase_url, memo, sort_order, thumbnail_url, image_urls, source_platform, detail_image_url, registration_status, platform_codes, seller_code, created_at, updated_at";
+  "id, user_id, product_name, lowest_price, margin_rate, category, source_category, purchase_url, memo, sort_order, thumbnail_url, image_urls, source_platform, detail_image_url, registration_status, platform_codes, seller_code, fixed_price_smartstore, fixed_price_esm, fixed_price_coupang, created_at, updated_at";
 
 export async function fetchProductDetailHtml(productId: string): Promise<string | null> {
   const { data, error } = await supabase

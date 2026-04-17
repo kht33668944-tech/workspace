@@ -205,9 +205,11 @@ export async function generatePlayAutoProductExcel(
     const settlementPrice = calcSettlementPrice(p.lowest_price, p.margin_rate);
     const categoryRates = rateMap[p.category] ?? {};
     const platformRate = (categoryRates as Record<string, number>)[config.rateKey] ?? 0;
-    const salePrice = platformRate > 0
-      ? calcPlatformPrice(settlementPrice, platformRate)
-      : p.lowest_price;
+    const fixedKey = `fixed_price_${config.rateKey}` as keyof Product;
+    const fixedPrice = (p as Product)[fixedKey] as number | null | undefined;
+    const salePrice = fixedPrice != null
+      ? fixedPrice
+      : (platformRate > 0 ? calcPlatformPrice(settlementPrice, platformRate) : p.lowest_price);
 
     const meta = metadataList[i] ?? { model: "", brand: "", manufacturer: "" };
     const savedCode = (p.seller_code as Record<string, string> | null)?.[sellerGroup];
@@ -383,7 +385,11 @@ export async function generatePriceUpdateExcel(
 
         const rateKey = accountRateKey(account);
         const rate = (categoryRates as Record<string, number>)[rateKey] ?? 0;
-        const salePrice = rate > 0 ? calcPlatformPrice(settlementPrice, rate) : p.lowest_price;
+        const fixedKey = `fixed_price_${rateKey}` as keyof Product;
+        const fixedPrice = (p as Product)[fixedKey] as number | null | undefined;
+        const salePrice = fixedPrice != null
+          ? fixedPrice
+          : (rate > 0 ? calcPlatformPrice(settlementPrice, rate) : p.lowest_price);
 
         rows.push({ "쇼핑몰(계정)": account, "쇼핑몰 상품번호": code, 판매가: salePrice });
       }

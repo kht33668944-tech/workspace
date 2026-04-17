@@ -8,6 +8,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import {
   COLUMNS, COL_COUNT, EDITABLE_KEYS, NUMERIC_KEYS,
   norm, processValue,
+  PLATFORM_FIXED_KEY_MAP, parseFixedPriceInput, getComputedValue,
   type ProductTableProps, type CellPos, type SelRange, type SortDir,
 } from "./table-utils";
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
@@ -74,12 +75,37 @@ function ProductTable({
     if (!product) return;
     const key = COLUMNS[col]?.key;
     if (!key || !EDITABLE_KEYS.has(key)) return;
+
+    // 플랫폼 판매가: fixed_price_* 컬럼으로 라우팅
+    const fixedKey = PLATFORM_FIXED_KEY_MAP[key];
+    if (fixedKey) {
+      const newVal = parseFixedPriceInput(raw);
+      const currentFixed = (product[fixedKey] as number | null) ?? null;
+      if (currentFixed === null) {
+        // 잠금 해제 상태 — 자동계산값과 동일한 입력이면 저장하지 않음 (실수로 잠기는 것 방지)
+        const displayVal = getComputedValue(product, key, rateMap, priceChanges);
+        if (newVal !== null && newVal !== displayVal) {
+          onUpdate(product.id, { [fixedKey]: newVal });
+        }
+      } else if (newVal !== currentFixed) {
+        onUpdate(product.id, { [fixedKey]: newVal });
+      }
+      return;
+    }
+
     const oldVal = product[key as keyof Product];
     const newVal = processValue(key, raw);
     if (String(oldVal ?? "") !== String(newVal ?? "")) {
       onUpdate(product.id, { [key]: newVal });
     }
-  }, [products, onUpdate]);
+  }, [products, onUpdate, rateMap, priceChanges]);
+
+  /** 플랫폼 판매가 고정값 해제 (자동계산으로 복귀) */
+  const handleUnlockFixedPrice = useCallback((productId: string, priceKey: string) => {
+    const fixedKey = PLATFORM_FIXED_KEY_MAP[priceKey];
+    if (!fixedKey) return;
+    onUpdate(productId, { [fixedKey]: null });
+  }, [onUpdate]);
 
   const handleCommit = useCallback((row: number, col: number, val: string | null, dir: string) => {
     if (val !== null) saveValue(row, col, val);
@@ -209,6 +235,15 @@ function ProductTable({
 
       onStartBatchUndo?.();
 
+      const pasteCell = (p: Product, k: string, rawVal: string) => {
+        const fixedKey = PLATFORM_FIXED_KEY_MAP[k];
+        if (fixedKey) {
+          onUpdate(p.id, { [fixedKey]: parseFixedPriceInput(rawVal) });
+          return;
+        }
+        onUpdate(p.id, { [k]: processValue(k, rawVal) });
+      };
+
       if (isSingleValue && selection) {
         const { minR, maxR, minC, maxC } = norm(selection);
         const val = clipData[0][0];
@@ -217,8 +252,7 @@ function ProductTable({
             if (r >= products.length || c >= COL_COUNT) continue;
             const p = products[r], k = COLUMNS[c].key;
             if (!EDITABLE_KEYS.has(k)) continue;
-            const v = processValue(k, val);
-            onUpdate(p.id, { [k]: v });
+            pasteCell(p, k, val);
           }
         }
       } else {
@@ -234,8 +268,7 @@ function ProductTable({
               const clipVal = clipRow[ci % clipRow.length];
               const p = products[tR], k = COLUMNS[tC].key;
               if (!EDITABLE_KEYS.has(k)) continue;
-              const v = processValue(k, clipVal);
-              onUpdate(p.id, { [k]: v });
+              pasteCell(p, k, clipVal);
             }
           }
         } else {
@@ -245,8 +278,7 @@ function ProductTable({
               if (tR >= products.length || tC >= COL_COUNT) continue;
               const p = products[tR], k = COLUMNS[tC].key;
               if (!EDITABLE_KEYS.has(k)) continue;
-              const v = processValue(k, clipData[ri][ci]);
-              onUpdate(p.id, { [k]: v });
+              pasteCell(p, k, clipData[ri][ci]);
             }
           }
         }
@@ -309,7 +341,9 @@ function ProductTable({
           for (let r = minR; r <= maxR; r++) for (let c = minC; c <= maxC; c++) {
             const p = products[r], k = COLUMNS[c].key;
             if (!p || !EDITABLE_KEYS.has(k)) continue;
-            onUpdate(p.id, { [k]: NUMERIC_KEYS.has(k) ? 0 : "" });
+            const fixedKey = PLATFORM_FIXED_KEY_MAP[k];
+            if (fixedKey) onUpdate(p.id, { [fixedKey]: null });
+            else onUpdate(p.id, { [k]: NUMERIC_KEYS.has(k) ? 0 : "" });
           }
           onEndBatchUndo?.();
         }
@@ -386,9 +420,18 @@ function ProductTable({
     const onUp = () => {
       if (fillDrag.endRow > fillDrag.startRow) {
         const colKey = COLUMNS[fillDrag.colIdx].key;
+        const fixedKey = PLATFORM_FIXED_KEY_MAP[colKey];
         for (let i = fillDrag.startRow + 1; i <= fillDrag.endRow; i++) {
           const p = products[i];
-          if (p && EDITABLE_KEYS.has(colKey)) onUpdate(p.id, { [colKey]: fillDrag.value });
+          if (!p || !EDITABLE_KEYS.has(colKey)) continue;
+          if (fixedKey) {
+            const parsed = typeof fillDrag.value === "number"
+              ? (fillDrag.value > 0 ? Math.round(fillDrag.value) : null)
+              : parseFixedPriceInput(String(fillDrag.value ?? ""));
+            onUpdate(p.id, { [fixedKey]: parsed });
+          } else {
+            onUpdate(p.id, { [colKey]: fillDrag.value });
+          }
         }
       }
       setFillDrag(null);
@@ -529,6 +572,7 @@ function ProductTable({
                   onEditValueChange={handleEditValueChange}
                   onSelectToggle={onSelectToggle} onFillStart={handleFillStart}
                   onStatusChange={handleStatusChange}
+                  onUnlockFixedPrice={handleUnlockFixedPrice}
                   isMobile={isMobile}
                   visibleColumns={visibleColumns}
                   rateMap={rateMap}
