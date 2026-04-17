@@ -146,6 +146,17 @@ export function formatCell(
     return React.createElement("span", { className: "text-[var(--text-secondary)] text-xs" }, computed.toLocaleString());
   }
 
+  // detail_html은 목록 조회 시 값을 가져오지 않음 → has_detail_html 플래그로 판정
+  if (key === "detail_html") {
+    if (!product?.has_detail_html && !val) {
+      return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
+    }
+    return React.createElement("span", {
+      title: "클릭하여 HTML 복사",
+      className: "text-[var(--text-secondary)] text-xs truncate block max-w-full",
+    }, "(생성됨)");
+  }
+
   if (val == null || val === "") return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
 
   if (key === "margin_rate") {
@@ -168,15 +179,6 @@ export function formatCell(
       href: url, target: "_blank", rel: "noopener noreferrer",
       className: "text-blue-400 text-xs truncate block max-w-full hover:underline",
       title: url, onClick: (e: React.MouseEvent) => e.stopPropagation(),
-    }, display);
-  }
-
-  if (key === "detail_html") {
-    const html = String(val);
-    const display = html.slice(0, 20) + (html.length > 20 ? "..." : "");
-    return React.createElement("span", {
-      title: html,
-      className: "text-[var(--text-secondary)] text-xs truncate block max-w-full",
     }, display);
   }
 

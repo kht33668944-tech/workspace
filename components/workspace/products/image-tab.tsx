@@ -9,6 +9,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useAiTask } from "@/context/AiTaskContext";
+import { fetchProductDetailHtml } from "@/hooks/use-products";
 import type { Product, ProductUpdate } from "@/types/database";
 import BatchDetailModal from "./batch-detail-modal";
 import ForbiddenWordsModal from "./forbidden-words-modal";
@@ -37,9 +38,21 @@ function useCopy() {
   return { state, copy };
 }
 
-function HtmlCopyButton({ html }: { html: string }) {
+function HtmlCopyButton({ product }: { product: Product }) {
   const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(false);
   const handleCopy = async () => {
+    if (loading) return;
+    let html = product.detail_html;
+    if (!html) {
+      setLoading(true);
+      try {
+        html = await fetchProductDetailHtml(product.id);
+      } finally {
+        setLoading(false);
+      }
+    }
+    if (!html) return;
     await navigator.clipboard.writeText(html).catch(() => null);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
@@ -47,14 +60,15 @@ function HtmlCopyButton({ html }: { html: string }) {
   return (
     <button
       onClick={handleCopy}
-      title="HTML 복사"
-      className={`p-1.5 rounded transition-colors ${
+      disabled={loading}
+      title={loading ? "불러오는 중..." : "HTML 복사"}
+      className={`p-1.5 rounded transition-colors disabled:opacity-50 ${
         copied
           ? "text-amber-400"
           : "text-[var(--text-muted)] hover:text-amber-400 hover:bg-amber-400/10"
       }`}
     >
-      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
     </button>
   );
 }
@@ -279,7 +293,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
   const filtered = products.filter((p) => {
     const hasImages = p.image_urls && p.image_urls.length > 0;
     if (!showEmpty && !hasImages) return false;
-    if (onlyMissingDetail && (p.detail_html || p.detail_image_url)) return false;
+    if (onlyMissingDetail && (p.has_detail_html || p.detail_image_url)) return false;
     if (search) return p.product_name.toLowerCase().includes(search.toLowerCase());
     return true;
   });
@@ -732,8 +746,8 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
                                   )}
 
                                   {/* HTML 복사 */}
-                                  {product.detail_html && (
-                                    <HtmlCopyButton html={product.detail_html} />
+                                  {product.has_detail_html && (
+                                    <HtmlCopyButton product={product} />
                                   )}
                                 </>
                               )}

@@ -37,6 +37,23 @@ interface UndoGroup {
 
 const MAX_UNDO = 20;
 
+// detail_html은 payload가 크므로 목록 조회 시 제외. 필요 시 fetchProductDetailHtml로 단건 조회.
+const PRODUCT_LIST_COLUMNS =
+  "id, user_id, product_name, lowest_price, margin_rate, category, source_category, purchase_url, memo, sort_order, thumbnail_url, image_urls, source_platform, detail_image_url, registration_status, platform_codes, seller_code, created_at, updated_at";
+
+export async function fetchProductDetailHtml(productId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("products")
+    .select("detail_html")
+    .eq("id", productId)
+    .single();
+  if (error) {
+    console.error("[use-products] detail_html 조회 실패:", error.message);
+    return null;
+  }
+  return (data as { detail_html: string | null } | null)?.detail_html ?? null;
+}
+
 export function useProducts(options: UseProductsOptions = {}) {
   const { user, session } = useAuth();
   const { showToast } = useToast();
@@ -68,7 +85,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     while (hasMore) {
       let query = supabase
         .from("products")
-        .select("*")
+        .select(PRODUCT_LIST_COLUMNS)
         .eq("user_id", userId)
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true })
@@ -87,9 +104,22 @@ export function useProducts(options: UseProductsOptions = {}) {
         break;
       }
 
-      allData.push(...(data as Product[]));
+      allData.push(...(data as unknown as Product[]));
       hasMore = data.length === PAGE_SIZE;
       from += PAGE_SIZE;
+    }
+
+    // detail_html 보유 여부만 별도로 조회 (내용은 전송하지 않음)
+    const { data: detailRows } = await supabase
+      .from("products")
+      .select("id")
+      .eq("user_id", userId)
+      .not("detail_html", "is", null);
+    const detailSet = new Set((detailRows ?? []).map((r: { id: string }) => r.id));
+
+    for (const p of allData) {
+      p.detail_html = null;
+      p.has_detail_html = detailSet.has(p.id);
     }
 
     setProducts(allData);
@@ -196,6 +226,11 @@ export function useProducts(options: UseProductsOptions = {}) {
     }
 
     inserted.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    // detail_html payload 메모리 보유를 피하기 위해 플래그만 남기고 null 처리
+    for (const p of inserted) {
+      p.has_detail_html = Boolean(p.detail_html);
+      p.detail_html = null;
+    }
     setProducts((prev) => [...prev, ...inserted]);
     nextSortOrderRef.current = startSort + inserted.length;
     fetchGenRef.current++;
@@ -228,11 +263,19 @@ export function useProducts(options: UseProductsOptions = {}) {
       return;
     }
 
-    setProducts((prev) => [...prev, data as Product]);
+    const newRow = { ...(data as Product), detail_html: null, has_detail_html: false };
+    setProducts((prev) => [...prev, newRow]);
   };
 
   // Optimistic update — DB 쓰기는 50ms 디바운스로 같은 상품 업데이트를 합침
   const updateProduct = useCallback((id: string, updates: ProductUpdate, skipUndo = false) => {
+    const hasDetailKey = Object.prototype.hasOwnProperty.call(updates, "detail_html");
+    const mergeRow = (p: Product): Product => {
+      if (p.id !== id) return p;
+      const merged: Product = { ...p, ...updates };
+      if (hasDetailKey) merged.has_detail_html = Boolean(updates.detail_html);
+      return merged;
+    };
     if (!skipUndo) {
       setProducts((prev) => {
         const product = prev.find((p) => p.id === id);
@@ -249,12 +292,10 @@ export function useProducts(options: UseProductsOptions = {}) {
             if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
           }
         }
-        return prev.map((p) => (p.id === id ? { ...p, ...updates } : p));
+        return prev.map(mergeRow);
       });
     } else {
-      setProducts((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
-      );
+      setProducts((prev) => prev.map(mergeRow));
     }
 
     // 디바운스: 같은 상품에 대한 연속 업데이트를 하나의 DB 요청으로 합침

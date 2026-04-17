@@ -169,7 +169,8 @@ export interface Product {
   thumbnail_url: string | null;
   image_urls: string[];
   source_platform: string | null; // 'gmarket' | 'auction' 등
-  detail_html: string | null; // 플레이오토 대량등록용 상세페이지 HTML
+  detail_html: string | null; // 플레이오토 대량등록용 상세페이지 HTML (목록 조회 시 제외, 필요 시 단건 조회)
+  has_detail_html: boolean; // 클라이언트 계산값: detail_html이 존재하는지 여부
   detail_image_url: string | null; // AI 생성 상세페이지 이미지 URL
   registration_status: string; // 상품 등록 상태
   platform_codes: Record<string, string> | null; // 플랫폼별 쇼핑몰 상품번호 {"옥션=redgoom00": "F445675075", ...}
@@ -178,8 +179,8 @@ export interface Product {
   updated_at: string;
 }
 
-export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at" | "platform_codes" | "seller_code">;
-export type ProductUpdate = Partial<Omit<Product, "id" | "user_id" | "created_at" | "updated_at">>;
+export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at" | "platform_codes" | "seller_code" | "has_detail_html">;
+export type ProductUpdate = Partial<Omit<Product, "id" | "user_id" | "created_at" | "updated_at" | "has_detail_html">>;
 
 // ─── 플레이오토 카테고리 매핑 ───
 export interface PlayautoCategoryMapping {

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { Product, CommissionPlatform } from "@/types/database";
 import { COLUMNS, EDITABLE_KEYS, COMPUTED_KEYS, formatCell, type Col } from "./table-utils";
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
+import { fetchProductDetailHtml } from "@/hooks/use-products";
 
 interface RowProps {
   product: Product; rowIdx: number; colWidths: Record<string, number>;
@@ -221,16 +222,24 @@ const MemoRow = memo(function Row({
                   className="absolute left-0 top-0 h-full min-w-[280px] w-max bg-[var(--bg-card)] border-2 border-blue-500 rounded px-1.5 text-xs text-[var(--text-primary)] outline-none z-30 shadow-lg"
                 />
               )
-            ) : (col.key === "thumbnail_url" || col.key === "detail_html") && val ? (
+            ) : (col.key === "thumbnail_url" && val) || (col.key === "detail_html" && (product.has_detail_html || val)) ? (
               <div
                 className={`text-xs truncate min-h-[22px] leading-[22px] px-1 cursor-pointer transition-colors ${
                   copiedKey === col.key
                     ? "text-green-400"
                     : "hover:text-blue-400"
                 } ${isSelected ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""}`}
-                title={copiedKey === col.key ? "복사됨!" : `클릭하여 전체 복사\n${String(val)}`}
+                title={copiedKey === col.key ? "복사됨!" : col.key === "detail_html" ? "클릭하여 HTML 복사" : `클릭하여 전체 복사\n${String(val)}`}
                 onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => { e.stopPropagation(); handleCopyCell(col.key, String(val)); }}
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (col.key === "detail_html") {
+                    const text = (val ? String(val) : await fetchProductDetailHtml(product.id)) ?? "";
+                    if (text) handleCopyCell(col.key, text);
+                  } else {
+                    handleCopyCell(col.key, String(val));
+                  }
+                }}
               >
                 {copiedKey === col.key ? "✓ 복사됨" : formatCell(col.key, val, product, rateMap, priceChanges)}
               </div>
