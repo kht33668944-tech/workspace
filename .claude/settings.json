@@ -37,5 +37,8 @@
       "c:\\Users\\sksso\\Desktop\\개발\\workspace",
       "C:\\Users\\kht33\\Desktop\\workspace\\.next"
     ]
+  },
+  "enabledPlugins": {
+    "claude-hud@claude-hud": true
   }
 }

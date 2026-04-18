@@ -668,11 +668,28 @@ export async function extractCoupangPurchaseOptions(
   const fallback = productNames.map(() => ({ hasOption: false, optionName: "", optionValue: "" }));
   if (!process.env.GEMINI_API_KEY || productNames.length === 0) return fallback;
 
-  // 1단계: Gemini에게 카테고리 분류 + 값 추출 요청
+  type ParsedItem = {
+    categoryCode?: number;
+    quantity?: number;
+    quantityUnit?: string;
+    unitValue?: number | null;
+    unitType?: string | null;
+  };
+
+  // Gemini 2.5 Flash 출력 토큰 한도(기본 8192, thinking 포함) 대응 — 배치 분할 병렬 호출
+  const BATCH_SIZE = 25;
+  const batches: string[][] = [];
+  for (let i = 0; i < productNames.length; i += BATCH_SIZE) {
+    batches.push(productNames.slice(i, i + BATCH_SIZE));
+  }
+
   const categoryList = buildCategoryListForPrompt();
-  const numbered = productNames.map((n, i) => `${i + 1}. ${n}`).join("\n");
-  const result = await generateText(
-    `아래 쿠팡 카테고리 목록을 참고하여, 각 상품명에 가장 적합한 쿠팡 카테고리를 분류하고 수량/단위 정보를 추출하세요.
+
+  const batchResults = await Promise.all(batches.map(async (batch, batchIdx): Promise<ParsedItem[]> => {
+    const emptyBatch: ParsedItem[] = batch.map(() => ({}));
+    const numbered = batch.map((n, i) => `${i + 1}. ${n}`).join("\n");
+    const result = await generateText(
+      `아래 쿠팡 카테고리 목록을 참고하여, 각 상품명에 가장 적합한 쿠팡 카테고리를 분류하고 수량/단위 정보를 추출하세요.
 
 [쿠팡 카테고리 목록] (코드:경로)
 ${categoryList}
@@ -698,31 +715,37 @@ ${numbered}
 - "물티슈 100매 10팩" → {"categoryCode":해당코드,"quantity":10,"quantityUnit":"개","unitValue":100,"unitType":"매"}
 - "무선이어폰" → {"categoryCode":해당코드,"quantity":1,"quantityUnit":"개","unitValue":null,"unitType":null}
 
-반드시 JSON 배열로만 출력 (설명 없이). 상품 개수: ${productNames.length}개`
-  );
+반드시 JSON 배열로만 출력 (설명 없이). 상품 개수: ${batch.length}개`
+    );
 
-  if (!result) return fallback;
+    if (!result) {
+      console.warn(`[extractCoupangPurchaseOptions] 배치 ${batchIdx + 1}/${batches.length} Gemini 응답 없음 (${batch.length}개)`);
+      return emptyBatch;
+    }
 
-  let parsed: Array<{
-    categoryCode?: number;
-    quantity?: number;
-    quantityUnit?: string;
-    unitValue?: number | null;
-    unitType?: string | null;
-  }>;
+    try {
+      const jsonMatch = result.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) {
+        console.warn(`[extractCoupangPurchaseOptions] 배치 ${batchIdx + 1}/${batches.length} JSON 배열 패턴 없음 (출력 잘림 추정)`);
+        return emptyBatch;
+      }
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(parsed)) return emptyBatch;
+      if (parsed.length < batch.length) {
+        console.warn(`[extractCoupangPurchaseOptions] 배치 ${batchIdx + 1}/${batches.length} 응답 길이 부족 (${parsed.length}/${batch.length})`);
+      }
+      return batch.map((_, i) => (parsed[i] ?? {}) as ParsedItem);
+    } catch (e) {
+      console.warn(`[extractCoupangPurchaseOptions] 배치 ${batchIdx + 1}/${batches.length} JSON 파싱 실패:`, e instanceof Error ? e.message : String(e));
+      return emptyBatch;
+    }
+  }));
 
-  try {
-    const jsonMatch = result.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return fallback;
-    parsed = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(parsed)) return fallback;
-  } catch {
-    return fallback;
-  }
+  const parsedAll: ParsedItem[] = batchResults.flat();
 
   // 2단계 + 3단계: 카테고리 데이터 기반 옵션 형식 생성
   return productNames.map((_, i) => {
-    const item = parsed[i];
+    const item = parsedAll[i];
     if (!item?.categoryCode) return { hasOption: false, optionName: "", optionValue: "" };
 
     const category = getCoupangCategoryByCode(item.categoryCode);
