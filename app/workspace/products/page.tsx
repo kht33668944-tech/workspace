@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags } from "lucide-react";
+import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags, ChevronDown, ChevronUp } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts, type PriceChangeFilter } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
@@ -61,6 +61,7 @@ export default function ProductsPage() {
   const [scrapeResultModalOpen, setScrapeResultModalOpen] = useState(false);
   const [applyingPrices, setApplyingPrices] = useState(false);
   const [scrapeLog, setScrapeLog] = useState<string[]>([]);
+  const [scrapeLogCollapsed, setScrapeLogCollapsed] = useState(false);
   const scrapeLogRef = useRef<HTMLDivElement>(null);
   const scrapeAbortRef = useRef<AbortController | null>(null);
   const platformCodeFileRef = useRef<HTMLInputElement>(null);
@@ -178,6 +179,7 @@ export default function ProductsPage() {
     scrapeAbortRef.current = abortController;
     setScrapingPrices(true);
     setScrapeLog(["최저가 수집 준비 중..."]);
+    setScrapeLogCollapsed(false);
     setScrapeResults([]);
 
     const collectedChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
@@ -248,6 +250,7 @@ export default function ProductsPage() {
       if (collectedChanges.length > 0) {
         setScrapeResults([...collectedChanges]);
         setScrapeResultModalOpen(true);
+        setScrapeLogCollapsed(true);
       }
       if (!stopped && collectedChanges.length === 0) {
         setTimeout(() => setScrapeLog([]), 3000);
@@ -922,29 +925,60 @@ export default function ProductsPage() {
       )}
 
       {(scrapingPrices || scrapeLog.length > 0) && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[min(480px,calc(100vw-24px))] bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-lg overflow-hidden">
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border)]">
-            <div className="flex items-center gap-2">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[min(480px,calc(100vw-24px))] bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-lg overflow-hidden">
+          <div
+            className={`flex items-center justify-between gap-3 px-4 py-2.5 ${scrapeLogCollapsed ? "" : "border-b border-[var(--border)]"}`}
+          >
+            <button
+              type="button"
+              onClick={() => setScrapeLogCollapsed(v => !v)}
+              className="flex items-center gap-2 flex-1 min-w-0 text-left"
+              aria-expanded={!scrapeLogCollapsed}
+              aria-label={scrapeLogCollapsed ? "최저가 수집 로그 펼치기" : "최저가 수집 로그 접기"}
+            >
               {scrapingPrices && <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />}
               <span className="text-sm font-medium text-[var(--text-primary)]">최저가 수집</span>
-            </div>
-            {scrapingPrices && (
+              {scrapeLog.length > 0 && (
+                <span className="text-xs text-[var(--text-muted)] shrink-0">({scrapeLog.length})</span>
+              )}
+              {scrapeLogCollapsed && scrapeLog.length > 0 && (
+                <span className="text-xs text-[var(--text-muted)] truncate ml-1">
+                  {scrapeLog[scrapeLog.length - 1]}
+                </span>
+              )}
+            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {scrapingPrices && (
+                <button
+                  onClick={handleStopScrape}
+                  className="px-2.5 py-1 min-h-[32px] text-xs font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors"
+                >
+                  중단
+                </button>
+              )}
               <button
-                onClick={handleStopScrape}
-                className="px-2.5 py-1 min-h-[32px] text-xs font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors shrink-0"
+                type="button"
+                onClick={() => setScrapeLogCollapsed(v => !v)}
+                className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                aria-label={scrapeLogCollapsed ? "펼치기" : "접기"}
               >
-                중단
+                {scrapeLogCollapsed
+                  ? <ChevronUp className="w-4 h-4" />
+                  : <ChevronDown className="w-4 h-4" />
+                }
               </button>
-            )}
+            </div>
           </div>
-          <div
-            ref={scrapeLogRef}
-            className="max-h-[40vh] overflow-y-auto px-4 py-2 space-y-0.5"
-          >
-            {scrapeLog.map((line, i) => (
-              <p key={i} className="text-xs text-[var(--text-secondary)] leading-relaxed">{line}</p>
-            ))}
-          </div>
+          {!scrapeLogCollapsed && (
+            <div
+              ref={scrapeLogRef}
+              className="max-h-[40vh] overflow-y-auto px-4 py-2 space-y-0.5"
+            >
+              {scrapeLog.map((line, i) => (
+                <p key={i} className="text-xs text-[var(--text-secondary)] leading-relaxed">{line}</p>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
