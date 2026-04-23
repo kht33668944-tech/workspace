@@ -19,6 +19,7 @@ function ProductTable({
   products: rawProducts, allProducts, loading, selectedIds, onSelectToggle, onSelectAll, onUpdate,
   onUndo, onStartBatchUndo, onEndBatchUndo, columnFilters, onColumnFilterChange,
   rateMap, categories, priceChanges, priceChangeFilter, onPriceChangeFilterChange,
+  onBulkMarginApply,
 }: ProductTableProps) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const o: Record<string, number> = {};
@@ -544,6 +545,8 @@ function ProductTable({
                   isMobile={isMobile}
                   priceChangeFilter={col.key === "price_change" ? priceChangeFilter : undefined}
                   onPriceChangeFilterChange={col.key === "price_change" ? onPriceChangeFilterChange : undefined}
+                  selectedCount={selectedIds.size}
+                  onBulkMarginApply={col.key === "margin_rate" ? onBulkMarginApply : undefined}
                 />
               ))}
             </tr>

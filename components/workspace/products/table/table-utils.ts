@@ -248,6 +248,7 @@ export function formatCell(
 export interface PriceChangeFilter {
   minPercent: number | null;
   maxPercent: number | null;
+  onlyChanged?: boolean;
 }
 
 export interface ProductTableProps {
@@ -268,4 +269,5 @@ export interface ProductTableProps {
   priceChanges?: Record<string, number>;
   priceChangeFilter?: PriceChangeFilter | null;
   onPriceChangeFilterChange?: (filter: PriceChangeFilter | null) => void;
+  onBulkMarginApply?: (value: number) => void;
 }

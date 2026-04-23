@@ -162,6 +162,16 @@ export default function ProductsPage() {
     await Promise.all(ids.map(id => updateProduct(id, { registration_status: status })));
   };
 
+  const handleBulkMarginChange = useCallback((value: number) => {
+    if (selectedIds.size === 0) return;
+    const ids = [...selectedIds];
+    startBatchUndo();
+    for (const id of ids) {
+      updateProduct(id, { margin_rate: value });
+    }
+    endBatchUndo();
+  }, [selectedIds, startBatchUndo, endBatchUndo, updateProduct]);
+
   const handleColumnFilterChange = useCallback((key: string, values: string[]) => {
     setColumnFilters(prev => ({ ...prev, [key]: values }));
   }, []);
@@ -759,6 +769,7 @@ export default function ProductsPage() {
             priceChanges={priceChanges}
             priceChangeFilter={priceChangeFilter}
             onPriceChangeFilterChange={setPriceChangeFilter}
+            onBulkMarginApply={handleBulkMarginChange}
           />
         </>
       )}

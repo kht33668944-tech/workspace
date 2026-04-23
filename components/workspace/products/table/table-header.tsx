@@ -5,7 +5,7 @@ import { Filter, Check, ArrowUp, ArrowDown } from "lucide-react";
 import type { Product } from "@/types/database";
 import type { Col, SortDir, PriceChangeFilter } from "./table-utils";
 
-export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allProducts, columnFilters, sort, onSort, isMobile, stickyLeft, priceChangeFilter, onPriceChangeFilterChange }: {
+export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allProducts, columnFilters, sort, onSort, isMobile, stickyLeft, priceChangeFilter, onPriceChangeFilterChange, selectedCount, onBulkMarginApply }: {
   col: Col; width: number; onResize: (w: number) => void;
   hasFilter: boolean; filterOpen: boolean; onFilterToggle: () => void;
   selectedValues: string[]; onFilterChange: (v: string[]) => void; allProducts: Product[];
@@ -15,6 +15,8 @@ export const ResizableHeader = memo(function ResizableHeader({ col, width, onRes
   stickyLeft?: number;
   priceChangeFilter?: PriceChangeFilter | null;
   onPriceChangeFilterChange?: (filter: PriceChangeFilter | null) => void;
+  selectedCount?: number;
+  onBulkMarginApply?: (value: number) => void;
 }) {
   const sx = useRef(0), sw = useRef(0);
   const onMouseDown = (e: React.MouseEvent) => {
@@ -39,7 +41,7 @@ export const ResizableHeader = memo(function ResizableHeader({ col, width, onRes
       </div>
       {filterOpen && (col.key === "price_change" && onPriceChangeFilterChange
         ? <PriceChangeFilterDropdown filter={priceChangeFilter ?? null} onChange={onPriceChangeFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} />
-        : <ColumnFilterDropdown columnKey={col.key} allProducts={allProducts} columnFilters={columnFilters} selectedValues={selectedValues} onChange={onFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} />
+        : <ColumnFilterDropdown columnKey={col.key} allProducts={allProducts} columnFilters={columnFilters} selectedValues={selectedValues} onChange={onFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} selectedCount={selectedCount} onBulkMarginApply={onBulkMarginApply} />
       )}
       {!isMobile && (
         <div onMouseDown={onMouseDown} className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group/resize z-10 flex items-center justify-center">
@@ -50,16 +52,31 @@ export const ResizableHeader = memo(function ResizableHeader({ col, width, onRes
   );
 });
 
-function ColumnFilterDropdown({ columnKey, allProducts, columnFilters, selectedValues, onChange, onClose, sort, onSort }: {
+function ColumnFilterDropdown({ columnKey, allProducts, columnFilters, selectedValues, onChange, onClose, sort, onSort, selectedCount, onBulkMarginApply }: {
   columnKey: string; allProducts: Product[];
   columnFilters: Record<string, string[]>;
   selectedValues: string[];
   onChange: (v: string[]) => void; onClose: () => void; sort: SortDir; onSort: (d: SortDir) => void;
+  selectedCount?: number;
+  onBulkMarginApply?: (value: number) => void;
 }) {
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState<string[]>(selectedValues);
+  const [bulkMargin, setBulkMargin] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const changed = JSON.stringify(pending) !== JSON.stringify(selectedValues);
+  const showBulkMargin = columnKey === "margin_rate" && !!onBulkMarginApply && (selectedCount ?? 0) > 0;
+
+  const applyBulkMargin = () => {
+    const value = parseFloat(bulkMargin);
+    if (Number.isNaN(value) || value < 0 || value > 100) {
+      alert("순마진율은 0~100 사이의 숫자여야 합니다.");
+      return;
+    }
+    onBulkMarginApply?.(value);
+    setBulkMargin("");
+    onClose();
+  };
 
   const crossFilteredProducts = useMemo(() => {
     const otherFilters = Object.entries(columnFilters).filter(
@@ -121,6 +138,31 @@ function ColumnFilterDropdown({ columnKey, allProducts, columnFilters, selectedV
           <ArrowDown className="w-3 h-3" /> 내림차순
         </button>
       </div>
+      {showBulkMargin && (
+        <div className="p-2 border-b border-[var(--border)] bg-emerald-500/5">
+          <div className="text-[11px] font-medium text-emerald-400 mb-1.5">
+            선택 {selectedCount}개 일괄 설정
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number" step="0.1" min="0" max="100"
+              value={bulkMargin}
+              onChange={e => setBulkMargin(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") applyBulkMargin(); if (e.key === "Escape") onClose(); }}
+              placeholder="예: 8.5"
+              className="flex-1 w-0 bg-[var(--bg-hover)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-emerald-500/50"
+            />
+            <span className="text-xs text-[var(--text-muted)]">%</span>
+            <button
+              onClick={applyBulkMargin}
+              disabled={bulkMargin.trim() === ""}
+              className="px-2.5 py-1 rounded text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              적용
+            </button>
+          </div>
+        </div>
+      )}
       <div className="p-2 border-b border-[var(--border)]">
         <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="검색..."
           className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--text-primary)] outline-none"
@@ -159,6 +201,7 @@ function PriceChangeFilterDropdown({ filter, onChange, onClose, sort, onSort }: 
 }) {
   const [min, setMin] = useState(filter?.minPercent?.toString() ?? "");
   const [max, setMax] = useState(filter?.maxPercent?.toString() ?? "");
+  const [onlyChanged, setOnlyChanged] = useState(!!filter?.onlyChanged);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -170,11 +213,16 @@ function PriceChangeFilterDropdown({ filter, onChange, onClose, sort, onSort }: 
   const apply = () => {
     const minVal = min.trim() !== "" ? parseFloat(min) : null;
     const maxVal = max.trim() !== "" ? parseFloat(max) : null;
-    if (minVal === null && maxVal === null) {
+    if (minVal === null && maxVal === null && !onlyChanged) {
       onChange(null);
     } else {
-      onChange({ minPercent: minVal, maxPercent: maxVal });
+      onChange({ minPercent: minVal, maxPercent: maxVal, onlyChanged });
     }
+    onClose();
+  };
+
+  const applyOnlyChanged = () => {
+    onChange({ minPercent: null, maxPercent: null, onlyChanged: true });
     onClose();
   };
 
@@ -188,7 +236,21 @@ function PriceChangeFilterDropdown({ filter, onChange, onClose, sort, onSort }: 
           <ArrowDown className="w-3 h-3" /> 내림차순
         </button>
       </div>
+      <div className="p-2 border-b border-[var(--border)]">
+        <button
+          onClick={applyOnlyChanged}
+          className="w-full px-2.5 py-1.5 rounded text-xs font-medium bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-colors"
+        >
+          변동 있는 상품만 보기
+        </button>
+      </div>
       <div className="p-2.5 border-b border-[var(--border)]">
+        <label className="flex items-center gap-2 cursor-pointer mb-2.5" onClick={e => { e.preventDefault(); setOnlyChanged(v => !v); }}>
+          <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${onlyChanged ? "bg-blue-600 border-blue-600" : "border-[var(--border-strong)]"}`}>
+            {onlyChanged && <Check className="w-2.5 h-2.5 text-white" />}
+          </div>
+          <span className="text-xs text-[var(--text-secondary)]">변동률 0 제외 (변동 있는 상품만)</span>
+        </label>
         <div className="text-xs font-medium text-[var(--text-secondary)] mb-2">변동률 범위 (%)</div>
         <div className="flex items-center gap-2">
           <input
