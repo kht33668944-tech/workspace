@@ -235,13 +235,15 @@ function OrdersPageInner() {
   const stats = useMemo(() => {
     const totalRevenue = orders.reduce((sum, o) => sum + (o.revenue || 0), 0);
     const totalMargin = orders.reduce((sum, o) => sum + (o.margin || 0), 0);
+    const totalSettlement = orders.reduce((sum, o) => sum + (o.settlement || 0), 0);
+    const totalCost = orders.reduce((sum, o) => sum + (o.cost || 0), 0);
     const marketplaceRevenue: Record<string, number> = {};
     for (const o of orders) {
       if (o.marketplace) {
         marketplaceRevenue[o.marketplace] = (marketplaceRevenue[o.marketplace] || 0) + (o.revenue || 0);
       }
     }
-    return { count: orders.length, totalRevenue, totalMargin, marketplaceRevenue };
+    return { count: orders.length, totalRevenue, totalMargin, totalSettlement, totalCost, marketplaceRevenue };
   }, [orders]);
 
   const handleImport = async (rows: OrderInsert[]) => {
@@ -651,6 +653,8 @@ function OrdersPageInner() {
             <span className="hidden md:inline text-[var(--text-disabled)]">|</span>
           </>
         )}
+        <span>정산예정 <strong className="text-[var(--text-secondary)]">{stats.totalSettlement.toLocaleString()}</strong>원</span>
+        <span>원가 <strong className="text-[var(--text-secondary)]">{stats.totalCost.toLocaleString()}</strong>원</span>
         <span>
           마진{" "}
           <strong className={stats.totalMargin >= 0 ? "text-green-400" : "text-red-400"}>
