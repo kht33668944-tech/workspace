@@ -216,15 +216,45 @@ export function useProducts(options: UseProductsOptions = {}) {
 
   const insertProducts = async (rows: ProductInsert[]) => {
     if (!user) return { error: "Not authenticated" };
+
+    // 중복 product_name 사전 필터 (DB UNIQUE INDEX와 협업 — 가격수정 엑셀 중복 row 방지)
+    const existingNames = new Set(
+      products.map((p) => p.product_name?.trim()).filter((n): n is string => Boolean(n))
+    );
+    const incomingNames = new Set<string>();
+    const skipped: string[] = [];
+    const filteredRows: ProductInsert[] = [];
+    for (const r of rows) {
+      const name = (r.product_name ?? "").trim();
+      if (name && (existingNames.has(name) || incomingNames.has(name))) {
+        skipped.push(name);
+        continue;
+      }
+      if (name) incomingNames.add(name);
+      filteredRows.push(r);
+    }
+    if (skipped.length > 0) {
+      console.warn(`[use-products] 중복 상품명 ${skipped.length}개 자동 스킵`);
+    }
+    if (filteredRows.length === 0) {
+      return { error: null, skipped };
+    }
+
     const startSort = nextSortOrderRef.current;
-    const withUserId = rows.map((row, i) => ({ ...row, user_id: user.id, sort_order: startSort + i }));
+    const withUserId = filteredRows.map((row, i) => ({ ...row, user_id: user.id, sort_order: startSort + i }));
 
     const inserted: Product[] = [];
     const BATCH_SIZE = 500;
     for (let i = 0; i < withUserId.length; i += BATCH_SIZE) {
       const batch = withUserId.slice(i, i + BATCH_SIZE);
       const { data, error } = await supabase.from("products").insert(batch).select();
-      if (error) return { error: error.message };
+      if (error) {
+        // PostgreSQL unique_violation (23505) — DB 안전망에 의한 차단
+        const friendlyMsg = error.code === "23505"
+          ? "이미 등록된 상품명이 포함되어 있습니다."
+          : error.message;
+        return { error: friendlyMsg, skipped };
+      }
       if (data) inserted.push(...(data as Product[]));
     }
 
@@ -237,7 +267,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     setProducts((prev) => [...prev, ...inserted]);
     nextSortOrderRef.current = startSort + inserted.length;
     fetchGenRef.current++;
-    return { error: null };
+    return { error: null, skipped };
   };
 
   // 단일 상품 추가
