@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { generatePriceUpdateExcel } from "@/lib/excel-export";
+import type { Product } from "@/types/database";
+
+export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
@@ -16,13 +19,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "상품 ID가 필요합니다." }, { status: 400 });
     }
 
-    // 상품 조회
-    const { data: products, error: pErr } = await supabase
-      .from("products")
-      .select("*")
-      .in("id", productIds);
-    if (pErr) throw pErr;
-    if (!products || products.length === 0) {
+    // 대량 처리: .in() URL 길이 한계 회피 위해 200개씩 청크 조회
+    const CHUNK = 200;
+    const products: Product[] = [];
+    for (let i = 0; i < productIds.length; i += CHUNK) {
+      const chunk = productIds.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .in("id", chunk);
+      if (error) {
+        console.error(`[price-update-export] 청크 조회 실패 (${i}~${i + chunk.length}):`, error.message);
+        return NextResponse.json({ error: `상품 조회 실패: ${error.message}` }, { status: 400 });
+      }
+      if (data) products.push(...(data as Product[]));
+    }
+    if (products.length === 0) {
       return NextResponse.json({ error: "상품이 없습니다." }, { status: 400 });
     }
 

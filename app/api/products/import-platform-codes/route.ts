@@ -38,6 +38,9 @@ export async function POST(request: NextRequest) {
     const accountCol = keys.find(k => k.includes("쇼핑몰(계정)") || k === "쇼핑몰(계정)");
     const codeCol = keys.find(k => k.includes("쇼핑몰 상품번호") || k === "쇼핑몰 상품번호");
     const sellerCodeCol = keys.find(k => k.includes("판매자관리코드") || k === "판매자관리코드");
+    // 쿠팡 가격수정 양식용 옵션 캐시 (선택)
+    const optionCombineCol = keys.find(k => k === "옵션조합" || k.includes("옵션조합"));
+    const optionCol = keys.find(k => k === "옵션" || (k.includes("옵션") && !k.includes("조합")));
 
     if (!nameCol || !accountCol || !codeCol) {
       return NextResponse.json({
@@ -66,7 +69,14 @@ export async function POST(request: NextRequest) {
     };
 
     // 4. 엑셀 행 처리 — 상품별로 코드 수집
-    const updates = new Map<string, { id: string; platform_codes: Record<string, string>; seller_code: Record<string, string> | null }>();
+    type CoupangOptions = { hasOption: boolean; optionName: string; optionValue: string };
+    type UpdateEntry = {
+      id: string;
+      platform_codes: Record<string, string>;
+      seller_code: Record<string, string> | null;
+      coupang_options?: CoupangOptions;
+    };
+    const updates = new Map<string, UpdateEntry>();
     const unmatchedNames = new Set<string>();
     let duplicateCount = 0;
 
@@ -92,7 +102,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const existing = updates.get(product.id) ?? {
+      const existing: UpdateEntry = updates.get(product.id) ?? {
         id: product.id,
         platform_codes: overwrite ? {} : { ...(product.platform_codes ?? {}) },
         seller_code: overwrite ? null : (product.seller_code ? { ...product.seller_code } : null),
@@ -105,6 +115,26 @@ export async function POST(request: NextRequest) {
         if (!existing.seller_code[group]) {
           existing.seller_code[group] = sellerCode;
         }
+      }
+      // 쿠팡 행 + 옵션 컬럼 있으면 coupang_options 추출 (한 상품당 1회)
+      if (
+        optionCombineCol &&
+        account.toLowerCase().startsWith("쿠팡") &&
+        existing.coupang_options === undefined
+      ) {
+        const combine = String(row[optionCombineCol] ?? "").trim();
+        const optionRaw = optionCol ? String(row[optionCol] ?? "").trim() : "";
+        if (combine === "조합형" && optionRaw) {
+          const parts = optionRaw.split(/\r?\n/);
+          existing.coupang_options = {
+            hasOption: true,
+            optionName: (parts[0] ?? "").trim(),
+            optionValue: (parts[1] ?? "").trim(),
+          };
+        } else if (combine === "옵션없음") {
+          existing.coupang_options = { hasOption: false, optionName: "", optionValue: "" };
+        }
+        // 그 외 (빈 값 등)는 추출 보류 → DB 미변경 → 추후 가격수정 시 Gemini fallback
       }
       updates.set(product.id, existing);
     }
@@ -127,9 +157,11 @@ export async function POST(request: NextRequest) {
     for (let i = 0; i < updateEntries.length; i += BATCH) {
       const batch = updateEntries.slice(i, i + BATCH);
       const results = await Promise.allSettled(
-        batch.map(({ id, platform_codes, seller_code }) =>
-          supabase.from("products").update({ platform_codes, seller_code }).eq("id", id)
-        )
+        batch.map(({ id, platform_codes, seller_code, coupang_options }) => {
+          const payload: Record<string, unknown> = { platform_codes, seller_code };
+          if (coupang_options !== undefined) payload.coupang_options = coupang_options;
+          return supabase.from("products").update(payload).eq("id", id);
+        })
       );
       for (let j = 0; j < results.length; j++) {
         const r = results[j];

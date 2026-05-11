@@ -22,16 +22,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "상품 ID가 없습니다." }, { status: 400 });
     }
 
-    // 상품 조회 (RLS로 본인 소유만 반환)
-    const { data: products, error: productsError } = await supabase
-      .from("products")
-      .select("*")
-      .in("id", productIds)
-      .order("sort_order");
-
-    if (productsError || !products) {
-      return NextResponse.json({ error: "상품 조회 실패" }, { status: 500 });
+    // 대량 처리: .in() URL 길이 한계 회피 위해 200개씩 청크 조회 (RLS로 본인 소유만 반환)
+    const CHUNK = 200;
+    type ProductRow = Record<string, unknown> & { id: string; product_name: string; sort_order?: number | null };
+    const products: ProductRow[] = [];
+    for (let i = 0; i < productIds.length; i += CHUNK) {
+      const chunk = productIds.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .in("id", chunk);
+      if (error) {
+        console.error(`[playauto-export] 청크 조회 실패 (${i}~${i + chunk.length}):`, error.message);
+        return NextResponse.json({ error: `상품 조회 실패: ${error.message}` }, { status: 500 });
+      }
+      if (data) products.push(...(data as ProductRow[]));
     }
+    products.sort((a, b) => ((a.sort_order ?? 0) as number) - ((b.sort_order ?? 0) as number));
 
     if (products.length === 0) {
       return NextResponse.json({ error: "조회된 상품이 없습니다." }, { status: 404 });
@@ -78,27 +85,74 @@ export async function POST(req: NextRequest) {
 
     const availableSsCodes = allCategoryCodes;
 
-    // Gemini로 브랜드/모델명/제조사 + 스마트스토어 카테고리코드 + 단위가격정보 병렬 추출
+    // 가격수정 모드: 대부분 Gemini skip (브랜드/카테고리코드/단위가격은 양식에 안 들어감)
+    // 단, 쿠팡 옵션조합/옵션은 가격수정 양식에 들어가므로 처리 필요 — DB 캐시 우선 + 누락 시 Gemini fallback
     const productNames = products.map((p) => p.product_name as string);
-    const [metadataList, smartstoreCategoryCodes, unitPriceInfoList, coupangPurchaseOptions] = await Promise.all([
-      extractProductMetadataBatch(productNames),
-      availableSsCodes.length > 0
-        ? suggestSmartStoreCategoryCodes(
-            products.map((p) => ({
-              product_name: p.product_name as string,
-              category: p.category as string,
-              source_category: p.source_category as string,
-            })),
-            availableSsCodes
-          )
-        : Promise.resolve(products.map(() => "")),
-      platform === "smartstore"
-        ? extractUnitPriceInfo(productNames)
-        : Promise.resolve(undefined),
-      platform === "coupang"
-        ? extractCoupangPurchaseOptions(productNames)
-        : Promise.resolve(undefined),
-    ]);
+
+    type CoupangOpt = { hasOption: boolean; optionName: string; optionValue: string };
+    let metadataList: Array<{ model: string; brand: string; manufacturer: string }>;
+    let smartstoreCategoryCodes: string[];
+    let unitPriceInfoList: Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }> | undefined;
+    let coupangPurchaseOptions: CoupangOpt[] | undefined;
+
+    if (priceUpdate) {
+      metadataList = productNames.map(() => ({ model: "", brand: "", manufacturer: "" }));
+      smartstoreCategoryCodes = productNames.map(() => "");
+      unitPriceInfoList = undefined;
+
+      if (platform === "coupang") {
+        // 1) DB 캐시 읽기
+        const cached: (CoupangOpt | null)[] = products.map((p) => {
+          const v = (p as Record<string, unknown>).coupang_options;
+          return (v && typeof v === "object") ? (v as CoupangOpt) : null;
+        });
+        // 2) 누락분만 Gemini 호출
+        const missingIdx: number[] = [];
+        cached.forEach((c, i) => { if (c === null) missingIdx.push(i); });
+        let extracted: CoupangOpt[] = [];
+        if (missingIdx.length > 0) {
+          console.log(`[playauto-export] coupang_options 누락 ${missingIdx.length}개 → Gemini 호출`);
+          extracted = await extractCoupangPurchaseOptions(missingIdx.map((i) => productNames[i]));
+          // 3) DB에 캐시 저장 (응답 지연 최소화: await 안 함)
+          Promise.all(missingIdx.map((idx, j) =>
+            supabase.from("products")
+              .update({ coupang_options: extracted[j] })
+              .eq("id", (products[idx] as Record<string, unknown>).id as string)
+          )).catch((e) => console.error("[playauto-export] coupang_options 캐시 저장 실패:", e instanceof Error ? e.message : String(e)));
+        }
+        let extPtr = 0;
+        coupangPurchaseOptions = cached.map((c) => {
+          if (c !== null) return c;
+          return extracted[extPtr++] ?? { hasOption: false, optionName: "", optionValue: "" };
+        });
+      } else {
+        coupangPurchaseOptions = undefined;
+      }
+    } else {
+      const result = await Promise.all([
+        extractProductMetadataBatch(productNames),
+        availableSsCodes.length > 0
+          ? suggestSmartStoreCategoryCodes(
+              products.map((p) => ({
+                product_name: p.product_name as string,
+                category: (p as Record<string, unknown>).category as string,
+                source_category: (p as Record<string, unknown>).source_category as string,
+              })),
+              availableSsCodes
+            )
+          : Promise.resolve(products.map(() => "")),
+        platform === "smartstore"
+          ? extractUnitPriceInfo(productNames)
+          : Promise.resolve(undefined),
+        platform === "coupang"
+          ? extractCoupangPurchaseOptions(productNames)
+          : Promise.resolve(undefined),
+      ]);
+      metadataList = result[0];
+      smartstoreCategoryCodes = result[1];
+      unitPriceInfoList = result[2];
+      coupangPurchaseOptions = result[3];
+    }
 
     // 사용자 커스텀 설정 (DB에 저장된 값 우선)
     let userConfig = exportConfigResult.data ?? undefined;

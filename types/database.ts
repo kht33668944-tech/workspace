@@ -179,11 +179,13 @@ export interface Product {
   fixed_price_smartstore: number | null;
   fixed_price_esm: number | null;
   fixed_price_coupang: number | null;
+  // 쿠팡 가격수정 양식용 옵션 캐시 (한 번 추출 후 재사용)
+  coupang_options: { hasOption: boolean; optionName: string; optionValue: string } | null;
   created_at: string;
   updated_at: string;
 }
 
-export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at" | "platform_codes" | "seller_code" | "has_detail_html" | "fixed_price_smartstore" | "fixed_price_esm" | "fixed_price_coupang">;
+export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at" | "platform_codes" | "seller_code" | "has_detail_html" | "fixed_price_smartstore" | "fixed_price_esm" | "fixed_price_coupang" | "coupang_options">;
 export type ProductUpdate = Partial<Omit<Product, "id" | "user_id" | "created_at" | "updated_at" | "has_detail_html">>;
 
 // ─── 플레이오토 카테고리 매핑 ───
