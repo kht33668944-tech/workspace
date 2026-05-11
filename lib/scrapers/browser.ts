@@ -1,4 +1,5 @@
 import { chromium, type Browser, type BrowserContext } from "playwright";
+import { chromium as patchedChromium } from "patchright";
 
 /**
  * G마켓 전용 BrowserContext 생성.
@@ -109,6 +110,42 @@ export async function createStealthContext(browser: Browser): Promise<BrowserCon
     if (typeof WebGL2RenderingContext !== "undefined") {
       patchWebGL(WebGL2RenderingContext.prototype);
     }
+  });
+
+  return context;
+}
+
+/**
+ * Patchright 기반 브라우저 런치 (Cloudflare/봇 감지 우회 강화)
+ * - patchright는 CDP Runtime.Enable 등 자동화 시그널을 패치한 playwright 호환 fork
+ * - launchBrowser와 달리 --disable-blink-features=AutomationControlled 등은 빼야 함
+ *   (오히려 봇 감지 트리거 가능 - rebrowser/patchright 권장사항)
+ */
+export async function launchPatchedBrowser(): Promise<Browser> {
+  const headless = process.env.BROWSER_HEADLESS !== "false";
+  const channel = process.env.BROWSER_CHANNEL || undefined;
+
+  return patchedChromium.launch({
+    headless,
+    ...(channel && { channel }),
+    args: [
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      "--window-size=1920,1080",
+    ],
+  }) as unknown as Browser;
+}
+
+/**
+ * Patchright + Stealth 적용 G마켓 전용 BrowserContext
+ * patchright가 자체적으로 webdriver/plugins/languages 등 stealth 처리.
+ * extraHTTPHeaders는 cloudflare가 실제 브라우저 헤더와의 불일치를 감지하므로 제외.
+ */
+export async function createPatchedGmarketContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext({
+    locale: "ko-KR",
+    timezoneId: "Asia/Seoul",
+    viewport: { width: 1920, height: 1080 },
   });
 
   return context;

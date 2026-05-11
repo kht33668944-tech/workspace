@@ -59,6 +59,7 @@ export default function ProductsPage() {
   const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(null);
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
   const [scrapeResultModalOpen, setScrapeResultModalOpen] = useState(false);
+  const [botBlockedItems, setBotBlockedItems] = useState<Array<{ id: string; name: string }>>([]);
   const [applyingPrices, setApplyingPrices] = useState(false);
   const [scrapeLog, setScrapeLog] = useState<string[]>([]);
   const [scrapeLogCollapsed, setScrapeLogCollapsed] = useState(false);
@@ -180,21 +181,17 @@ export default function ProductsPage() {
     return insertProducts(rows as ProductInsert[]);
   };
 
-  const handleScrapePrices = async () => {
-    const ids = selectedIds.size > 0 ? [...selectedIds] : products.filter(p => p.purchase_url).map(p => p.id);
-    if (ids.length === 0) return;
-    if (!confirm(`${selectedIds.size > 0 ? `선택한 ${ids.length}개` : `전체 ${ids.length}개`} 상품의 최저가를 갱신하시겠습니까?`)) return;
-
-    const abortController = new AbortController();
-    scrapeAbortRef.current = abortController;
-    setScrapingPrices(true);
-    setScrapeLog(["최저가 수집 준비 중..."]);
-    setScrapeLogCollapsed(false);
-    setScrapeResults([]);
-
-    const collectedChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
+  const runScrapeOnce = async (
+    ids: string[],
+    abortController: AbortController,
+  ): Promise<{
+    changes: Array<{ id: string; name: string; previous: number; price: number }>;
+    botBlocked: Array<{ id: string; name: string }>;
+    stopped: boolean;
+  }> => {
+    const changes: Array<{ id: string; name: string; previous: number; price: number }> = [];
+    const botBlocked: Array<{ id: string; name: string }> = [];
     let stopped = false;
-
     try {
       const res = await fetch("/api/products/scrape-prices", {
         method: "POST",
@@ -205,42 +202,41 @@ export default function ProductsPage() {
         body: JSON.stringify({ productIds: ids }),
         signal: abortController.signal,
       });
-
       if (!res.ok || !res.body) {
-        alert("최저가 수집 실패");
-        return;
+        pushScrapeLog("최저가 수집 실패 (서버 응답 오류)");
+        return { changes, botBlocked, stopped };
       }
-
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-
         const lines = buffer.split("\n\n");
         buffer = lines.pop() ?? "";
-
         for (const line of lines) {
           const data = line.replace(/^data: /, "").trim();
           if (!data) continue;
           try {
             const event = JSON.parse(data);
             if (event.type === "progress") {
-              const priceText = event.price > 0
-                ? event.price !== event.previous_price
-                  ? `${event.previous_price.toLocaleString()}→${event.price.toLocaleString()}원`
-                  : `${event.price.toLocaleString()}원 (변동없음)`
-                : "실패";
-              const msg = `(${event.index}/${event.total}) ${event.name} → ${priceText}`;
-              pushScrapeLog(msg);
-              if (event.price > 0) {
-                collectedChanges.push({ id: event.id, name: event.name, previous: event.previous_price, price: event.price });
+              const priceText = event.bot_blocked
+                ? "봇 감지로 차단 (재시도 필요)"
+                : event.price > 0
+                  ? event.price !== event.previous_price
+                    ? `${event.previous_price.toLocaleString()}→${event.price.toLocaleString()}원`
+                    : `${event.price.toLocaleString()}원 (변동없음)`
+                  : "실패";
+              pushScrapeLog(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
+              if (event.bot_blocked) {
+                botBlocked.push({ id: event.id, name: event.name });
+              } else if (event.price > 0) {
+                changes.push({ id: event.id, name: event.name, previous: event.previous_price, price: event.price });
               }
             } else if (event.type === "done") {
-              pushScrapeLog(`완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패`);
+              const blockedText = event.bot_blocked > 0 ? `, ${event.bot_blocked}개 봇감지` : "";
+              pushScrapeLog(`완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패${blockedText}`);
             } else if (event.type === "error") {
               pushScrapeLog(`오류: ${event.message}`);
             }
@@ -250,19 +246,56 @@ export default function ProductsPage() {
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         stopped = true;
-        pushScrapeLog(`중단됨: ${collectedChanges.length}개 수집 완료`);
+        pushScrapeLog(`중단됨: ${changes.length}개 수집 완료`);
       } else {
         pushScrapeLog("최저가 수집 중 오류 발생");
       }
+    }
+    return { changes, botBlocked, stopped };
+  };
+
+  const handleScrapePrices = async (overrideIds?: string[]) => {
+    const isRetry = !!(overrideIds && overrideIds.length > 0);
+    const ids = isRetry
+      ? overrideIds!
+      : (selectedIds.size > 0 ? [...selectedIds] : products.filter(p => p.purchase_url).map(p => p.id));
+    if (ids.length === 0) return;
+    if (!isRetry && !confirm(`${selectedIds.size > 0 ? `선택한 ${ids.length}개` : `전체 ${ids.length}개`} 상품의 최저가를 갱신하시겠습니까?`)) return;
+
+    const abortController = new AbortController();
+    scrapeAbortRef.current = abortController;
+    setScrapingPrices(true);
+    if (!isRetry) {
+      setScrapeLog(["최저가 수집 준비 중..."]);
+      setScrapeResults([]);
+    } else {
+      pushScrapeLog(`봇감지 실패 ${ids.length}개 다시 시도 중...`);
+    }
+    setScrapeLogCollapsed(false);
+    setBotBlockedItems([]);
+
+    let accumulatedChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
+    let remainingBlocked: Array<{ id: string; name: string }> = [];
+    let stopped = false;
+
+    try {
+      const result = await runScrapeOnce(ids, abortController);
+      accumulatedChanges = result.changes;
+      remainingBlocked = result.botBlocked;
+      stopped = result.stopped;
     } finally {
       scrapeAbortRef.current = null;
       setScrapingPrices(false);
-      if (collectedChanges.length > 0) {
-        setScrapeResults([...collectedChanges]);
+      if (accumulatedChanges.length > 0) {
+        setScrapeResults([...accumulatedChanges]);
         setScrapeResultModalOpen(true);
         setScrapeLogCollapsed(true);
       }
-      if (!stopped && collectedChanges.length === 0) {
+      if (remainingBlocked.length > 0) {
+        setBotBlockedItems(remainingBlocked);
+        pushScrapeLog(`봇감지 ${remainingBlocked.length}개 미완료 - 수동 재시도 버튼 사용 가능`);
+      }
+      if (!stopped && accumulatedChanges.length === 0 && remainingBlocked.length === 0) {
         setTimeout(() => setScrapeLog([]), 3000);
       }
     }
@@ -460,6 +493,7 @@ export default function ProductsPage() {
     setExportStep("가격수정 엑셀 생성 중...");
 
     // 가격수정은 ESM을 옥션/지마켓/11번가 개별 파일로 분리 (전체 선택 시 5개 병렬 다운로드)
+    // priceUpdate=true 플래그로 서버에서 Gemini 호출 skip → 토큰 절감 + 대량 가능
     const platforms: PlayAutoExportPlatform[] = target === "all"
       ? ["smartstore", "auction", "gmarket", "11st", "coupang"]
       : [target];
@@ -606,7 +640,7 @@ export default function ProductsPage() {
                 </>
               )}
               <button
-                onClick={handleScrapePrices}
+                onClick={() => handleScrapePrices()}
                 disabled={scrapingPrices}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 rounded-lg transition-colors disabled:opacity-50"
               >
@@ -935,7 +969,7 @@ export default function ProductsPage() {
         <BatchDetailModal items={batchItems} onClose={dismissBatch} onClear={clearBatch} />
       )}
 
-      {(scrapingPrices || scrapeLog.length > 0) && (
+      {(scrapingPrices || scrapeLog.length > 0 || botBlockedItems.length > 0) && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[min(480px,calc(100vw-24px))] bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-lg overflow-hidden">
           <div
             className={`flex items-center justify-between gap-3 px-4 py-2.5 ${scrapeLogCollapsed ? "" : "border-b border-[var(--border)]"}`}
@@ -952,6 +986,9 @@ export default function ProductsPage() {
               {scrapeLog.length > 0 && (
                 <span className="text-xs text-[var(--text-muted)] shrink-0">({scrapeLog.length})</span>
               )}
+              {!scrapingPrices && botBlockedItems.length > 0 && (
+                <span className="text-xs font-medium text-orange-400 shrink-0">봇감지 {botBlockedItems.length}개</span>
+              )}
               {scrapeLogCollapsed && scrapeLog.length > 0 && (
                 <span className="text-xs text-[var(--text-muted)] truncate ml-1">
                   {scrapeLog[scrapeLog.length - 1]}
@@ -966,6 +1003,24 @@ export default function ProductsPage() {
                 >
                   중단
                 </button>
+              )}
+              {!scrapingPrices && botBlockedItems.length > 0 && (
+                <>
+                  <button
+                    onClick={() => handleScrapePrices(botBlockedItems.map(b => b.id))}
+                    className="flex items-center gap-1 px-2.5 py-1 min-h-[32px] text-xs font-medium text-orange-400 bg-orange-500/10 hover:bg-orange-500/20 rounded-lg transition-colors"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    다시 시도
+                  </button>
+                  <button
+                    onClick={() => { setBotBlockedItems([]); setScrapeLog([]); }}
+                    className="px-2 py-1 min-h-[32px] text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
+                    aria-label="봇감지 목록 닫기"
+                  >
+                    닫기
+                  </button>
+                </>
               )}
               <button
                 type="button"
