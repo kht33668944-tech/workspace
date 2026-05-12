@@ -1308,17 +1308,22 @@ async function handleKakaoPayFlow(page: Page) {
 
   console.log("[ohouse-purchase] 카카오페이 iframe 대기 중...");
 
-  // 1. 카카오페이 iframe 감지 (payment.ohou.se/.../KAKAO/ready...)
-  //    iframe이 2단 중첩이라 page.frames()로 평탄화 탐색
+  // 1. 카카오페이 iframe 감지
+  //    iframe이 2단 중첩(외부 wrapper + 내부 결제 UI)이라 URL만으론 외부를 잡을 수 있음.
+  //    → "카톡결제" 탭이 실제로 존재하는 frame을 직접 탐색 (페이지 모든 frame 순회)
   const startWait = Date.now();
   let kakaoFrame: import("playwright").Frame | null = null;
-  while (Date.now() - startWait < 20000) {
+  while (Date.now() - startWait < 25000) {
     for (const frame of page.frames()) {
-      const url = frame.url();
-      if (url.includes("payment.ohou.se") && url.toUpperCase().includes("KAKAO")) {
-        kakaoFrame = frame;
-        console.log(`[ohouse-purchase] 카카오페이 iframe 감지: ${url}`);
-        break;
+      try {
+        const tab = frame.locator('[role="tab"]:has-text("카톡결제")').first();
+        if (await tab.isVisible({ timeout: 200 }).catch(() => false)) {
+          kakaoFrame = frame;
+          console.log(`[ohouse-purchase] 카카오페이 iframe 감지: ${frame.url()}`);
+          break;
+        }
+      } catch {
+        // detached frame 등은 skip
       }
     }
     if (kakaoFrame) break;
@@ -1326,14 +1331,11 @@ async function handleKakaoPayFlow(page: Page) {
   }
 
   if (!kakaoFrame) {
-    throw new Error("카카오페이 iframe을 찾을 수 없습니다");
+    throw new Error("카카오페이 iframe(카톡결제 탭 포함)을 찾을 수 없습니다");
   }
-
-  await page.waitForTimeout(1500);
 
   // 2. 카톡결제 탭 클릭 (기본은 QR결제)
   const katokTab = kakaoFrame.locator('[role="tab"]:has-text("카톡결제")').first();
-  await katokTab.waitFor({ state: "visible", timeout: 10000 });
   await katokTab.click({ force: true });
   console.log("[ohouse-purchase] '카톡결제' 탭 클릭");
   await page.waitForTimeout(800);
