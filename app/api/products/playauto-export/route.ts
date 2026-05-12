@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { extractProductMetadataBatch, suggestSmartStoreCategoryCodes, extractUnitPriceInfo, extractCoupangPurchaseOptions } from "@/lib/gemini";
 import { generatePlayAutoProductExcel, arrayBufferToBase64, PLATFORM_CONFIGS, type PlayAutoExportPlatform } from "@/lib/excel-export";
+import type { Product } from "@/types/database";
 
 export async function POST(req: NextRequest) {
   try {
@@ -188,7 +189,7 @@ export async function POST(req: NextRequest) {
 
     // 엑셀 생성 (seller_code는 사전 할당된 DB 값 사용)
     const { buffer, filename } = await generatePlayAutoProductExcel(
-      products,
+      products as unknown as Product[],
       metadataList,
       ratesResult.data ?? [],
       categoryMappings,
