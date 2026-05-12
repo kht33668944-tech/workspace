@@ -10,6 +10,8 @@ const LOGIN_URL = "https://ohou.se/users/sign_in";
 const FIXED_PHONE_SUFFIX = process.env.OHOUSE_PHONE_SUFFIX ?? "";
 const TOSSPAY_PHONE = process.env.OHOUSE_TOSSPAY_PHONE ?? "";   // 예: 010-3366-8944
 const TOSSPAY_BIRTH = process.env.OHOUSE_TOSSPAY_BIRTH ?? "";   // 예: 980309
+const KAKAO_PAY_PHONE = process.env.OHOUSE_KAKAO_PHONE ?? "";   // 예: 01033668944
+const KAKAO_PAY_BIRTH = process.env.OHOUSE_KAKAO_BIRTHDAY ?? ""; // 예: 980309
 const PAYMENT_WAIT_MS = 60000;          // 결제 승인 대기 시간 (60초)
 
 interface ProgressCallback {
@@ -368,53 +370,36 @@ async function changeDeliveryAddress(page: Page, order: PurchaseOrderInfo) {
     await editBtn.click();
     await page.waitForTimeout(2000);
 
-    // 3. 배송지 수정 모달 내에서만 입력 (모달 스코프)
-    // 모달: "배송지 수정" 헤더 + "저장" 버튼이 포함된 컨테이너
-    const modal = page.locator(':text-is("배송지 수정")').locator('..').locator('..');
-    const modalInputs = modal.locator('input:not([disabled])');
-    const inputCount = await modalInputs.count().catch(() => 0);
-    console.log(`[ohouse-purchase] 배송지 수정 모달 input 수: ${inputCount}`);
+    // 3. 배송지 수정 모달 내에서만 입력 (role="dialog" 스코프)
+    // 모달 내부 input: name="name"(배송지명), name="recipient"(받는사람), type="tel"(전화번호),
+    //                  placeholder="상세주소 입력"(상세주소), checkbox(기본 배송지로 저장)
+    const modal = page.locator('[role="dialog"]:has-text("배송지 수정")').first();
+    await modal.waitFor({ state: "visible", timeout: 5000 });
 
-    // 모달 내 input 순서: 배송지명(0), 받는사람(1), 전화번호(2), 우편번호(disabled), 기본주소(disabled), 상세주소(3)
-    if (inputCount >= 3) {
-      // 배송지명
-      await modalInputs.nth(0).fill(order.recipientName, { force: true });
-      console.log(`[ohouse-purchase] 배송지명 입력: ${order.recipientName}`);
+    // 배송지명
+    const nameInput = modal.locator('input[name="name"]');
+    await nameInput.fill(order.recipientName, { force: true });
+    console.log(`[ohouse-purchase] 배송지명 입력: ${order.recipientName}`);
 
-      // 받는 사람
-      await modalInputs.nth(1).fill(order.recipientName, { force: true });
-      console.log(`[ohouse-purchase] 받는 사람 입력: ${order.recipientName}`);
+    // 받는 사람
+    const recipientInput = modal.locator('input[name="recipient"]');
+    await recipientInput.fill(order.recipientName, { force: true });
+    console.log(`[ohouse-purchase] 받는 사람 입력: ${order.recipientName}`);
 
-      // 전화번호 (010 뒤 뒷자리)
-      await modalInputs.nth(2).fill(FIXED_PHONE_SUFFIX, { force: true });
-      console.log(`[ohouse-purchase] 배송지 전화번호 입력 완료`);
-    } else {
-      // fallback: 라벨 기반 (모달 스코프 실패 시)
-      console.log("[ohouse-purchase] 모달 input 감지 실패, 라벨 기반 fallback");
-      const nameInput = page.locator(':text-is("배송지명")').locator('..').locator('input:not([disabled])').first();
-      if (await nameInput.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await nameInput.fill(order.recipientName, { force: true });
-      }
-      const recvInput = page.locator(':text-is("받는 사람")').locator('..').locator('input:not([disabled])').first();
-      if (await recvInput.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await recvInput.fill(order.recipientName, { force: true });
-      }
-      // 전화번호는 fallback에서도 배송지명 라벨 근처에서 찾기 (주문자 영역과 구분)
-      const phoneInput = page.locator(':text-is("배송지명")').locator('../..').locator('input:not([disabled])').nth(2);
-      if (await phoneInput.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await phoneInput.fill(FIXED_PHONE_SUFFIX, { force: true });
-      }
-    }
+    // 전화번호 (010 뒤 뒷자리)
+    const phoneInput = modal.locator('input[type="tel"]');
+    await phoneInput.fill(FIXED_PHONE_SUFFIX, { force: true });
+    console.log(`[ohouse-purchase] 배송지 전화번호 입력 완료`);
 
     console.log(`[ohouse-purchase] 배송지 정보 입력 완료: ${order.recipientName}`);
 
-    // 4. 주소찾기 버튼 클릭
-    const searchAddrBtn = page.locator('button:has-text("주소찾기")').first();
+    // 4. 주소찾기 버튼 클릭 (모달 내부)
+    const searchAddrBtn = modal.locator('button:has-text("주소찾기")').first();
     await searchAddrBtn.waitFor({ state: "visible", timeout: 5000 });
     await searchAddrBtn.click({ force: true });
     await page.waitForTimeout(2000);
 
-    // 5. 주소 검색 입력 (도로명 검색 입력란)
+    // 5. 주소 검색 입력 (도로명 검색 — 중첩 팝업이라 page 스코프)
     const searchKeyword = extractAddressKeyword(order.address);
     console.log(`[ohouse-purchase] 주소 검색: "${searchKeyword}"`);
 
@@ -429,9 +414,9 @@ async function changeDeliveryAddress(page: Page, order: PurchaseOrderInfo) {
     await selectAddressResult(page, order.postalCode);
     await page.waitForTimeout(2000);
 
-    // 7. 상세주소 입력
+    // 7. 상세주소 입력 (모달 내부 input[placeholder="상세주소 입력"])
     if (order.addressDetail) {
-      const detailInput = page.locator('input[placeholder*="상세주소"]').first();
+      const detailInput = modal.locator('input[placeholder*="상세주소"]').first();
       if (await detailInput.isVisible({ timeout: 3000 }).catch(() => false)) {
         await detailInput.click({ force: true });
         await detailInput.fill(order.addressDetail);
@@ -439,8 +424,8 @@ async function changeDeliveryAddress(page: Page, order: PurchaseOrderInfo) {
       }
     }
 
-    // 8. 저장 버튼 클릭
-    const saveBtn = page.locator('button:has-text("저장")').first();
+    // 8. 저장 버튼 클릭 (모달 내부)
+    const saveBtn = modal.locator('button:has-text("저장")').first();
     await saveBtn.waitFor({ state: "visible", timeout: 5000 });
     await saveBtn.click({ force: true });
     await page.waitForTimeout(3000);
@@ -740,7 +725,8 @@ async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLog
     if (discountOptions.length > 0) {
       selectedOption = discountOptions.reduce((best, cur) => cur.discountPercent > best.discountPercent ? cur : best);
       console.log(`[ohouse-purchase] 최대 할인 수단: ${selectedOption.name} (${selectedOption.discountPercent}%)`);
-      if (selectedOption.name !== "네이버페이") {
+      const autoHandled = ["네이버페이", "토스페이", "카카오페이"];
+      if (!autoHandled.includes(selectedOption.name)) {
         console.log("[ohouse-purchase] ※ 이 수단은 수동 앱 승인이 필요합니다");
       }
     } else {
@@ -832,6 +818,10 @@ async function selectPaymentAndRequest(page: Page, paymentPin?: string, naverLog
       await payBtn.click({ force: true });
       console.log("[ohouse-purchase] 결제하기 버튼 클릭 (토스페이)");
       await handleTossPayFlow(page);
+    } else if (selectedOption.name === "카카오페이") {
+      await payBtn.click({ force: true });
+      console.log("[ohouse-purchase] 결제하기 버튼 클릭 (카카오페이)");
+      await handleKakaoPayFlow(page);
     } else {
       await payBtn.click({ force: true });
       console.log("[ohouse-purchase] 결제하기 버튼 클릭");
@@ -1298,6 +1288,79 @@ async function handleTossPayFlow(page: Page) {
   } else {
     console.log("[ohouse-purchase] 토스 앱 안내 화면 미감지 (이미 진행됐거나 UI 변경) — 계속 진행");
   }
+}
+
+// ═══════════════════════════════════
+// 카카오페이 결제 플로우
+// ═══════════════════════════════════
+
+/** 카카오페이 결제 처리:
+ *  1) 카카오페이 iframe 감지 (payment.ohou.se/.../KAKAO/...)
+ *  2) "카톡결제" 탭 클릭 (기본은 QR결제)
+ *  3) 휴대폰번호 + 생년월일(6자리) 입력
+ *  4) "결제요청" 버튼 클릭 → 사용자 카카오톡으로 결제요청 메시지 전송
+ *     (이후 waitForPaymentCompletion이 order_result URL을 폴링하며 앱 승인 대기)
+ */
+async function handleKakaoPayFlow(page: Page) {
+  if (!KAKAO_PAY_PHONE || !KAKAO_PAY_BIRTH) {
+    throw new Error("카카오페이 자동결제에 필요한 OHOUSE_KAKAO_PHONE / OHOUSE_KAKAO_BIRTHDAY 환경변수가 설정되지 않았습니다.");
+  }
+
+  console.log("[ohouse-purchase] 카카오페이 iframe 대기 중...");
+
+  // 1. 카카오페이 iframe 감지 (payment.ohou.se/.../KAKAO/ready...)
+  //    iframe이 2단 중첩이라 page.frames()로 평탄화 탐색
+  const startWait = Date.now();
+  let kakaoFrame: import("playwright").Frame | null = null;
+  while (Date.now() - startWait < 20000) {
+    for (const frame of page.frames()) {
+      const url = frame.url();
+      if (url.includes("payment.ohou.se") && url.toUpperCase().includes("KAKAO")) {
+        kakaoFrame = frame;
+        console.log(`[ohouse-purchase] 카카오페이 iframe 감지: ${url}`);
+        break;
+      }
+    }
+    if (kakaoFrame) break;
+    await page.waitForTimeout(500);
+  }
+
+  if (!kakaoFrame) {
+    throw new Error("카카오페이 iframe을 찾을 수 없습니다");
+  }
+
+  await page.waitForTimeout(1500);
+
+  // 2. 카톡결제 탭 클릭 (기본은 QR결제)
+  const katokTab = kakaoFrame.locator('[role="tab"]:has-text("카톡결제")').first();
+  await katokTab.waitFor({ state: "visible", timeout: 10000 });
+  await katokTab.click({ force: true });
+  console.log("[ohouse-purchase] '카톡결제' 탭 클릭");
+  await page.waitForTimeout(800);
+
+  // 3. 휴대폰번호 입력 (대시 없이 입력)
+  const phoneInput = kakaoFrame.getByRole("textbox", { name: "휴대폰번호" }).first();
+  await phoneInput.waitFor({ state: "visible", timeout: 10000 });
+  await phoneInput.click();
+  await phoneInput.fill("");
+  await page.keyboard.type(KAKAO_PAY_PHONE.replace(/-/g, ""), { delay: 40 });
+  console.log(`[ohouse-purchase] 카카오페이 휴대폰번호 입력: ${KAKAO_PAY_PHONE}`);
+
+  // 4. 생년월일 6자리 입력
+  const birthInput = kakaoFrame.getByRole("textbox", { name: /생년월일/ }).first();
+  await birthInput.waitFor({ state: "visible", timeout: 10000 });
+  await birthInput.click();
+  await birthInput.fill("");
+  await page.keyboard.type(KAKAO_PAY_BIRTH, { delay: 40 });
+  console.log("[ohouse-purchase] 카카오페이 생년월일 입력 완료");
+
+  await page.waitForTimeout(500);
+
+  // 5. 결제요청 버튼 클릭
+  const requestBtn = kakaoFrame.locator('button:has-text("결제요청")').first();
+  await requestBtn.waitFor({ state: "visible", timeout: 10000 });
+  await requestBtn.click({ force: true });
+  console.log("[ohouse-purchase] 카카오페이 '결제요청' 버튼 클릭 — 사용자 카카오톡 앱 승인 대기");
 }
 
 async function waitForPaymentCompletion(page: Page) {
