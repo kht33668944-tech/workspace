@@ -30,9 +30,11 @@ export interface DashboardData {
   unpaidCount: number;
   // 할일 플로우
   unpurchasedCount: number;
+  outOfStockCount: number;
   noTrackingCount: number;
   deliveredCount: number;       // 이번달만
   csCount: number;              // 교환준비 + 반품준비
+  cancelPendingCount: number;   // 취소준비
   // 테이블/로그
   recentOrders: DashboardRecentOrder[];
   activityLogs: ActivityLogBatch[];
@@ -47,9 +49,11 @@ const EMPTY_DATA: DashboardData = {
   lastMonthMargin: 0,
   unpaidCount: 0,
   unpurchasedCount: 0,
+  outOfStockCount: 0,
   noTrackingCount: 0,
   deliveredCount: 0,
   csCount: 0,
+  cancelPendingCount: 0,
   recentOrders: [],
   activityLogs: [],
 };
@@ -158,7 +162,19 @@ export function useDashboard() {
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
             .in("delivery_status", ["교환준비", "반품준비"]),
-          // 5. 최근 주문 8건
+          // 5. 취소준비
+          supabase
+            .from("orders")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", uid)
+            .eq("delivery_status", "취소준비"),
+          // 6. 재고부족
+          supabase
+            .from("orders")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", uid)
+            .eq("delivery_status", "재고부족"),
+          // 7. 최근 주문 8건
           supabase
             .from("orders")
             .select(
@@ -167,14 +183,14 @@ export function useDashboard() {
             .eq("user_id", uid)
             .order("created_at", { ascending: false })
             .limit(8),
-          // 6. 최근 구매 로그 150건 (배치 집계용, 15배치 보장)
+          // 8. 최근 구매 로그 150건 (배치 집계용, 15배치 보장)
           supabase
             .from("purchase_logs")
             .select("batch_id,platform,status,created_at")
             .eq("user_id", uid)
             .order("created_at", { ascending: false })
             .limit(150),
-          // 7. 최근 운송장 로그 150건 (배치 집계용, 15배치 보장)
+          // 9. 최근 운송장 로그 150건 (배치 집계용, 15배치 보장)
           supabase
             .from("tracking_logs")
             .select("batch_id,platform,status,created_at")
@@ -188,12 +204,12 @@ export function useDashboard() {
         fetchMonthStats(uid, lastMonth),
       ]);
 
-      const [c0, c1, c2, c3, c4, c5, c6, c7] = counts;
+      const [c0, c1, c2, c3, c4, c5, c6, c7, c8, c9] = counts;
 
       // 구매/운송장 배치 집계 후 시간순 병합 (최신 15개)
       type LogRow = { batch_id: string; platform: string; status: string; created_at: string };
-      const purchaseBatches = groupIntoBatches((c6.data ?? []) as LogRow[], "purchase");
-      const trackingBatches = groupIntoBatches((c7.data ?? []) as LogRow[], "tracking");
+      const purchaseBatches = groupIntoBatches((c8.data ?? []) as LogRow[], "purchase");
+      const trackingBatches = groupIntoBatches((c9.data ?? []) as LogRow[], "tracking");
       const activityLogs = [...purchaseBatches, ...trackingBatches]
         .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
         .slice(0, 15);
@@ -210,7 +226,9 @@ export function useDashboard() {
         noTrackingCount: c2.count ?? 0,
         deliveredCount: c3.count ?? 0,
         csCount: c4.count ?? 0,
-        recentOrders: (c5.data ?? []) as DashboardRecentOrder[],
+        cancelPendingCount: c5.count ?? 0,
+        outOfStockCount: c6.count ?? 0,
+        recentOrders: (c7.data ?? []) as DashboardRecentOrder[],
         activityLogs,
       });
     } catch (err) {

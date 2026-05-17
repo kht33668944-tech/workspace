@@ -6,9 +6,11 @@ import SkeletonBlock from "./skeleton-block";
 
 interface TodoFlowProps {
   unpurchasedCount: number;
+  outOfStockCount: number;
   noTrackingCount: number;
   deliveredCount: number;
   csCount: number;
+  cancelPendingCount: number;
   loading: boolean;
 }
 
@@ -51,23 +53,36 @@ function Arrow() {
 
 export default function TodoFlow({
   unpurchasedCount,
+  outOfStockCount,
   noTrackingCount,
   deliveredCount,
   csCount,
+  cancelPendingCount,
   loading,
 }: TodoFlowProps) {
   return (
     <div>
       <p className="text-sm font-semibold text-[var(--text-secondary)] mb-3">오늘 할일</p>
       <div className="flex flex-col md:flex-row items-stretch gap-2 md:gap-0">
-        <Step
-          label="결제 전"
-          count={unpurchasedCount}
-          sub="구매 처리 필요"
-          countColor={unpurchasedCount > 0 ? "text-orange-400" : undefined}
-          loading={loading}
-          filter={{ delivery_status: ["결제전"] }}
-        />
+        <div className="flex-1 flex flex-col gap-2 min-w-0">
+          <Step
+            label="결제 전"
+            count={unpurchasedCount}
+            sub="구매 처리 필요"
+            countColor={unpurchasedCount > 0 ? "text-orange-400" : undefined}
+            loading={loading}
+            filter={{ delivery_status: ["결제전"] }}
+          />
+          <Step
+            label="재고부족"
+            count={outOfStockCount}
+            sub="재고 확인 필요"
+            countColor={outOfStockCount > 0 ? "text-amber-400" : undefined}
+            borderColor={outOfStockCount > 0 ? "border-amber-500/30 hover:border-amber-500/60" : "border-[var(--border)] hover:border-amber-400/50"}
+            loading={loading}
+            filter={{ delivery_status: ["재고부족"] }}
+          />
+        </div>
         <Arrow />
         <Step
           label="배송준비중"
@@ -100,6 +115,16 @@ export default function TodoFlow({
           borderColor={csCount > 0 ? "border-red-500/30 hover:border-red-500/60" : "border-[var(--border)] hover:border-red-400/50"}
           loading={loading}
           filter={{ delivery_status: ["교환준비", "반품준비"] }}
+        />
+
+        <Step
+          label="취소준비"
+          count={cancelPendingCount}
+          sub="취소 처리 필요"
+          countColor={cancelPendingCount > 0 ? "text-red-400" : undefined}
+          borderColor={cancelPendingCount > 0 ? "border-red-500/30 hover:border-red-500/60" : "border-[var(--border)] hover:border-red-400/50"}
+          loading={loading}
+          filter={{ delivery_status: ["취소준비"] }}
         />
       </div>
     </div>
