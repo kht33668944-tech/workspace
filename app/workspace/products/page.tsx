@@ -18,6 +18,9 @@ const CommissionTab = dynamic(() => import("@/components/workspace/products/comm
 const ImageTab = dynamic(() => import("@/components/workspace/products/image-tab"), { ssr: false });
 const SmartStoreCategoryTab = dynamic(() => import("@/components/workspace/products/smartstore-category-tab"), { ssr: false });
 const GmarketImportModal = dynamic(() => import("@/components/workspace/products/gmarket-import-modal"), { ssr: false });
+const CoupangPriceImportModal = dynamic(() => import("@/components/workspace/products/coupang-price-import-modal"), { ssr: false });
+const EsmPriceImportModal = dynamic(() => import("@/components/workspace/products/esm-price-import-modal"), { ssr: false });
+const SmartstorePriceImportModal = dynamic(() => import("@/components/workspace/products/smartstore-price-import-modal"), { ssr: false });
 const BatchDetailModal = dynamic(() => import("@/components/workspace/products/batch-detail-modal"), { ssr: false });
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
 import { downloadExcelFromBase64, type PlayAutoExportPlatform, PLATFORM_CONFIGS } from "@/lib/excel-export";
@@ -56,6 +59,10 @@ export default function ProductsPage() {
   const [platformCodeDragOver, setPlatformCodeDragOver] = useState(false);
   const [platformCodeResult, setPlatformCodeResult] = useState<{ matched: number; unmatched: string[]; total: number } | null>(null);
   const [priceUpdateExporting, setPriceUpdateExporting] = useState(false);
+  const [priceUpdateV2Exporting, setPriceUpdateV2Exporting] = useState(false);
+  const [coupangImportModalOpen, setCoupangImportModalOpen] = useState(false);
+  const [esmImportModalOpen, setEsmImportModalOpen] = useState(false);
+  const [smartstoreImportModalOpen, setSmartstoreImportModalOpen] = useState(false);
   const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(null);
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
   const [scrapeResultModalOpen, setScrapeResultModalOpen] = useState(false);
@@ -483,6 +490,43 @@ export default function ProductsPage() {
     if (file) handlePlatformCodeFile(file);
   };
 
+  const handlePriceUpdateV2Export = async (platform: "coupang" | "esm" | "smartstore") => {
+    const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
+    if (ids.length === 0) {
+      alert("내보낼 상품이 없습니다.");
+      return;
+    }
+    setExportModalOpen(false);
+    setPriceUpdateV2Exporting(true);
+    try {
+      const res = await fetch(`/api/${platform}-price-inventory/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ productIds: ids }),
+      });
+      const json = await res.json() as { excelBase64?: string; filename?: string; rowCount?: number; skippedProductIds?: string[]; error?: string };
+      if (!res.ok || !json.excelBase64 || !json.filename) {
+        alert(json.error ?? "가격수정 v2 내보내기 실패");
+        return;
+      }
+      downloadExcelFromBase64(json.excelBase64, json.filename);
+      const skipped = json.skippedProductIds?.length ?? 0;
+      if (skipped > 0) {
+        const label = platform === "coupang" ? "쿠팡 양식"
+          : platform === "esm" ? "ESM 상품목록"
+          : "스마트스토어 일괄수정 엑셀";
+        const rowLabel = platform === "coupang" ? "옵션 행"
+          : platform === "esm" ? "옥션·지마켓 행"
+          : "스마트스토어 행";
+        alert(`총 ${json.rowCount}행 생성, ${skipped}개 상품은 ${rowLabel}이 없어 제외됐습니다. ${label}을 다시 임포트하세요.`);
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "가격수정 v2 내보내기 중 오류");
+    } finally {
+      setPriceUpdateV2Exporting(false);
+    }
+  };
+
   const handlePriceUpdateExport = async (target: PlayAutoExportPlatform | "all") => {
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) return;
@@ -696,7 +740,7 @@ export default function ProductsPage() {
                       <div className="border-t border-[var(--border)]">
                         <div className="px-3 py-2 flex items-center gap-1.5 text-xs font-medium text-orange-400">
                           <TrendingUp className="w-3 h-3" />
-                          가격수정 내보내기
+                          가격수정 v1
                         </div>
                         <button
                           onClick={() => handlePriceUpdateExport("smartstore")}
@@ -745,6 +789,65 @@ export default function ProductsPage() {
                         >
                           <TrendingUp className="w-3.5 h-3.5" />
                           {priceUpdateExporting ? "생성 중..." : "전체 다운로드"}
+                        </button>
+                      </div>
+                      <div className="border-t border-[var(--border)]">
+                        <div className="px-3 py-2 flex items-center gap-1.5 text-xs font-medium text-orange-400">
+                          <TrendingUp className="w-3 h-3" />
+                          가격수정 v2 (플랫폼 양식)
+                        </div>
+                        <button
+                          onClick={() => { setExportModalOpen(false); setCoupangImportModalOpen(true); }}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          쿠팡 양식 임포트
+                        </button>
+                        <button
+                          onClick={() => { setExportModalOpen(false); setEsmImportModalOpen(true); }}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          옥션·지마켓 상품목록 임포트
+                        </button>
+                        <button
+                          onClick={() => { setExportModalOpen(false); setSmartstoreImportModalOpen(true); }}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          스마트스토어 일괄수정 임포트
+                        </button>
+                        <button
+                          onClick={() => handlePriceUpdateV2Export("coupang")}
+                          disabled={priceUpdateV2Exporting}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-red-400" />
+                          {priceUpdateV2Exporting ? "생성 중..." : "쿠팡"}
+                        </button>
+                        <button
+                          onClick={() => handlePriceUpdateV2Export("esm")}
+                          disabled={priceUpdateV2Exporting}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-yellow-400" />
+                          {priceUpdateV2Exporting ? "생성 중..." : "옥션·지마켓"}
+                        </button>
+                        <button
+                          onClick={() => handlePriceUpdateV2Export("smartstore")}
+                          disabled={priceUpdateV2Exporting}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-green-400" />
+                          {priceUpdateV2Exporting ? "생성 중..." : "스마트스토어"}
+                        </button>
+                        <button
+                          disabled
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-disabled)] opacity-50 cursor-not-allowed"
+                          title="추후 지원 예정"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-red-400/40" />
+                          11번가 (추후 지원)
                         </button>
                       </div>
                     </div>
@@ -962,6 +1065,21 @@ export default function ProductsPage() {
             existingUrls={new Set(allProducts.map(p => p.purchase_url).filter(Boolean))}
           />
         )
+      )}
+
+      {/* 쿠팡 가격수정 v2 양식 임포트 모달 */}
+      {coupangImportModalOpen && (
+        <CoupangPriceImportModal onClose={() => setCoupangImportModalOpen(false)} />
+      )}
+
+      {/* 옥션·지마켓 가격수정 v2 상품목록 임포트 모달 */}
+      {esmImportModalOpen && (
+        <EsmPriceImportModal onClose={() => setEsmImportModalOpen(false)} />
+      )}
+
+      {/* 스마트스토어 가격수정 v2 일괄수정 양식 임포트 모달 */}
+      {smartstoreImportModalOpen && (
+        <SmartstorePriceImportModal onClose={() => setSmartstoreImportModalOpen(false)} />
       )}
 
       {/* 상세페이지 일괄 생성 모달 */}

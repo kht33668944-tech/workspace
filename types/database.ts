@@ -212,6 +212,75 @@ export interface SmartStoreCategoryCode {
 
 export type SmartStoreCategoryCodeInsert = Pick<SmartStoreCategoryCode, "category_code" | "category_type" | "category_name">;
 
+// ─── 쿠팡 가격수정 v2: 셀러센터 양식 행 캐시 ───
+export interface CoupangPriceInventory {
+  id: string;
+  user_id: string;
+  product_id: string | null;
+  vendor_item_id: string | null;
+  coupang_product_id: string | null;
+  option_id: string;
+  product_status: string | null;
+  barcode: string | null;
+  vendor_item_code: string | null;
+  coupang_display_name: string | null;
+  registered_name: string | null;
+  option_name: string | null;
+  sale_price: number | null;
+  discount_base_price: number | null;
+  sale_status: string | null;
+  stock: number | null;
+  sales_count: number | null;
+  approval_status: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CoupangPriceInventoryInsert = Omit<CoupangPriceInventory, "id" | "created_at" | "updated_at">;
+
+// ─── 옥션·지마켓(ESM) 가격 인벤토리 ───
+export interface EsmPriceInventory {
+  id: string;
+  user_id: string;
+  product_id: string | null;
+  master_product_id: string | null;  // 마스터상품번호 (옥션+지마켓 공통 키)
+  site_product_id: string;            // 사이트 상품번호 (양식에 들어가는 값)
+  site: string | null;                // "옥션" | "지마켓"
+  product_name: string | null;
+  seller_code: string | null;
+  seller_id: string | null;
+  sale_status: string | null;
+  sale_price: number | null;
+  stock: number | null;
+  category: string | null;
+  site_category: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type EsmPriceInventoryInsert = Omit<EsmPriceInventory, "id" | "created_at" | "updated_at">;
+
+// ─── 스마트스토어 가격 인벤토리 ───
+export interface SmartstorePriceInventory {
+  id: string;
+  user_id: string;
+  product_id: string | null;
+  smartstore_product_id: string;
+  seller_product_code: string | null;
+  category_code: string | null;
+  product_name: string | null;
+  product_status: string | null;
+  sale_price: number | null;
+  option_type: string | null;
+  // 94컬럼 전체 raw 값을 보존: { "0": "값A", "1": "값B", ..., "93": "값CP" }
+  // 내보내기 시 F열만 우리 시스템 가격으로 교체하고 나머지는 그대로 복원.
+  raw_row: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SmartstorePriceInventoryInsert = Omit<SmartstorePriceInventory, "id" | "created_at" | "updated_at">;
+
 // ─── 가격 이력 ───
 export interface PriceHistory {
   id: string;
