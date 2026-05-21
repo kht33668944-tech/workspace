@@ -504,13 +504,35 @@ export default function ProductsPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({ productIds: ids }),
       });
-      const json = await res.json() as { excelBase64?: string; filename?: string; rowCount?: number; skippedProductIds?: string[]; error?: string };
-      if (!res.ok || !json.excelBase64 || !json.filename) {
+      const json = await res.json() as {
+        files?: Array<{ excelBase64: string; filename: string; rowCount: number }>;
+        excelBase64?: string;
+        filename?: string;
+        rowCount?: number;
+        fileCount?: number;
+        skippedProductIds?: string[];
+        error?: string;
+      };
+      if (!res.ok) {
         alert(json.error ?? "가격수정 v2 내보내기 실패");
         return;
       }
-      downloadExcelFromBase64(json.excelBase64, json.filename);
+      const files = json.files && json.files.length > 0
+        ? json.files
+        : (json.excelBase64 && json.filename
+          ? [{ excelBase64: json.excelBase64, filename: json.filename, rowCount: json.rowCount ?? 0 }]
+          : []);
+      if (files.length === 0) {
+        alert(json.error ?? "가격수정 v2 내보내기 실패");
+        return;
+      }
+      for (let i = 0; i < files.length; i++) {
+        downloadExcelFromBase64(files[i].excelBase64, files[i].filename);
+        // 브라우저가 연속 다운로드를 차단하지 않도록 약간의 지연
+        if (i < files.length - 1) await new Promise(r => setTimeout(r, 250));
+      }
       const skipped = json.skippedProductIds?.length ?? 0;
+      const fileCountMsg = files.length > 1 ? ` (${files.length}개 파일로 분할 — 양식 한 개당 500행 제한)` : "";
       if (skipped > 0) {
         const label = platform === "coupang" ? "쿠팡 양식"
           : platform === "esm" ? "ESM 상품목록"
@@ -518,7 +540,9 @@ export default function ProductsPage() {
         const rowLabel = platform === "coupang" ? "옵션 행"
           : platform === "esm" ? "옥션·지마켓 행"
           : "스마트스토어 행";
-        alert(`총 ${json.rowCount}행 생성, ${skipped}개 상품은 ${rowLabel}이 없어 제외됐습니다. ${label}을 다시 임포트하세요.`);
+        alert(`총 ${json.rowCount}행 생성${fileCountMsg}, ${skipped}개 상품은 ${rowLabel}이 없어 제외됐습니다. ${label}을 다시 임포트하세요.`);
+      } else if (files.length > 1) {
+        alert(`총 ${json.rowCount}행${fileCountMsg}`);
       }
     } catch (e) {
       alert(e instanceof Error ? e.message : "가격수정 v2 내보내기 중 오류");

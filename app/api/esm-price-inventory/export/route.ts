@@ -10,6 +10,8 @@ import type { Product, CommissionRate, EsmPriceInventory } from "@/types/databas
 export const maxDuration = 60;
 
 const MAX_PRODUCTS = 5000;
+// ESM Plus "판매가 엑셀 일괄 변경"은 파일당 최대 500행
+const MAX_ROWS_PER_FILE = 500;
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
@@ -73,22 +75,7 @@ export async function POST(request: NextRequest) {
     const matchedProductIds = new Set(inventoryRows.map(r => r.product_id).filter((x): x is string => !!x));
     const skippedProductIds = productIds.filter(id => !matchedProductIds.has(id));
 
-    // 4. 템플릿 .xlsx 로드 — 안내문/헤더/예시 행/병합 보존
-    const templatePath = path.join(process.cwd(), "lib", "templates", "esm-price-inventory.xlsx");
-    const templateBuf = await fs.readFile(templatePath);
-    const wb = new ExcelJS.Workbook();
-    const ab = templateBuf.buffer.slice(templateBuf.byteOffset, templateBuf.byteOffset + templateBuf.byteLength);
-    await wb.xlsx.load(ab as ArrayBuffer);
-    const ws = wb.worksheets[0];
-
-    // 5. 6행부터의 기존 데이터(빈 행번호 1,2,3,... 포함) 정리
-    // 1~5행만 유지 (안내·헤더·필수·설명·예시)
-    while (ws.rowCount > 5) {
-      ws.spliceRows(ws.rowCount, 1);
-    }
-
-    // 6. site_product_id 중복 제거 후 6행부터 채우기
-    //    같은 site_product_id가 여러 번 임포트되었을 가능성에 대비
+    // 4. site_product_id 중복 제거 + 가격이 산정된 행만 남기기
     const seenSiteProductIds = new Set<string>();
     const rowsWithPrice = inventoryRows
       .filter(r => r.product_id && priceByProductId.has(r.product_id))
@@ -100,28 +87,61 @@ export async function POST(request: NextRequest) {
         return true;
       });
 
-    rowsWithPrice.forEach((row, i) => {
-      const rowNumber = TEMPLATE_DATA_START_ROW_INDEX + 1 + i; // 0-based 5 → 6행
-      const xRow = ws.getRow(rowNumber);
-      const newPrice = priceByProductId.get(row.product_id!);
-      xRow.getCell(TEMPLATE_COL.row_number + 1).value = i + 1;
-      xRow.getCell(TEMPLATE_COL.site_product_id + 1).value = row.site_product_id;
-      xRow.getCell(TEMPLATE_COL.sale_price + 1).value = newPrice ?? null;
-      xRow.commit();
-    });
+    if (rowsWithPrice.length === 0) {
+      return NextResponse.json({
+        error: "내보낼 옥션·지마켓 행이 없습니다.",
+      }, { status: 404 });
+    }
 
-    // 7. base64 출력
-    const buf = await wb.xlsx.writeBuffer();
-    const out = Buffer.from(buf).toString("base64");
+    // 5. 템플릿 버퍼 미리 로드 (청크마다 새 워크북에 로드)
+    const templatePath = path.join(process.cwd(), "lib", "templates", "esm-price-inventory.xlsx");
+    const templateBuf = await fs.readFile(templatePath);
+
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const filename = `옥션지마켓_가격수정_v2_${today}.xlsx`;
+    const totalFiles = Math.ceil(rowsWithPrice.length / MAX_ROWS_PER_FILE);
+    const files: Array<{ excelBase64: string; filename: string; rowCount: number }> = [];
 
-    console.log(`[esm-price-inventory/export] 완료: ${rowsWithPrice.length}행, skipped ${skippedProductIds.length}개 상품`);
+    // 6. 500행씩 청크로 나누어 파일 생성
+    for (let fileIdx = 0; fileIdx < totalFiles; fileIdx++) {
+      const start = fileIdx * MAX_ROWS_PER_FILE;
+      const chunkRows = rowsWithPrice.slice(start, start + MAX_ROWS_PER_FILE);
+
+      const wb = new ExcelJS.Workbook();
+      const ab = templateBuf.buffer.slice(templateBuf.byteOffset, templateBuf.byteOffset + templateBuf.byteLength);
+      await wb.xlsx.load(ab as ArrayBuffer);
+      const ws = wb.worksheets[0];
+
+      // 1~5행만 유지 (안내·헤더·필수·설명·예시), 6행 이하 기존 행 제거
+      while (ws.rowCount > 5) {
+        ws.spliceRows(ws.rowCount, 1);
+      }
+
+      chunkRows.forEach((row, i) => {
+        const rowNumber = TEMPLATE_DATA_START_ROW_INDEX + 1 + i; // 0-based 5 → 6행
+        const xRow = ws.getRow(rowNumber);
+        const newPrice = priceByProductId.get(row.product_id!);
+        xRow.getCell(TEMPLATE_COL.row_number + 1).value = i + 1;
+        xRow.getCell(TEMPLATE_COL.site_product_id + 1).value = row.site_product_id;
+        xRow.getCell(TEMPLATE_COL.sale_price + 1).value = newPrice ?? null;
+        xRow.commit();
+      });
+
+      const buf = await wb.xlsx.writeBuffer();
+      const out = Buffer.from(buf).toString("base64");
+      const suffix = totalFiles > 1 ? `_${fileIdx + 1}of${totalFiles}` : "";
+      const filename = `옥션지마켓_가격수정_v2_${today}${suffix}.xlsx`;
+      files.push({ excelBase64: out, filename, rowCount: chunkRows.length });
+    }
+
+    console.log(`[esm-price-inventory/export] 완료: ${rowsWithPrice.length}행, ${files.length}개 파일, skipped ${skippedProductIds.length}개 상품`);
 
     return NextResponse.json({
-      excelBase64: out,
-      filename,
+      files,
+      // 호환성: 단일 파일이면 기존 필드도 유지
+      excelBase64: files.length === 1 ? files[0].excelBase64 : undefined,
+      filename: files.length === 1 ? files[0].filename : undefined,
       rowCount: rowsWithPrice.length,
+      fileCount: files.length,
       skippedProductIds,
     });
   } catch (err) {
