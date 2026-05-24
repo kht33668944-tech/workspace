@@ -7,7 +7,7 @@ import type { Product, CommissionPlatform } from "@/types/database";
 import {
   COLUMNS, EDITABLE_KEYS, COMPUTED_KEYS, formatCell,
   PLATFORM_FIXED_KEY_MAP, isPlatformPriceLocked, getComputedValue,
-  type Col,
+  type Col, type PriceScrapeStatus,
 } from "./table-utils";
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
 import { fetchProductDetailHtml } from "@/hooks/use-products";
@@ -33,13 +33,14 @@ interface RowProps {
   rateMap: Record<string, Record<CommissionPlatform, number>>;
   categories: string[];
   priceChanges?: Record<string, number>;
+  priceScrapeStatus?: Record<string, PriceScrapeStatus>;
 }
 
 const MemoRow = memo(function Row({
   product, rowIdx, colWidths, isChecked, activeCol, editingCol, initialChar,
   selMinC, selMaxC, showFillHandle, fillHandleCol, fillHighlightCol,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onCommit, onBlurSave, onEditValueChange, onSelectToggle, onFillStart,
-  onStatusChange, onUnlockFixedPrice, isMobile, visibleColumns, rateMap, categories, priceChanges,
+  onStatusChange, onUnlockFixedPrice, isMobile, visibleColumns, rateMap, categories, priceChanges, priceScrapeStatus,
 }: RowProps) {
   const [editValue, setEditValue] = useState("");
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
@@ -251,13 +252,13 @@ const MemoRow = memo(function Row({
                   }
                 }}
               >
-                {copiedKey === col.key ? "✓ 복사됨" : formatCell(col.key, val, product, rateMap, priceChanges)}
+                {copiedKey === col.key ? "✓ 복사됨" : formatCell(col.key, val, product, rateMap, priceChanges, priceScrapeStatus)}
               </div>
             ) : (
               <div className={`text-xs truncate min-h-[22px] leading-[22px] px-1 ${
                 isSelected ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""
               }`}>
-                {formatCell(col.key, val, product, rateMap, priceChanges)}
+                {formatCell(col.key, val, product, rateMap, priceChanges, priceScrapeStatus)}
               </div>
             )}
             {!isMobile && showFillHandle && ci === fillHandleCol && isEditable && (
@@ -299,6 +300,7 @@ const MemoRow = memo(function Row({
   prev.rateMap === next.rateMap &&
   prev.categories === next.categories &&
   prev.priceChanges === next.priceChanges &&
+  prev.priceScrapeStatus === next.priceScrapeStatus &&
   prev.onStatusChange === next.onStatusChange &&
   prev.onUnlockFixedPrice === next.onUnlockFixedPrice
 );

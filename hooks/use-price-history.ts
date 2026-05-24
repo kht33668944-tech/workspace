@@ -46,7 +46,9 @@ export function usePriceHistory() {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const json = await res.json() as { history?: PriceHistoryItem[] };
-      setAllHistory(json.history ?? []);
+      // 변동없음(change_amount=0 & new_price>0)·실패(new_price=0) 이력은 가격 이력 탭에서 제외
+      const filtered = (json.history ?? []).filter(h => h.new_price > 0 && h.change_amount !== 0);
+      setAllHistory(filtered);
     } catch (e) {
       console.error("[usePriceHistory]", e instanceof Error ? e.message : String(e));
     } finally {

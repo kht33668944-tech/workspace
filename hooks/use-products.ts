@@ -16,7 +16,11 @@ export interface PriceChangeFilter {
   minPercent: number | null; // 하한 (예: -3)
   maxPercent: number | null; // 상한 (예: 5)
   onlyChanged?: boolean; // true면 변동률 0 제외
+  onlyUnchanged?: boolean; // true면 변동없음만 (오늘 스크랩됐고 가격 동일)
+  onlyFailed?: boolean; // true면 실패만 (오늘 스크랩됐지만 가격 못 가져옴)
 }
+
+export type PriceScrapeStatus = "scraped" | "failed";
 
 interface UseProductsOptions {
   search?: string;
@@ -61,6 +65,7 @@ export function useProducts(options: UseProductsOptions = {}) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [priceChanges, setPriceChanges] = useState<Record<string, number>>({});
+  const [priceScrapeStatus, setPriceScrapeStatus] = useState<Record<string, PriceScrapeStatus>>({});
   const undoStackRef = useRef<UndoGroup[]>([]);
   const batchUndoRef = useRef<UndoEntry[] | null>(null);
   const pinnedIdsRef = useRef<Set<string> | null>(null);
@@ -141,16 +146,27 @@ export function useProducts(options: UseProductsOptions = {}) {
       headers: { Authorization: `Bearer ${session.access_token}` },
     })
       .then(r => r.json())
-      .then((json: { history?: Array<{ product_id: string; change_rate: number }> }) => {
-        const map: Record<string, number> = {};
+      .then((json: { history?: Array<{ product_id: string; change_rate: number; new_price: number }> }) => {
+        const rateMap: Record<string, number> = {};
+        const statusMap: Record<string, PriceScrapeStatus> = {};
+        // API는 scraped_at DESC. 가장 최근 1건만 채택.
         (json.history ?? []).forEach(h => {
-          if (!(h.product_id in map)) map[h.product_id] = h.change_rate;
+          if (!(h.product_id in statusMap)) {
+            statusMap[h.product_id] = h.new_price === 0 ? "failed" : "scraped";
+            rateMap[h.product_id] = h.change_rate;
+          }
         });
         setPriceChanges(prev => {
           const prevKeys = Object.keys(prev);
-          const mapKeys = Object.keys(map);
-          if (prevKeys.length === mapKeys.length && mapKeys.every(k => prev[k] === map[k])) return prev;
-          return map;
+          const mapKeys = Object.keys(rateMap);
+          if (prevKeys.length === mapKeys.length && mapKeys.every(k => prev[k] === rateMap[k])) return prev;
+          return rateMap;
+        });
+        setPriceScrapeStatus(prev => {
+          const prevKeys = Object.keys(prev);
+          const mapKeys = Object.keys(statusMap);
+          if (prevKeys.length === mapKeys.length && mapKeys.every(k => prev[k] === statusMap[k])) return prev;
+          return statusMap;
         });
       })
       .catch(() => {});
@@ -200,14 +216,17 @@ export function useProducts(options: UseProductsOptions = {}) {
   // 전일대비 범위 필터
   if (options.priceChangeFilter) {
     let { minPercent, maxPercent } = options.priceChangeFilter;
-    const { onlyChanged } = options.priceChangeFilter;
+    const { onlyChanged, onlyUnchanged, onlyFailed } = options.priceChangeFilter;
     // min > max이면 자동 swap (예: min=-0.5, max=-20 → min=-20, max=-0.5)
     if (minPercent !== null && maxPercent !== null && minPercent > maxPercent) {
       [minPercent, maxPercent] = [maxPercent, minPercent];
     }
     filteredProducts = filteredProducts.filter((p) => {
+      const status = priceScrapeStatus[p.id];
       const change = priceChanges[p.id] ?? 0;
-      if (onlyChanged && change === 0) return false;
+      if (onlyFailed) return status === "failed";
+      if (onlyUnchanged) return status === "scraped" && change === 0;
+      if (onlyChanged && (status !== "scraped" || change === 0)) return false;
       if (minPercent !== null && change < minPercent) return false;
       if (maxPercent !== null && change > maxPercent) return false;
       return true;
@@ -446,6 +465,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     startBatchUndo,
     endBatchUndo,
     priceChanges,
+    priceScrapeStatus,
     refetchPriceChanges: fetchPriceChanges,
   };
 }

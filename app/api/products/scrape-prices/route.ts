@@ -238,6 +238,7 @@ export async function POST(request: NextRequest) {
       let failed = 0;
       let unchanged = 0;
       let botBlocked = 0;
+      const statusHistoryRows: Array<Record<string, unknown>> = []; // 변동없음·실패 이력 (변동은 apply 단계에서 별도 기록)
 
       await browserPool.acquire();
       const browser = await launchPatchedBrowser();
@@ -295,8 +296,28 @@ export async function POST(request: NextRequest) {
               updated++;
             } else if (r.price > 0) {
               unchanged++;
+              if (previousPrice > 0) {
+                statusHistoryRows.push({
+                  product_id: r.id,
+                  previous_price: previousPrice,
+                  new_price: previousPrice,
+                  change_amount: 0,
+                  change_rate: 0,
+                  source: "scrape",
+                });
+              }
             } else {
               failed++;
+              if (previousPrice > 0) {
+                statusHistoryRows.push({
+                  product_id: r.id,
+                  previous_price: previousPrice,
+                  new_price: 0,
+                  change_amount: 0,
+                  change_rate: 0,
+                  source: "scrape",
+                });
+              }
             }
 
             send({
@@ -323,6 +344,11 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         send({ type: "error", message: e instanceof Error ? e.message : String(e) });
       } finally {
+        // 변동없음·실패 이력 일괄 저장 (전일대비 컬럼에서 상태 표시·필터링용)
+        if (statusHistoryRows.length > 0) {
+          const { error: histErr } = await sb.from("price_history").insert(statusHistoryRows);
+          if (histErr) console.error("[scrape-prices] 상태 이력 저장 실패:", histErr.message);
+        }
         await ctx.close().catch(() => {});
         await browser.close().catch(() => {});
         browserPool.release();

@@ -18,7 +18,7 @@ const PAGE_SIZE = 100;
 function ProductTable({
   products: rawProducts, allProducts, loading, selectedIds, onSelectToggle, onSelectAll, onUpdate,
   onUndo, onStartBatchUndo, onEndBatchUndo, columnFilters, onColumnFilterChange,
-  rateMap, categories, priceChanges, priceChangeFilter, onPriceChangeFilterChange,
+  rateMap, categories, priceChanges, priceScrapeStatus, priceChangeFilter, onPriceChangeFilterChange,
   onBulkMarginApply,
 }: ProductTableProps) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
@@ -581,6 +581,7 @@ function ProductTable({
                   rateMap={rateMap}
                   categories={categories}
                   priceChanges={priceChanges}
+                  priceScrapeStatus={priceScrapeStatus}
                 />
               );
             })}

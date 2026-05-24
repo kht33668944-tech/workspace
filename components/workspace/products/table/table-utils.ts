@@ -124,7 +124,8 @@ export function formatCell(
   val: unknown,
   product?: Product,
   rateMap?: Record<string, Record<CommissionPlatform, number>>,
-  priceChanges?: Record<string, number>
+  priceChanges?: Record<string, number>,
+  priceScrapeStatus?: Record<string, PriceScrapeStatus>
 ): React.ReactNode {
   // 플랫폼 코드 (별도 처리)
   if (key === "platform_codes" && product) {
@@ -145,7 +146,16 @@ export function formatCell(
   if (COMPUTED_KEYS.has(key) && product && rateMap) {
     const computed = getComputedValue(product, key, rateMap, priceChanges);
     if (key === "price_change") {
+      const status = product && priceScrapeStatus ? priceScrapeStatus[product.id] : undefined;
+      if (status === "failed") {
+        return React.createElement("span", {
+          className: "text-xs font-medium px-1.5 py-0.5 rounded text-red-400 bg-red-500/10",
+        }, "실패");
+      }
       if (computed === 0) {
+        if (status === "scraped") {
+          return React.createElement("span", { className: "text-[var(--text-muted)] text-xs" }, "변동없음");
+        }
         return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
       }
       const isUp = computed > 0;
@@ -249,7 +259,11 @@ export interface PriceChangeFilter {
   minPercent: number | null;
   maxPercent: number | null;
   onlyChanged?: boolean;
+  onlyUnchanged?: boolean;
+  onlyFailed?: boolean;
 }
+
+export type PriceScrapeStatus = "scraped" | "failed";
 
 export interface ProductTableProps {
   products: Product[];
@@ -267,6 +281,7 @@ export interface ProductTableProps {
   rateMap: Record<string, Record<CommissionPlatform, number>>;
   categories: string[];
   priceChanges?: Record<string, number>;
+  priceScrapeStatus?: Record<string, PriceScrapeStatus>;
   priceChangeFilter?: PriceChangeFilter | null;
   onPriceChangeFilterChange?: (filter: PriceChangeFilter | null) => void;
   onBulkMarginApply?: (value: number) => void;

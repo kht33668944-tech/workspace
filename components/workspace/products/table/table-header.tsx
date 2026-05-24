@@ -226,6 +226,16 @@ function PriceChangeFilterDropdown({ filter, onChange, onClose, sort, onSort }: 
     onClose();
   };
 
+  const applyOnlyUnchanged = () => {
+    onChange({ minPercent: null, maxPercent: null, onlyUnchanged: true });
+    onClose();
+  };
+
+  const applyOnlyFailed = () => {
+    onChange({ minPercent: null, maxPercent: null, onlyFailed: true });
+    onClose();
+  };
+
   return (
     <div ref={ref} className="absolute top-full left-0 mt-1 z-50 bg-[var(--table-header-bg)] border border-[var(--border)] rounded-lg shadow-xl min-w-[220px]" onClick={e => e.stopPropagation()}>
       <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
@@ -236,12 +246,24 @@ function PriceChangeFilterDropdown({ filter, onChange, onClose, sort, onSort }: 
           <ArrowDown className="w-3 h-3" /> 내림차순
         </button>
       </div>
-      <div className="p-2 border-b border-[var(--border)]">
+      <div className="p-2 border-b border-[var(--border)] space-y-1.5">
         <button
           onClick={applyOnlyChanged}
           className="w-full px-2.5 py-1.5 rounded text-xs font-medium bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-colors"
         >
           변동 있는 상품만 보기
+        </button>
+        <button
+          onClick={applyOnlyUnchanged}
+          className="w-full px-2.5 py-1.5 rounded text-xs font-medium bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-[var(--bg-active)] transition-colors"
+        >
+          변동없음 상품만 보기
+        </button>
+        <button
+          onClick={applyOnlyFailed}
+          className="w-full px-2.5 py-1.5 rounded text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+        >
+          실패 상품만 보기
         </button>
       </div>
       <div className="p-2.5 border-b border-[var(--border)]">

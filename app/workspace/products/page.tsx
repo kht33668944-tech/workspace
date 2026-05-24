@@ -70,12 +70,14 @@ export default function ProductsPage() {
   const [applyingPrices, setApplyingPrices] = useState(false);
   const [scrapeLog, setScrapeLog] = useState<string[]>([]);
   const [scrapeLogCollapsed, setScrapeLogCollapsed] = useState(false);
+  const [scrapeStatus, setScrapeStatus] = useState<Map<string, "updated" | "unchanged" | "bot_blocked" | "failed">>(new Map());
+  const [scrapeTotal, setScrapeTotal] = useState(0);
   const scrapeLogRef = useRef<HTMLDivElement>(null);
   const scrapeAbortRef = useRef<AbortController | null>(null);
   const platformCodeFileRef = useRef<HTMLInputElement>(null);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
-  const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, refetchPriceChanges } = useProducts({
+  const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, priceScrapeStatus, refetchPriceChanges } = useProducts({
     search: activeSearch,
     columnFilters,
     priceChangeFilter,
@@ -87,6 +89,16 @@ export default function ProductsPage() {
     [scrapeResults]
   );
   const changedScrapeCount = useMemo(() => scrapeResults.filter(r => r.price !== r.previous).length, [scrapeResults]);
+  const scrapeStats = useMemo(() => {
+    let updated = 0, unchanged = 0, botBlocked = 0, failed = 0;
+    for (const s of scrapeStatus.values()) {
+      if (s === "updated") updated++;
+      else if (s === "unchanged") unchanged++;
+      else if (s === "bot_blocked") botBlocked++;
+      else if (s === "failed") failed++;
+    }
+    return { updated, unchanged, botBlocked, failed, processed: scrapeStatus.size };
+  }, [scrapeStatus]);
 
   useEffect(() => {
     if (scrapeLogRef.current) {
@@ -236,6 +248,16 @@ export default function ProductsPage() {
                     : `${event.price.toLocaleString()}원 (변동없음)`
                   : "실패";
               pushScrapeLog(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
+              const statusKey: "updated" | "unchanged" | "bot_blocked" | "failed" = event.bot_blocked
+                ? "bot_blocked"
+                : event.price > 0
+                  ? event.price !== event.previous_price ? "updated" : "unchanged"
+                  : "failed";
+              setScrapeStatus(prev => {
+                const next = new Map(prev);
+                next.set(event.id, statusKey);
+                return next;
+              });
               if (event.bot_blocked) {
                 botBlocked.push({ id: event.id, name: event.name });
               } else if (event.price > 0) {
@@ -275,6 +297,8 @@ export default function ProductsPage() {
     if (!isRetry) {
       setScrapeLog(["최저가 수집 준비 중..."]);
       setScrapeResults([]);
+      setScrapeStatus(new Map());
+      setScrapeTotal(ids.length);
     } else {
       pushScrapeLog(`봇감지 실패 ${ids.length}개 다시 시도 중...`);
     }
@@ -293,6 +317,8 @@ export default function ProductsPage() {
     } finally {
       scrapeAbortRef.current = null;
       setScrapingPrices(false);
+      // 변동없음·실패 이력이 서버에 기록되었을 수 있으므로 새로고침
+      refetchPriceChanges();
       if (accumulatedChanges.length > 0) {
         setScrapeResults([...accumulatedChanges]);
         setScrapeResultModalOpen(true);
@@ -928,6 +954,7 @@ export default function ProductsPage() {
             rateMap={rateMap as Record<string, Record<CommissionPlatform, number>>}
             categories={categories}
             priceChanges={priceChanges}
+            priceScrapeStatus={priceScrapeStatus}
             priceChangeFilter={priceChangeFilter}
             onPriceChangeFilterChange={setPriceChangeFilter}
             onBulkMarginApply={handleBulkMarginChange}
@@ -1119,22 +1146,34 @@ export default function ProductsPage() {
             <button
               type="button"
               onClick={() => setScrapeLogCollapsed(v => !v)}
-              className="flex items-center gap-2 flex-1 min-w-0 text-left"
+              className="flex flex-col gap-0.5 flex-1 min-w-0 text-left"
               aria-expanded={!scrapeLogCollapsed}
               aria-label={scrapeLogCollapsed ? "최저가 수집 로그 펼치기" : "최저가 수집 로그 접기"}
             >
-              {scrapingPrices && <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />}
-              <span className="text-sm font-medium text-[var(--text-primary)]">최저가 수집</span>
-              {scrapeLog.length > 0 && (
-                <span className="text-xs text-[var(--text-muted)] shrink-0">({scrapeLog.length})</span>
-              )}
-              {!scrapingPrices && botBlockedItems.length > 0 && (
-                <span className="text-xs font-medium text-orange-400 shrink-0">봇감지 {botBlockedItems.length}개</span>
-              )}
-              {scrapeLogCollapsed && scrapeLog.length > 0 && (
-                <span className="text-xs text-[var(--text-muted)] truncate ml-1">
-                  {scrapeLog[scrapeLog.length - 1]}
-                </span>
+              <div className="flex items-center gap-2 min-w-0">
+                {scrapingPrices && <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />}
+                <span className="text-sm font-medium text-[var(--text-primary)]">최저가 수집</span>
+                {scrapeTotal > 0 && (
+                  <span className="text-xs text-[var(--text-muted)] shrink-0 tabular-nums">
+                    {scrapeStats.processed}/{scrapeTotal}
+                  </span>
+                )}
+                {scrapeLogCollapsed && scrapeLog.length > 0 && (
+                  <span className="text-xs text-[var(--text-muted)] truncate ml-1">
+                    {scrapeLog[scrapeLog.length - 1]}
+                  </span>
+                )}
+              </div>
+              {scrapeStats.processed > 0 && (
+                <div className="flex items-center gap-2 text-[11px] tabular-nums pl-0">
+                  <span className="text-emerald-400">변동 {scrapeStats.updated}</span>
+                  <span className="text-[var(--text-muted)]">·</span>
+                  <span className="text-[var(--text-secondary)]">변동없음 {scrapeStats.unchanged}</span>
+                  <span className="text-[var(--text-muted)]">·</span>
+                  <span className="text-orange-400">봇감지 {scrapeStats.botBlocked}</span>
+                  <span className="text-[var(--text-muted)]">·</span>
+                  <span className="text-red-400">실패 {scrapeStats.failed}</span>
+                </div>
               )}
             </button>
             <div className="flex items-center gap-1.5 shrink-0">
@@ -1156,7 +1195,7 @@ export default function ProductsPage() {
                     다시 시도
                   </button>
                   <button
-                    onClick={() => { setBotBlockedItems([]); setScrapeLog([]); }}
+                    onClick={() => { setBotBlockedItems([]); setScrapeLog([]); setScrapeStatus(new Map()); setScrapeTotal(0); }}
                     className="px-2 py-1 min-h-[32px] text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
                     aria-label="봇감지 목록 닫기"
                   >
