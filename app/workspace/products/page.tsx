@@ -306,30 +306,44 @@ export default function ProductsPage() {
     setScrapeLogCollapsed(false);
     setBotBlockedItems([]);
 
-    let accumulatedChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
+    const allChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
     let remainingBlocked: Array<{ id: string; name: string }> = [];
     let stopped = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 10;
 
     try {
-      const result = await runScrapeOnce(ids, abortController);
-      accumulatedChanges = result.changes;
-      remainingBlocked = result.botBlocked;
-      stopped = result.stopped;
+      let currentIds = ids;
+      while (currentIds.length > 0) {
+        if (retryCount > 0) {
+          pushScrapeLog(`봇감지 ${currentIds.length}개 자동 재시도 (${retryCount}/${MAX_RETRIES})...`);
+          await new Promise(r => setTimeout(r, 3000));
+          if (abortController.signal.aborted) { stopped = true; break; }
+        }
+        const result = await runScrapeOnce(currentIds, abortController);
+        allChanges.push(...result.changes);
+        remainingBlocked = result.botBlocked;
+        stopped = result.stopped;
+        if (stopped || remainingBlocked.length === 0 || retryCount >= MAX_RETRIES) break;
+        currentIds = remainingBlocked.map(b => b.id);
+        retryCount++;
+      }
     } finally {
       scrapeAbortRef.current = null;
       setScrapingPrices(false);
-      // 변동없음·실패 이력이 서버에 기록되었을 수 있으므로 새로고침
       refetchPriceChanges();
-      if (accumulatedChanges.length > 0) {
-        setScrapeResults([...accumulatedChanges]);
+      if (allChanges.length > 0) {
+        setScrapeResults([...allChanges]);
         setScrapeResultModalOpen(true);
         setScrapeLogCollapsed(true);
       }
       if (remainingBlocked.length > 0) {
         setBotBlockedItems(remainingBlocked);
-        pushScrapeLog(`봇감지 ${remainingBlocked.length}개 미완료 - 수동 재시도 버튼 사용 가능`);
+        pushScrapeLog(`봇감지 ${remainingBlocked.length}개 미완료 (${retryCount}회 재시도 후) - 수동 재시도 가능`);
+      } else if (retryCount > 0 && !stopped) {
+        pushScrapeLog(`봇감지 전체 해소 (${retryCount}회 재시도)`);
       }
-      if (!stopped && accumulatedChanges.length === 0 && remainingBlocked.length === 0) {
+      if (!stopped && allChanges.length === 0 && remainingBlocked.length === 0) {
         setTimeout(() => setScrapeLog([]), 3000);
       }
     }
