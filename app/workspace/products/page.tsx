@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags, ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts, type PriceChangeFilter } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
@@ -53,6 +53,7 @@ export default function ProductsPage() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [scrapingPrices, setScrapingPrices] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [expandedExportSection, setExpandedExportSection] = useState<string | null>(null);
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const [importingCodes, setImportingCodes] = useState(false);
   const [platformCodeModalOpen, setPlatformCodeModalOpen] = useState(false);
@@ -753,152 +754,92 @@ export default function ProductsPage() {
                 {exportModalOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setExportModalOpen(false)} />
-                    <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl overflow-hidden">
+                    <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl overflow-hidden max-h-[70vh] overflow-y-auto">
                       <div className="px-3 py-2 border-b border-[var(--border)]">
                         <span className="text-xs font-medium text-[var(--text-muted)]">플랫폼 선택</span>
                       </div>
-                      <button
-                        onClick={() => handlePlayAutoExport("smartstore")}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                      >
-                        <span className="w-2 h-2 rounded-full bg-green-400" />
-                        스마트스토어
+                      <button onClick={() => handlePlayAutoExport("smartstore")} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                        <span className="w-2 h-2 rounded-full bg-green-400" /> 스마트스토어
                       </button>
-                      <button
-                        onClick={() => handlePlayAutoExport("gmarket_auction")}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                      >
-                        <span className="w-2 h-2 rounded-full bg-yellow-400" />
-                        지마켓·옥션·11번가
+                      <button onClick={() => handlePlayAutoExport("gmarket_auction")} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                        <span className="w-2 h-2 rounded-full bg-yellow-400" /> 지마켓·옥션·11번가
                       </button>
-                      <button
-                        onClick={() => handlePlayAutoExport("coupang")}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                      >
-                        <span className="w-2 h-2 rounded-full bg-red-400" />
-                        쿠팡
+                      <button onClick={() => handlePlayAutoExport("coupang")} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                        <span className="w-2 h-2 rounded-full bg-red-400" /> 쿠팡
                       </button>
+                      <button onClick={handleExportAll} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-violet-400 hover:bg-violet-600/10 transition-colors font-medium border-t border-[var(--border)]">
+                        <FileSpreadsheet className="w-3.5 h-3.5" /> 전체 다운로드
+                      </button>
+                      {/* 가격수정 v1 */}
                       <div className="border-t border-[var(--border)]">
                         <button
-                          onClick={handleExportAll}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-violet-400 hover:bg-violet-600/10 transition-colors font-medium"
+                          onClick={() => setExpandedExportSection(expandedExportSection === "v1" ? null : "v1")}
+                          className="w-full flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-orange-400 hover:bg-[var(--bg-hover)] transition-colors"
                         >
-                          <FileSpreadsheet className="w-3.5 h-3.5" />
-                          전체 다운로드
-                        </button>
-                      </div>
-                      <div className="border-t border-[var(--border)]">
-                        <div className="px-3 py-2 flex items-center gap-1.5 text-xs font-medium text-orange-400">
+                          {expandedExportSection === "v1" ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                           <TrendingUp className="w-3 h-3" />
                           가격수정 v1
-                        </div>
-                        <button
-                          onClick={() => handlePriceUpdateExport("smartstore")}
-                          disabled={priceUpdateExporting}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-green-400" />
-                          스마트스토어
                         </button>
-                        <button
-                          onClick={() => handlePriceUpdateExport("auction")}
-                          disabled={priceUpdateExporting}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-yellow-400" />
-                          옥션
-                        </button>
-                        <button
-                          onClick={() => handlePriceUpdateExport("gmarket")}
-                          disabled={priceUpdateExporting}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-yellow-400" />
-                          지마켓
-                        </button>
-                        <button
-                          onClick={() => handlePriceUpdateExport("11st")}
-                          disabled={priceUpdateExporting}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-yellow-400" />
-                          11번가
-                        </button>
-                        <button
-                          onClick={() => handlePriceUpdateExport("coupang")}
-                          disabled={priceUpdateExporting}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-red-400" />
-                          쿠팡
-                        </button>
-                        <button
-                          onClick={() => handlePriceUpdateExport("all")}
-                          disabled={priceUpdateExporting}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-orange-400 hover:bg-orange-600/10 transition-colors font-medium disabled:opacity-50 border-t border-[var(--border)]"
-                        >
-                          <TrendingUp className="w-3.5 h-3.5" />
-                          {priceUpdateExporting ? "생성 중..." : "전체 다운로드"}
-                        </button>
+                        {expandedExportSection === "v1" && (
+                          <div>
+                            <button onClick={() => handlePriceUpdateExport("smartstore")} disabled={priceUpdateExporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                              <span className="w-2 h-2 rounded-full bg-green-400" /> 스마트스토어
+                            </button>
+                            <button onClick={() => handlePriceUpdateExport("auction")} disabled={priceUpdateExporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                              <span className="w-2 h-2 rounded-full bg-yellow-400" /> 옥션
+                            </button>
+                            <button onClick={() => handlePriceUpdateExport("gmarket")} disabled={priceUpdateExporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                              <span className="w-2 h-2 rounded-full bg-yellow-400" /> 지마켓
+                            </button>
+                            <button onClick={() => handlePriceUpdateExport("11st")} disabled={priceUpdateExporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                              <span className="w-2 h-2 rounded-full bg-yellow-400" /> 11번가
+                            </button>
+                            <button onClick={() => handlePriceUpdateExport("coupang")} disabled={priceUpdateExporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                              <span className="w-2 h-2 rounded-full bg-red-400" /> 쿠팡
+                            </button>
+                            <button onClick={() => handlePriceUpdateExport("all")} disabled={priceUpdateExporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-orange-400 hover:bg-orange-600/10 transition-colors font-medium disabled:opacity-50 border-t border-[var(--border)]">
+                              <TrendingUp className="w-3.5 h-3.5" /> {priceUpdateExporting ? "생성 중..." : "전체 다운로드"}
+                            </button>
+                          </div>
+                        )}
                       </div>
+                      {/* 가격수정 v2 */}
                       <div className="border-t border-[var(--border)]">
-                        <div className="px-3 py-2 flex items-center gap-1.5 text-xs font-medium text-orange-400">
+                        <button
+                          onClick={() => setExpandedExportSection(expandedExportSection === "v2" ? null : "v2")}
+                          className="w-full flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-orange-400 hover:bg-[var(--bg-hover)] transition-colors"
+                        >
+                          {expandedExportSection === "v2" ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                           <TrendingUp className="w-3 h-3" />
                           가격수정 v2 (플랫폼 양식)
-                        </div>
-                        <button
-                          onClick={() => { setExportModalOpen(false); setCoupangImportModalOpen(true); }}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          쿠팡 양식 임포트
                         </button>
-                        <button
-                          onClick={() => { setExportModalOpen(false); setEsmImportModalOpen(true); }}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          옥션·지마켓 상품목록 임포트
-                        </button>
-                        <button
-                          onClick={() => { setExportModalOpen(false); setSmartstoreImportModalOpen(true); }}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          스마트스토어 일괄수정 임포트
-                        </button>
-                        <button
-                          onClick={() => handlePriceUpdateV2Export("coupang")}
-                          disabled={priceUpdateV2Exporting}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-red-400" />
-                          {priceUpdateV2Exporting ? "생성 중..." : "쿠팡"}
-                        </button>
-                        <button
-                          onClick={() => handlePriceUpdateV2Export("esm")}
-                          disabled={priceUpdateV2Exporting}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-yellow-400" />
-                          {priceUpdateV2Exporting ? "생성 중..." : "옥션·지마켓"}
-                        </button>
-                        <button
-                          onClick={() => handlePriceUpdateV2Export("smartstore")}
-                          disabled={priceUpdateV2Exporting}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-green-400" />
-                          {priceUpdateV2Exporting ? "생성 중..." : "스마트스토어"}
-                        </button>
-                        <button
-                          disabled
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-disabled)] opacity-50 cursor-not-allowed"
-                          title="추후 지원 예정"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-red-400/40" />
-                          11번가 (추후 지원)
-                        </button>
+                        {expandedExportSection === "v2" && (
+                          <div>
+                            <button onClick={() => { setExportModalOpen(false); setCoupangImportModalOpen(true); }} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                              <Upload className="w-3.5 h-3.5" /> 쿠팡 양식 임포트
+                            </button>
+                            <button onClick={() => { setExportModalOpen(false); setEsmImportModalOpen(true); }} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                              <Upload className="w-3.5 h-3.5" /> 옥션·지마켓 상품목록 임포트
+                            </button>
+                            <button onClick={() => { setExportModalOpen(false); setSmartstoreImportModalOpen(true); }} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                              <Upload className="w-3.5 h-3.5" /> 스마트스토어 일괄수정 임포트
+                            </button>
+                            <div className="border-t border-[var(--border)]">
+                              <button onClick={() => handlePriceUpdateV2Export("coupang")} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                                <span className="w-2 h-2 rounded-full bg-red-400" /> {priceUpdateV2Exporting ? "생성 중..." : "쿠팡"}
+                              </button>
+                              <button onClick={() => handlePriceUpdateV2Export("esm")} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                                <span className="w-2 h-2 rounded-full bg-yellow-400" /> {priceUpdateV2Exporting ? "생성 중..." : "옥션·지마켓"}
+                              </button>
+                              <button onClick={() => handlePriceUpdateV2Export("smartstore")} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                                <span className="w-2 h-2 rounded-full bg-green-400" /> {priceUpdateV2Exporting ? "생성 중..." : "스마트스토어"}
+                              </button>
+                              <button disabled className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-disabled)] opacity-50 cursor-not-allowed" title="추후 지원 예정">
+                                <span className="w-2 h-2 rounded-full bg-red-400/40" /> 11번가 (추후 지원)
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </>
