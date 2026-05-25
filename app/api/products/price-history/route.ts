@@ -22,8 +22,8 @@ export async function GET(request: NextRequest) {
     .order("scraped_at", { ascending: false })
     .limit(2000);
 
-  if (from) query = query.gte("scraped_at", `${from}T00:00:00`);
-  if (to) query = query.lte("scraped_at", `${to}T23:59:59`);
+  if (from) query = query.gte("scraped_at", from.includes("T") ? from : `${from}T00:00:00`);
+  if (to) query = query.lte("scraped_at", to.includes("T") ? to : `${to}T23:59:59`);
 
   const { data, error } = await query;
 

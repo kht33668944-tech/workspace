@@ -133,8 +133,12 @@ export function useProducts(options: UseProductsOptions = {}) {
   const priceChangesFetchedRef = useRef(false);
   const fetchPriceChanges = useCallback(() => {
     if (!session?.access_token) return;
-    const today = new Date().toISOString().slice(0, 10);
-    fetch(`/api/products/price-history?from=${today}&to=${today}`, {
+    const now = new Date();
+    const resetPoint = new Date(now);
+    resetPoint.setHours(12, 0, 0, 0);
+    if (now < resetPoint) resetPoint.setDate(resetPoint.getDate() - 1);
+    const from = resetPoint.toISOString();
+    fetch(`/api/products/price-history?from=${encodeURIComponent(from)}`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
     })
       .then(r => r.json())
