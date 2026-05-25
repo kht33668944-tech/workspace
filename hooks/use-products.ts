@@ -5,22 +5,14 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import type { Product, ProductInsert, ProductUpdate } from "@/types/database";
+import type { PriceChangeFilter, PriceScrapeStatus } from "@/components/workspace/products/table/table-utils";
+export type { PriceChangeFilter, PriceScrapeStatus };
 
 function urlToStoragePath(publicUrl: string): string {
   const marker = "/product-images/";
   const idx = publicUrl.indexOf(marker);
   return idx >= 0 ? publicUrl.slice(idx + marker.length) : publicUrl;
 }
-
-export interface PriceChangeFilter {
-  minPercent: number | null; // 하한 (예: -3)
-  maxPercent: number | null; // 상한 (예: 5)
-  onlyChanged?: boolean; // true면 변동률 0 제외
-  onlyUnchanged?: boolean; // true면 변동없음만 (오늘 스크랩됐고 가격 동일)
-  onlyFailed?: boolean; // true면 실패만 (오늘 스크랩됐지만 가격 못 가져옴)
-}
-
-export type PriceScrapeStatus = "scraped" | "failed";
 
 interface UseProductsOptions {
   search?: string;
@@ -213,20 +205,26 @@ export function useProducts(options: UseProductsOptions = {}) {
     filteredProducts = filteredProducts.filter((p) => p.category === options.categoryFilter);
   }
 
-  // 전일대비 범위 필터
+  // 전일대비 필터
   if (options.priceChangeFilter) {
     let { minPercent, maxPercent } = options.priceChangeFilter;
-    const { onlyChanged, onlyUnchanged, onlyFailed } = options.priceChangeFilter;
-    // min > max이면 자동 swap (예: min=-0.5, max=-20 → min=-20, max=-0.5)
+    const { onlyChanged, statuses } = options.priceChangeFilter;
     if (minPercent !== null && maxPercent !== null && minPercent > maxPercent) {
       [minPercent, maxPercent] = [maxPercent, minPercent];
     }
     filteredProducts = filteredProducts.filter((p) => {
-      const status = priceScrapeStatus[p.id];
+      const scrapeStatus = priceScrapeStatus[p.id];
       const change = priceChanges[p.id] ?? 0;
-      if (onlyFailed) return status === "failed";
-      if (onlyUnchanged) return status === "scraped" && change === 0;
-      if (onlyChanged && (status !== "scraped" || change === 0)) return false;
+      // 상태 체크박스 필터
+      if (statuses && statuses.length > 0) {
+        let productStatus: string;
+        if (scrapeStatus === "failed") productStatus = "failed";
+        else if (scrapeStatus === "scraped" && change !== 0) productStatus = "changed";
+        else if (scrapeStatus === "scraped" && change === 0) productStatus = "unchanged";
+        else productStatus = "none";
+        if (!statuses.includes(productStatus as typeof statuses[number])) return false;
+      }
+      if (onlyChanged && (scrapeStatus !== "scraped" || change === 0)) return false;
       if (minPercent !== null && change < minPercent) return false;
       if (maxPercent !== null && change > maxPercent) return false;
       return true;

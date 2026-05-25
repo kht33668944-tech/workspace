@@ -255,12 +255,13 @@ export function formatCell(
   }, String(val));
 }
 
+export type PriceChangeStatus = "changed" | "unchanged" | "failed" | "none";
+
 export interface PriceChangeFilter {
   minPercent: number | null;
   maxPercent: number | null;
   onlyChanged?: boolean;
-  onlyUnchanged?: boolean;
-  onlyFailed?: boolean;
+  statuses?: PriceChangeStatus[];
 }
 
 export type PriceScrapeStatus = "scraped" | "failed";

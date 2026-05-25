@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { Filter, Check, ArrowUp, ArrowDown } from "lucide-react";
 import type { Product } from "@/types/database";
-import type { Col, SortDir, PriceChangeFilter } from "./table-utils";
+import type { Col, SortDir, PriceChangeFilter, PriceChangeStatus } from "./table-utils";
 
 export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allProducts, columnFilters, sort, onSort, isMobile, stickyLeft, priceChangeFilter, onPriceChangeFilterChange, selectedCount, onBulkMarginApply }: {
   col: Col; width: number; onResize: (w: number) => void;
@@ -193,15 +193,22 @@ function ColumnFilterDropdown({ columnKey, allProducts, columnFilters, selectedV
   );
 }
 
+const PRICE_CHANGE_STATUSES: { value: PriceChangeStatus; label: string; color: string }[] = [
+  { value: "changed", label: "변동", color: "text-orange-400" },
+  { value: "unchanged", label: "변동없음", color: "text-[var(--text-secondary)]" },
+  { value: "failed", label: "실패", color: "text-red-400" },
+  { value: "none", label: "(빈칸)", color: "text-[var(--text-muted)]" },
+];
+
 function PriceChangeFilterDropdown({ filter, onChange, onClose, sort, onSort }: {
   filter: PriceChangeFilter | null;
   onChange: (f: PriceChangeFilter | null) => void;
   onClose: () => void;
   sort: SortDir; onSort: (d: SortDir) => void;
 }) {
+  const [pending, setPending] = useState<PriceChangeStatus[]>(filter?.statuses ?? []);
   const [min, setMin] = useState(filter?.minPercent?.toString() ?? "");
   const [max, setMax] = useState(filter?.maxPercent?.toString() ?? "");
-  const [onlyChanged, setOnlyChanged] = useState(!!filter?.onlyChanged);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -210,29 +217,25 @@ function PriceChangeFilterDropdown({ filter, onChange, onClose, sort, onSort }: 
     return () => document.removeEventListener("mousedown", h);
   }, [onClose]);
 
+  const allChecked = pending.length === 0;
+  const isChecked = (v: PriceChangeStatus) => allChecked || pending.includes(v);
+
+  const toggle = useCallback((val: PriceChangeStatus) => {
+    setPending(prev => {
+      if (prev.length === 0) return PRICE_CHANGE_STATUSES.map(s => s.value).filter(v => v !== val);
+      if (prev.includes(val)) { const n = prev.filter(v => v !== val); return n.length === 0 || n.length === PRICE_CHANGE_STATUSES.length ? [] : n; }
+      const n = [...prev, val]; return n.length >= PRICE_CHANGE_STATUSES.length ? [] : n;
+    });
+  }, []);
+
   const apply = () => {
     const minVal = min.trim() !== "" ? parseFloat(min) : null;
     const maxVal = max.trim() !== "" ? parseFloat(max) : null;
-    if (minVal === null && maxVal === null && !onlyChanged) {
+    if (pending.length === 0 && minVal === null && maxVal === null) {
       onChange(null);
     } else {
-      onChange({ minPercent: minVal, maxPercent: maxVal, onlyChanged });
+      onChange({ minPercent: minVal, maxPercent: maxVal, statuses: pending.length > 0 ? pending : undefined });
     }
-    onClose();
-  };
-
-  const applyOnlyChanged = () => {
-    onChange({ minPercent: null, maxPercent: null, onlyChanged: true });
-    onClose();
-  };
-
-  const applyOnlyUnchanged = () => {
-    onChange({ minPercent: null, maxPercent: null, onlyUnchanged: true });
-    onClose();
-  };
-
-  const applyOnlyFailed = () => {
-    onChange({ minPercent: null, maxPercent: null, onlyFailed: true });
     onClose();
   };
 
@@ -246,37 +249,26 @@ function PriceChangeFilterDropdown({ filter, onChange, onClose, sort, onSort }: 
           <ArrowDown className="w-3 h-3" /> 내림차순
         </button>
       </div>
-      <div className="p-2 border-b border-[var(--border)] space-y-1.5">
-        <button
-          onClick={applyOnlyChanged}
-          className="w-full px-2.5 py-1.5 rounded text-xs font-medium bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-colors"
-        >
-          변동 있는 상품만 보기
-        </button>
-        <button
-          onClick={applyOnlyUnchanged}
-          className="w-full px-2.5 py-1.5 rounded text-xs font-medium bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-[var(--bg-active)] transition-colors"
-        >
-          변동없음 상품만 보기
-        </button>
-        <button
-          onClick={applyOnlyFailed}
-          className="w-full px-2.5 py-1.5 rounded text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-        >
-          실패 상품만 보기
-        </button>
+      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-[var(--border)]">
+        <button onClick={() => setPending([])} className={`text-xs ${allChecked ? "text-blue-400 font-medium" : "text-blue-400/60 hover:text-blue-300"}`}>전체 선택</button>
+        <span className="text-[var(--text-disabled)]">|</span>
+        <button onClick={() => setPending(["none"])} className="text-xs text-[var(--text-muted)] hover:text-[var(--text-tertiary)]">전체 해제</button>
+      </div>
+      <div className="py-1 border-b border-[var(--border)]">
+        {PRICE_CHANGE_STATUSES.map(({ value, label, color }) => (
+          <label key={value} className="flex items-center gap-2 px-2 py-1.5 hover:bg-[var(--bg-hover)] cursor-pointer text-xs" onClick={e => { e.preventDefault(); toggle(value); }}>
+            <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${isChecked(value) ? "bg-blue-600 border-blue-600" : "border-[var(--border-strong)]"}`}>
+              {isChecked(value) && <Check className="w-2.5 h-2.5 text-white" />}
+            </div>
+            <span className={`${color} truncate flex-1`}>{label}</span>
+          </label>
+        ))}
       </div>
       <div className="p-2.5 border-b border-[var(--border)]">
-        <label className="flex items-center gap-2 cursor-pointer mb-2.5" onClick={e => { e.preventDefault(); setOnlyChanged(v => !v); }}>
-          <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${onlyChanged ? "bg-blue-600 border-blue-600" : "border-[var(--border-strong)]"}`}>
-            {onlyChanged && <Check className="w-2.5 h-2.5 text-white" />}
-          </div>
-          <span className="text-xs text-[var(--text-secondary)]">변동률 0 제외 (변동 있는 상품만)</span>
-        </label>
         <div className="text-xs font-medium text-[var(--text-secondary)] mb-2">변동률 범위 (%)</div>
         <div className="flex items-center gap-2">
           <input
-            autoFocus type="number" value={min} onChange={e => setMin(e.target.value)}
+            type="number" value={min} onChange={e => setMin(e.target.value)}
             placeholder="최소" onKeyDown={e => { if (e.key === "Enter") apply(); if (e.key === "Escape") onClose(); }}
             className="flex-1 bg-[var(--bg-hover)] border border-[var(--border)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-disabled)] w-0"
           />
