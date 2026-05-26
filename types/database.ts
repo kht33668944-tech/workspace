@@ -289,7 +289,7 @@ export interface PriceHistory {
   new_price: number;
   change_amount: number;  // new_price - previous_price
   change_rate: number;    // 변동률 (%)
-  source: "scrape" | "manual";
+  source: "scrape" | "impit_scrape" | "manual" | "soldout";
   scraped_at: string;
 }
 

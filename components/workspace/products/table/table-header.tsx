@@ -196,6 +196,7 @@ function ColumnFilterDropdown({ columnKey, allProducts, columnFilters, selectedV
 const PRICE_CHANGE_STATUSES: { value: PriceChangeStatus; label: string; color: string }[] = [
   { value: "changed", label: "변동", color: "text-orange-400" },
   { value: "unchanged", label: "변동없음", color: "text-[var(--text-secondary)]" },
+  { value: "sold_out", label: "품절", color: "text-yellow-400" },
   { value: "failed", label: "실패", color: "text-red-400" },
   { value: "none", label: "(빈칸)", color: "text-[var(--text-muted)]" },
 ];

@@ -141,13 +141,12 @@ export function useProducts(options: UseProductsOptions = {}) {
       headers: { Authorization: `Bearer ${session.access_token}` },
     })
       .then(r => r.json())
-      .then((json: { history?: Array<{ product_id: string; change_rate: number; new_price: number }> }) => {
+      .then((json: { history?: Array<{ product_id: string; change_rate: number; new_price: number; source?: string }> }) => {
         const rateMap: Record<string, number> = {};
         const statusMap: Record<string, PriceScrapeStatus> = {};
-        // API는 scraped_at DESC. 가장 최근 1건만 채택.
         (json.history ?? []).forEach(h => {
           if (!(h.product_id in statusMap)) {
-            statusMap[h.product_id] = h.new_price === 0 ? "failed" : "scraped";
+            statusMap[h.product_id] = h.source === "soldout" ? "sold_out" : h.new_price === 0 ? "failed" : "scraped";
             rateMap[h.product_id] = h.change_rate;
           }
         });
@@ -221,7 +220,8 @@ export function useProducts(options: UseProductsOptions = {}) {
       // 상태 체크박스 필터
       if (statuses && statuses.length > 0) {
         let productStatus: string;
-        if (scrapeStatus === "failed") productStatus = "failed";
+        if (scrapeStatus === "sold_out") productStatus = "sold_out";
+        else if (scrapeStatus === "failed") productStatus = "failed";
         else if (scrapeStatus === "scraped" && change !== 0) productStatus = "changed";
         else if (scrapeStatus === "scraped" && change === 0) productStatus = "unchanged";
         else productStatus = "none";

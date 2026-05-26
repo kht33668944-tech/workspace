@@ -255,7 +255,7 @@ export function formatCell(
   }, String(val));
 }
 
-export type PriceChangeStatus = "changed" | "unchanged" | "failed" | "none";
+export type PriceChangeStatus = "changed" | "unchanged" | "failed" | "sold_out" | "none";
 
 export interface PriceChangeFilter {
   minPercent: number | null;
@@ -264,7 +264,7 @@ export interface PriceChangeFilter {
   statuses?: PriceChangeStatus[];
 }
 
-export type PriceScrapeStatus = "scraped" | "failed";
+export type PriceScrapeStatus = "scraped" | "failed" | "sold_out";
 
 export interface ProductTableProps {
   products: Product[];

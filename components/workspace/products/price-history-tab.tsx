@@ -137,7 +137,7 @@ export default function PriceHistoryTab() {
                       {isUp ? "+" : ""}{h.change_rate}%
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text-muted)]">
-                      {h.source === "scrape" ? "자동" : "수동"}
+                      {h.source === "manual" ? "수동" : h.source === "soldout" ? "품절" : h.source === "impit_scrape" ? "자동(v2)" : "자동"}
                     </td>
                   </tr>
                 );
