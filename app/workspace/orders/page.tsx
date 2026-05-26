@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
-import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap } from "lucide-react";
+import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
 import { useOrders } from "@/hooks/use-orders";
@@ -25,6 +25,7 @@ const ExcelImport = dynamic(() => import("@/components/workspace/orders/excel-im
 const SettlementImportModal = dynamic(() => import("@/components/workspace/orders/settlement-import-modal"), { ssr: false });
 const TrackingCollectModal = dynamic(() => import("@/components/workspace/orders/tracking-collect-modal"), { ssr: false });
 const AutoPurchaseModal = dynamic(() => import("@/components/workspace/orders/auto-purchase-modal"), { ssr: false });
+const BulkSmsModal = dynamic(() => import("@/components/workspace/orders/bulk-sms-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
 import type { Order, OrderInsert } from "@/types/database";
 
@@ -108,6 +109,7 @@ function OrdersPageInner() {
   const [sidePanelOrder, setSidePanelOrder] = useState<Order | null>(null);
   const [showTrackingCollect, setShowTrackingCollect] = useState(false);
   const [showAutoPurchase, setShowAutoPurchase] = useState(false);
+  const [showBulkSms, setShowBulkSms] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showAutoMenu, setShowAutoMenu] = useState(false);
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
@@ -576,6 +578,14 @@ function OrdersPageInner() {
                   <Truck className="w-4 h-4 text-purple-400" />
                   배송조회 수집
                 </button>
+                <button
+                  onClick={() => { setShowAutoMenu(false); setShowBulkSms(true); }}
+                  disabled={selectedIds.size === 0}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <MessageSquare className="w-4 h-4 text-green-400" />
+                  단체문자{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
+                </button>
               </div>
             )}
           </div>
@@ -728,6 +738,12 @@ function OrdersPageInner() {
             />
           )}
         </MobileSheet>
+      )}
+      {showBulkSms && (
+        <BulkSmsModal
+          orders={orders.filter((o) => selectedIds.has(o.id))}
+          onClose={() => setShowBulkSms(false)}
+        />
       )}
       {showAutoPurchase && (
         <AutoPurchaseModal

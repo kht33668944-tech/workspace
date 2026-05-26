@@ -337,3 +337,30 @@ export interface DailySnapshot {
 
 export type DailySnapshotInsert = Omit<DailySnapshot, "id" | "created_at" | "updated_at">;
 export type DailySnapshotUpdate = Partial<Omit<DailySnapshot, "id" | "user_id" | "created_at" | "updated_at">>;
+
+// ─── SMS ───
+export interface SmsTemplate {
+  id: string;
+  user_id: string;
+  name: string;
+  content: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SmsTemplateInsert = Omit<SmsTemplate, "id" | "created_at" | "updated_at">;
+export type SmsTemplateUpdate = Partial<Omit<SmsTemplate, "id" | "user_id" | "created_at" | "updated_at">>;
+
+export interface SmsLog {
+  id: string;
+  user_id: string;
+  batch_id: string;
+  order_id: string | null;
+  phone: string;
+  message: string;
+  status: "success" | "failed";
+  error_message: string | null;
+  message_id: string | null;
+  created_at: string;
+}

@@ -82,7 +82,8 @@ async function ensureLogin(ctx: BrowserContext, userId: string) {
 }
 
 // ── 가격 추출 ──────────────────────────────────
-type PriceResult = { price: number; botBlocked: boolean };
+type FailReason = "bot_blocked" | "timeout" | "sold_out" | "selector_changed" | "network_error" | null;
+type PriceResult = { price: number; botBlocked: boolean; failReason: FailReason };
 
 async function extractGmarketPrice(ctx: BrowserContext, url: string): Promise<PriceResult> {
   const page = await ctx.newPage();
@@ -92,24 +93,33 @@ async function extractGmarketPrice(ctx: BrowserContext, url: string): Promise<Pr
       if (["image", "media", "font", "stylesheet"].includes(t)) route.abort();
       else route.continue();
     });
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(url, { waitUntil: "load", timeout: 30000 });
 
-    // 봇 감지 페이지 검출 (cloudflare turnstile)
     const title = await page.title().catch(() => "");
     if (title.includes("잠시만 기다리십시오") || title.includes("Just a moment")) {
-      return { price: 0, botBlocked: true };
+      return { price: 0, botBlocked: true, failReason: "bot_blocked" };
     }
 
-    await page.waitForSelector(".box__price strong.price_real", { timeout: 5000 }).catch(() => {});
+    // 품절 감지
+    const isSoldOut = await page.evaluate(() => {
+      const el = document.querySelector(".box__soldout, .item-soldout, [class*='soldout'], [class*='sold_out']");
+      if (el) return true;
+      const text = document.body.innerText;
+      return text.includes("품절") && (text.includes("이 상품은") || text.includes("판매종료"));
+    }).catch(() => false);
+
+    if (isSoldOut) {
+      return { price: 0, botBlocked: false, failReason: "sold_out" };
+    }
+
+    const selectorFound = await page.waitForSelector(".box__price strong.price_real", { timeout: 10000 }).catch(() => null);
 
     const price = await page.evaluate(() => {
-      // 1순위: 클럽쿠폰가
       const coupon = document.querySelector(".price_innerwrap-coupon .price_real");
       if (coupon?.textContent) {
         const n = parseInt(coupon.textContent.replace(/[^0-9]/g, ""), 10);
         if (n > 0) return n;
       }
-      // 2순위: 판매가
       const sale = document.querySelector(".box__price strong.price_real");
       if (sale?.textContent) {
         const n = parseInt(sale.textContent.replace(/[^0-9]/g, ""), 10);
@@ -117,9 +127,12 @@ async function extractGmarketPrice(ctx: BrowserContext, url: string): Promise<Pr
       }
       return 0;
     });
-    return { price, botBlocked: false };
-  } catch { return { price: 0, botBlocked: false }; }
-  finally { await page.close(); }
+
+    if (price > 0) return { price, botBlocked: false, failReason: null };
+    return { price: 0, botBlocked: false, failReason: selectorFound ? "sold_out" : "timeout" };
+  } catch {
+    return { price: 0, botBlocked: false, failReason: "network_error" };
+  } finally { await page.close(); }
 }
 
 async function extractOhousePrice(ctx: BrowserContext, url: string): Promise<PriceResult> {
@@ -133,19 +146,25 @@ async function extractOhousePrice(ctx: BrowserContext, url: string): Promise<Pri
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(2000);
 
-    const price = await page.evaluate(() => {
+    const result = await page.evaluate(() => {
+      // 품절 감지
+      const soldOutEl = document.querySelector('[class*="sold-out"], [class*="soldout"], [class*="sold_out"]');
+      const bodyText = document.body.innerText;
+      if (soldOutEl || (bodyText.includes("품절") && bodyText.includes("알림"))) {
+        return { price: 0, reason: "sold_out" as const };
+      }
       // 1순위: Open Graph meta 태그
       const ogPrice = document.querySelector<HTMLMetaElement>('meta[property="product:price:amount"]')?.content;
       if (ogPrice) {
         const n = parseInt(ogPrice, 10);
-        if (n > 0) return n;
+        if (n > 0) return { price: n, reason: null };
       }
       // 2순위: JSON-LD
       const jsonLd = document.querySelector('script[type="application/ld+json"]');
       if (jsonLd?.textContent) {
         try {
           const data = JSON.parse(jsonLd.textContent);
-          if (data.offers?.price) return parseInt(String(data.offers.price), 10);
+          if (data.offers?.price) return { price: parseInt(String(data.offers.price), 10), reason: null };
         } catch {}
       }
       // 3순위: __NEXT_DATA__
@@ -153,19 +172,20 @@ async function extractOhousePrice(ctx: BrowserContext, url: string): Promise<Pri
       if (nd?.textContent) {
         try {
           const m = nd.textContent.match(/"sellingPrice"\s*:\s*(\d+)/);
-          if (m) return parseInt(m[1], 10);
+          if (m) return { price: parseInt(m[1], 10), reason: null };
         } catch {}
       }
-      return 0;
+      return { price: 0, reason: "selector_changed" as const };
     });
-    return { price, botBlocked: false };
-  } catch { return { price: 0, botBlocked: false }; }
-  finally { await page.close(); }
+    return { price: result.price, botBlocked: false, failReason: result.price > 0 ? null : (result.reason as FailReason) };
+  } catch {
+    return { price: 0, botBlocked: false, failReason: "network_error" };
+  } finally { await page.close(); }
 }
 
 // ── SSE API ──────────────────────────────────
 type SSEEvent =
-  | { type: "progress"; id: string; name: string; price: number; previous_price: number; index: number; total: number; bot_blocked?: boolean }
+  | { type: "progress"; id: string; name: string; price: number; previous_price: number; index: number; total: number; bot_blocked?: boolean; fail_reason?: FailReason }
   | { type: "done"; updated: number; failed: number; unchanged: number; bot_blocked: number }
   | { type: "error"; message: string };
 
@@ -282,7 +302,7 @@ export async function POST(request: NextRequest) {
               const r = isGmarket
                 ? await extractGmarketPrice(ctx, p.purchase_url)
                 : await extractOhousePrice(ctx, p.purchase_url);
-              return { ...p, price: r.price, botBlocked: r.botBlocked };
+              return { ...p, price: r.price, botBlocked: r.botBlocked, failReason: r.failReason };
             })
           );
 
@@ -329,6 +349,7 @@ export async function POST(request: NextRequest) {
               index: updated + failed + unchanged + botBlocked,
               total: allTargets.length,
               bot_blocked: r.botBlocked,
+              fail_reason: r.failReason,
             });
           }
 

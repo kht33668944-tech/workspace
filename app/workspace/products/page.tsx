@@ -241,13 +241,20 @@ export default function ProductsPage() {
           try {
             const event = JSON.parse(data);
             if (event.type === "progress") {
+              const failReasonText: Record<string, string> = {
+                bot_blocked: "봇 감지로 차단 (재시도 필요)",
+                sold_out: "품절/판매종료",
+                timeout: "페이지 로딩 타임아웃",
+                selector_changed: "가격 추출 실패 (페이지 구조 변경)",
+                network_error: "네트워크 오류",
+              };
               const priceText = event.bot_blocked
                 ? "봇 감지로 차단 (재시도 필요)"
                 : event.price > 0
                   ? event.price !== event.previous_price
                     ? `${event.previous_price.toLocaleString()}→${event.price.toLocaleString()}원`
                     : `${event.price.toLocaleString()}원 (변동없음)`
-                  : "실패";
+                  : (failReasonText[event.fail_reason] || "실패");
               pushScrapeLog(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
               const statusKey: "updated" | "unchanged" | "bot_blocked" | "failed" = event.bot_blocked
                 ? "bot_blocked"

@@ -135,8 +135,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     if (!session?.access_token) return;
     const now = new Date();
     const resetPoint = new Date(now);
-    resetPoint.setHours(12, 0, 0, 0);
-    if (now < resetPoint) resetPoint.setDate(resetPoint.getDate() - 1);
+    resetPoint.setHours(0, 0, 0, 0);
     const from = resetPoint.toISOString();
     fetch(`/api/products/price-history?from=${encodeURIComponent(from)}`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
