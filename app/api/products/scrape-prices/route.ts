@@ -93,7 +93,7 @@ async function extractGmarketPrice(ctx: BrowserContext, url: string): Promise<Pr
       if (["image", "media", "font", "stylesheet"].includes(t)) route.abort();
       else route.continue();
     });
-    await page.goto(url, { waitUntil: "load", timeout: 30000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
 
     const title = await page.title().catch(() => "");
     if (title.includes("잠시만 기다리십시오") || title.includes("Just a moment")) {
@@ -112,7 +112,7 @@ async function extractGmarketPrice(ctx: BrowserContext, url: string): Promise<Pr
       return { price: 0, botBlocked: false, failReason: "sold_out" };
     }
 
-    const selectorFound = await page.waitForSelector(".box__price strong.price_real", { timeout: 10000 }).catch(() => null);
+    const selectorFound = await page.waitForSelector(".box__price strong.price_real", { timeout: 5000 }).catch(() => null);
 
     const price = await page.evaluate(() => {
       const coupon = document.querySelector(".price_innerwrap-coupon .price_real");
