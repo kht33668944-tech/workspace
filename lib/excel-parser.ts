@@ -15,6 +15,9 @@ import type { OrderInsert } from "@/types/database";
 const SETTLEMENT_RATES: [string, number][] = [
   ["스마트스토어", 0.93],
   ["쿠팡", 0.89],
+  ["옥션", 0.85],
+  ["지마켓", 0.87],
+  ["11번가", 0.92],
 ];
 
 interface RawRow {
@@ -324,7 +327,7 @@ function splitAddress(fullAddress: string): { base: string; detail: string } {
 
   // 도로명주소: ~대로/~번길/~로/~길 + 번지[-번지]
   // 지번주소: ~동/~리/~가 + 번지[-번지]
-  const basePattern = /^(.*?(?:대로|번길|로|길|동|리|가)\s+\d+(?:-\d+)?)\s+(.+)$/;
+  const basePattern = /^(.*?(?:대로|번길|로|길|동|리|가)\s+\d+(?:-\d+)?)(?:\s+|(?=\())(.+)$/;
   const match = trimmed.match(basePattern);
 
   if (!match) {

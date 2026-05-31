@@ -52,7 +52,11 @@
       "Bash(gh repo:*)",
       "WebFetch(domain:github.com)",
       "Bash(grep -r seller_code /c/Users/sksso/Desktop/개발/workspace --include=*.ts --include=*.tsx --include=*.js --include=*.jsx -l)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(npm i *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(supabase --version)",
+      "Bash(npm ls *)"
     ]
   },
   "enableAllProjectMcpServers": true,
