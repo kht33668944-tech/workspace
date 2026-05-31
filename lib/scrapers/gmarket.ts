@@ -69,19 +69,8 @@ export async function collectGmarketTracking(
     const targetSet = new Set(orderNos.map(String));
     const found = new Set<string>();
     const allBundles: GmarketOrderResponse["data"]["payBundleList"] = [];
-    let capturedHeaders: Record<string, string> = {};
-    let capturedBaseUrl = "";
 
-    // 페이지의 API 요청 헤더를 캡처 (수정하지 않고 통과)
-    await page.route("**/api/pays/paging**", async (route) => {
-      const req = route.request();
-      capturedHeaders = req.headers();
-      capturedBaseUrl = req.url().split("?")[0];
-      console.log("[gmarket] 요청 헤더 캡처 완료:", Object.keys(capturedHeaders).join(", "));
-      await route.continue();
-    });
-
-    // my.gmarket.co.kr/ko/pc/main 이동 → 페이지 자체 API 호출 발생 → 헤더 캡처 + 응답 수집
+    // my.gmarket.co.kr/ko/pc/main 이동 → 페이지 자체 API 호출 발생 → 응답 + 요청 헤더 수집
     console.log("[gmarket] my.gmarket.co.kr 이동...");
     const firstApiPromise = page.waitForResponse(
       (res) => res.url().includes("/api/pays/paging") && res.status() === 200,
@@ -93,8 +82,16 @@ export async function collectGmarketTracking(
     const firstData = await firstApiRes.json() as GmarketOrderResponse;
     console.log("[gmarket] 첫 페이지:", `totalCount=${firstData.data?.totalCount}, bundles=${firstData.data?.payBundleList?.length}`);
 
-    // route 해제 (이후 직접 요청)
-    await page.unroute("**/api/pays/paging**");
+    // 첫 응답의 요청 헤더를 그대로 재사용 (page.route 인터셉트 제거 → unroute 블로킹 차단)
+    // ":authority" 등 HTTP/2 의사 헤더는 request.get에 넣을 수 없으므로 제외
+    const rawHeaders = await firstApiRes.request().allHeaders();
+    const capturedHeaders: Record<string, string> = {};
+    for (const [k, v] of Object.entries(rawHeaders)) {
+      if (k.startsWith(":")) continue;
+      capturedHeaders[k] = v;
+    }
+    const capturedBaseUrl = firstApiRes.url().split("?")[0];
+    console.log("[gmarket] 요청 헤더 캡처 완료:", Object.keys(capturedHeaders).join(", "), "→ 페이지네이션 시작");
 
     if (firstData.data?.payBundleList?.length) {
       allBundles.push(...firstData.data.payBundleList);
