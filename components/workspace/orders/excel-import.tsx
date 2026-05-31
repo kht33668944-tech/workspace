@@ -45,56 +45,76 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
   const [duplicateIndices, setDuplicateIndices] = useState<Set<number>>(new Set());
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [matchedUrlCount, setMatchedUrlCount] = useState(0);
+  const [matchedCostCount, setMatchedCostCount] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // 상품소싱에서 구매 URL 매칭 (파싱 직후 1회 호출)
-  const enrichWithProductUrls = useCallback(async (orders: OrderInsert[]): Promise<OrderInsert[]> => {
-    if (!user || orders.length === 0 || !orders.some((o) => o.product_name && !o.purchase_url)) {
+  // 상품소싱에서 구매 URL + 원가 매칭 (파싱 직후 1회 호출)
+  // 상품명 정확 일치(정규화 후) 시: purchase_url이 비었으면 채우고, cost가 비었으면 최저가×수량으로 채움
+  const enrichWithProducts = useCallback(async (orders: OrderInsert[]): Promise<OrderInsert[]> => {
+    const needsEnrich = orders.some((o) => o.product_name && (!o.purchase_url || !o.cost));
+    if (!user || orders.length === 0 || !needsEnrich) {
       setMatchedUrlCount(0);
+      setMatchedCostCount(0);
       return orders;
     }
 
     const PAGE_SIZE = 1000;
-    const allProducts: { product_name: string; purchase_url: string }[] = [];
+    const allProducts: { product_name: string; purchase_url: string | null; lowest_price: number | null }[] = [];
     let from = 0;
     while (true) {
       const { data } = await supabase
         .from("products")
-        .select("product_name, purchase_url")
+        .select("product_name, purchase_url, lowest_price")
         .eq("user_id", user.id)
-        .not("purchase_url", "is", null)
         .range(from, from + PAGE_SIZE - 1);
       if (!data || data.length === 0) break;
       allProducts.push(...data);
       if (data.length < PAGE_SIZE) break;
       from += PAGE_SIZE;
     }
-    if (allProducts.length === 0) { setMatchedUrlCount(0); return orders; }
+    if (allProducts.length === 0) {
+      setMatchedUrlCount(0);
+      setMatchedCostCount(0);
+      return orders;
+    }
 
-    const productUrlMap = new Map<string, string>();
+    const productMap = new Map<string, { url: string | null; price: number | null }>();
     for (const p of allProducts) {
-      if (p.product_name && p.purchase_url) {
-        productUrlMap.set(normalizeProductName(p.product_name), p.purchase_url);
+      if (p.product_name) {
+        productMap.set(normalizeProductName(p.product_name), { url: p.purchase_url, price: p.lowest_price });
       }
     }
 
-    let matched = 0;
+    let urlMatched = 0;
+    let costMatched = 0;
     const enriched = orders.map((order) => {
-      if (order.purchase_url || !order.product_name) return order;
-      const url = productUrlMap.get(normalizeProductName(order.product_name));
-      if (url) { matched++; return { ...order, purchase_url: url }; }
-      return order;
+      if (!order.product_name) return order;
+      const match = productMap.get(normalizeProductName(order.product_name));
+      if (!match) return order;
+      let next = order;
+      // 구매 URL: 비어있을 때만 채움
+      if (!order.purchase_url && match.url) {
+        next = { ...next, purchase_url: match.url };
+        urlMatched++;
+      }
+      // 원가: 비어있거나 0일 때만 최저가×수량으로 채움 (기존 값 보존)
+      if ((!order.cost || order.cost === 0) && match.price && match.price > 0) {
+        next = { ...next, cost: match.price * (order.quantity || 1) };
+        costMatched++;
+      }
+      return next;
     });
 
-    setMatchedUrlCount(matched);
-    return matched > 0 ? enriched : orders;
+    setMatchedUrlCount(urlMatched);
+    setMatchedCostCount(costMatched);
+    return urlMatched > 0 || costMatched > 0 ? enriched : orders;
   }, [user]);
 
   // 파싱된 주문을 세팅하는 공용 함수 (enrichment + duplicate check 한 번에)
   const setOrdersWithEnrichment = useCallback(async (orders: OrderInsert[]) => {
-    const enriched = await enrichWithProductUrls(orders);
+    const enriched = await enrichWithProducts(orders);
     setParsedOrders(enriched);
-  }, [enrichWithProductUrls]);
+  }, [enrichWithProducts]);
 
   // parsedOrders 변경 시 중복 체크 실행
   useEffect(() => {
@@ -431,13 +451,16 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
                 <div className="mb-4 text-xs text-[var(--text-muted)]">중복 확인 중...</div>
               )}
 
-              {/* 상품소싱 URL 매칭 결과 */}
-              {matchedUrlCount > 0 && (
+              {/* 상품소싱 URL + 원가 매칭 결과 */}
+              {(matchedUrlCount > 0 || matchedCostCount > 0) && (
                 <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Link className="w-4 h-4 text-green-400 shrink-0" />
                     <span className="text-green-400 text-xs font-medium">
-                      상품소싱에서 구매 URL {matchedUrlCount}건이 자동 매칭되었습니다
+                      상품소싱 자동 매칭: {[
+                        matchedUrlCount > 0 ? `구매 URL ${matchedUrlCount}건` : null,
+                        matchedCostCount > 0 ? `원가 ${matchedCostCount}건` : null,
+                      ].filter(Boolean).join(" · ")}
                     </span>
                   </div>
                 </div>
@@ -502,7 +525,7 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
         {parsedOrders && parsedOrders.length > 0 && (
           <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border)]">
             <button
-              onClick={() => { setParsedOrders(null); setFileName(""); setRawFile(null); setSheetNames([]); setManualDate(""); setDuplicateIndices(new Set()); setMatchedUrlCount(0); }}
+              onClick={() => { setParsedOrders(null); setFileName(""); setRawFile(null); setSheetNames([]); setManualDate(""); setDuplicateIndices(new Set()); setMatchedUrlCount(0); setMatchedCostCount(0); }}
               className="px-4 py-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
             >
               다시 선택
