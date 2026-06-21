@@ -28,6 +28,21 @@ export function toE164(phone: string): string {
   return `+${digits}`;
 }
 
+/**
+ * 게이트웨이로 보낼 수신번호 포맷을 결정한다.
+ * - 실제 휴대폰(010/011/016/017/018/019) → E.164(+82...). 검증된 정상 발송 경로.
+ * - 그 외(안심번호 0502/0504, 070 등) → 로컬 형식(숫자만, 앞자리 0 유지) 그대로.
+ *   안심번호는 휴대폰 메시지 앱에서 직접 0502...로 보내듯 국내번호 형식이어야
+ *   통신사 안심번호 릴레이가 실번호로 포워딩한다. E.164(+82 50...)는 국제표기로
+ *   해석돼 국내 안심번호 라우팅이 깨질 수 있어 변환하지 않는다.
+ *   (이 경우 발송 요청 시 skipPhoneValidation=true 로 게이트웨이의 E.164 검증을 끈다.)
+ */
+export function formatGatewayNumber(phone: string): string {
+  const digits = phone.replace(/[^0-9]/g, "");
+  if (/^01[016789]/.test(digits)) return toE164(digits);
+  return digits;
+}
+
 interface GatewaySendResponse {
   id: string;
   state: string;
@@ -43,7 +58,9 @@ export async function sendGatewayMessage(
   to: string,
   text: string
 ): Promise<{ messageId: string; state: string }> {
-  const res = await fetch(`${SMS_GATEWAY_BASE_URL}/messages`, {
+  // skipPhoneValidation=true: 게이트웨이의 E.164/모바일 검증을 끈다.
+  // (안심번호 050x 등 비-모바일 번호도 발송 큐잉되도록)
+  const res = await fetch(`${SMS_GATEWAY_BASE_URL}/messages?skipPhoneValidation=true`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -51,7 +68,7 @@ export async function sendGatewayMessage(
     },
     body: JSON.stringify({
       textMessage: { text },
-      phoneNumbers: [toE164(to)],
+      phoneNumbers: [formatGatewayNumber(to)],
     }),
   });
 
