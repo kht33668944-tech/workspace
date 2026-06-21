@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { User, Lock, ArrowRight } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
@@ -47,9 +48,9 @@ export function SignupForm() {
           인증 링크를 보냈습니다.<br />
           이메일을 확인해 가입을 완료해주세요.
         </p>
-        <a href="/" className="inline-block text-xs text-gray-400 hover:text-white transition">
+        <Link href="/" className="inline-block text-xs text-gray-400 hover:text-white transition">
           로그인 페이지로 돌아가기
-        </a>
+        </Link>
       </div>
     );
   }
@@ -153,9 +154,9 @@ export function SignupForm() {
       </form>
       <p className="text-center text-xs text-gray-400">
         이미 계정이 있으신가요?{" "}
-        <a href="/" className="font-semibold text-blue-400 hover:text-blue-300 transition">
+        <Link href="/" className="font-semibold text-blue-400 hover:text-blue-300 transition">
           로그인
-        </a>
+        </Link>
       </p>
     </div>
   );

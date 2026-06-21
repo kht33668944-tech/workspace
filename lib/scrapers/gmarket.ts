@@ -2,7 +2,6 @@ import { launchBrowser, createStealthContext } from "./browser";
 import { normalizeCourier } from "./constants";
 import type {
   GmarketOrderResponse,
-  TrackingInfo,
   ScrapeResult,
 } from "./types";
 
@@ -13,9 +12,6 @@ const TIMEOUT_LOGIN = 30000;
 const TIMEOUT_API = 30000;
 const TIMEOUT_TRACKING = 10000;
 
-function formatDate(d: Date): string {
-  return d.toISOString();
-}
 
 /**
  * Playwright 기반 지마켓 배송정보 일괄 수집

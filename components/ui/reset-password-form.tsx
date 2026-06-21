@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { Lock, ArrowRight } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
@@ -42,13 +43,13 @@ export function ResetPasswordForm() {
         </div>
         <h2 className="text-2xl font-bold text-white">비밀번호 변경 완료</h2>
         <p className="text-sm text-gray-300">새 비밀번호로 로그인할 수 있습니다.</p>
-        <a
+        <Link
           href="/"
           className="group inline-flex items-center justify-center w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-semibold transition-all duration-300"
         >
           로그인하러 가기
           <ArrowRight className="ml-2 h-5 w-5 transform group-hover:translate-x-1 transition-transform" />
-        </a>
+        </Link>
       </div>
     );
   }

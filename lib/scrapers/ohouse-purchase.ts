@@ -1,4 +1,4 @@
-import { type Page, type BrowserContext, type Cookie } from "playwright";
+import { type Page, type BrowserContext } from "playwright";
 import { launchBrowser } from "./browser";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
@@ -113,7 +113,6 @@ export async function purchaseOhouse(
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const activeContext = context!;
   const page = await activeContext.newPage();
 

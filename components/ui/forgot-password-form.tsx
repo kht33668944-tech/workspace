@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { User, ArrowRight } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
@@ -36,9 +37,9 @@ export function ForgotPasswordForm() {
           <span className="text-blue-400 font-semibold">{email}</span>으로<br />
           비밀번호 재설정 링크를 보냈습니다.
         </p>
-        <a href="/" className="inline-block text-xs text-gray-400 hover:text-white transition">
+        <Link href="/" className="inline-block text-xs text-gray-400 hover:text-white transition">
           로그인 페이지로 돌아가기
-        </a>
+        </Link>
       </div>
     );
   }
@@ -85,9 +86,9 @@ export function ForgotPasswordForm() {
         </button>
       </form>
       <p className="text-center text-xs text-gray-400">
-        <a href="/" className="font-semibold text-blue-400 hover:text-blue-300 transition">
+        <Link href="/" className="font-semibold text-blue-400 hover:text-blue-300 transition">
           로그인으로 돌아가기
-        </a>
+        </Link>
       </p>
     </div>
   );

@@ -1,4 +1,4 @@
-import { type BrowserContext, type Cookie } from "playwright";
+import { type BrowserContext } from "playwright";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ScrapeResult } from "./types";
 import { launchBrowser, createStealthContext } from "./browser";
@@ -140,7 +140,6 @@ export async function collectOhouseTracking(
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const activeContext = context!;
 
   try {
