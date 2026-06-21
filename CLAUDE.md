@@ -16,12 +16,14 @@ npm run lint     # ESLint
 npx tsc --noEmit # 타입 체크
 ```
 
+테스트 프레임워크 없음(jest/vitest/playwright test 설정 없음). 검증은 수동/E2E.
+
 ## 기술 스택
 
 - **Next.js 16** App Router (standalone output), **React 19**, **TypeScript 5** (strict)
 - **Tailwind CSS 4**, **Lucide React** (아이콘)
 - **Supabase** (DB, Auth, Storage, RLS)
-- **Playwright** (스크래핑/자동구매), **Tesseract.js** (CAPTCHA OCR)
+- **Playwright** + **patchright** (스크래핑/자동구매, 봇 감지 우회), **Tesseract.js** (CAPTCHA OCR), **impit** (가격비교 fetch)
 - **Gemini API** (상품명 정규화, 썸네일, 상세페이지, 카테고리 분류)
 - **XLSX** (엑셀 파싱/내보내기), **Sharp** (이미지 처리)
 
@@ -31,6 +33,11 @@ npx tsc --noEmit # 타입 체크
 - `getSupabaseClient(token)` — 사용자 JWT 기반 (RLS 적용)
 - `getServiceSupabaseClient()` — service_role 키 (RLS 우회, 장시간 작업용)
 - API route에서는 반드시 이 헬퍼 사용
+
+### API route 인증 (middleware.ts 없음)
+- 인증은 미들웨어가 아니라 각 route에서 처리. 클라이언트는 `Authorization: Bearer <JWT>` 헤더 전송
+- route에서 `getAccessToken(request)`로 토큰 추출 → 위 헬퍼에 전달
+- RLS 정책은 `user_id = auth.uid()` 기준, service_role은 우회
 
 ### 스크래퍼 구조 (lib/scrapers/)
 - `browser.ts` — Playwright 런치 + 스텔스 컨텍스트 (봇 감지 우회)
@@ -58,6 +65,20 @@ npx tsc --noEmit # 타입 체크
 - 기본 모델: `gemini-2.5-flash` (`GEMINI_MODEL` 환경변수로 변경 가능)
 - `GEMINI_API_KEY` 없으면 graceful fallback (null 반환)
 - 주요 함수: `generateText`, `analyzeImageFromUrl`, `generateImageFromPrompt`, `groundedSearch`, `classifyCategory`, `normalizeProductName`
+
+### 가격·재고 동기화 (lib/*-price-inventory.ts)
+- 쿠팡/스마트스토어/ESM(11번가)별 대량 엑셀 템플릿 import/export
+- API: `app/api/{coupang,smartstore,esm}-price-inventory/{import,export,status}/route.ts`
+- 셀러센터 원본 양식(JSONB)을 DB에 캐시 후, 우리 가격으로 재작성해 재업로드용 파일 생성
+- 카테고리/필수옵션 정의: `lib/coupang-category-options.ts`, `lib/playauto-schema.ts`
+
+### DB 스키마 (supabase/migrations/)
+- 마이그레이션 SQL은 `supabase/migrations/`에 위치 (수동 적용)
+- 핵심 테이블: `products`, `orders`, `purchase_credentials`(암호화), `purchase_logs`, `tracking_logs`, `finance`, `gemini_usage`(AI 토큰 비용 추적), `*_price_inventory`, `forbidden_words`
+- Gemini 호출은 `gemini_usage`에 fire-and-forget으로 사용량 기록
+
+### Next 빌드 설정 (next.config.ts)
+- `output: "standalone"` (Docker), 네이티브/대형 패키지는 `serverExternalPackages`에 등록 (playwright, patchright, sharp, tesseract.js, impit) — 새 네이티브 의존성 추가 시 여기에 등록 필요
 
 ## 배포
 
