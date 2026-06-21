@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import { sendMessages, substituteTemplate } from "@/lib/solapi";
+import { sendGatewayMessage } from "@/lib/sms-gateway";
 import type { Order } from "@/types/database";
 
 export const maxDuration = 300;
@@ -10,6 +11,7 @@ interface SendRequest {
   orderIds: string[];
   templateContent: string;
   phoneField: "recipient_phone" | "orderer_phone";
+  provider?: "solapi" | "phone";
 }
 
 interface SSEEvent {
@@ -36,6 +38,7 @@ export async function POST(request: NextRequest) {
   }
 
   const phoneField = body.phoneField || "recipient_phone";
+  const provider = body.provider || "phone";
   const userSupabase = getSupabaseClient(token);
   const { data: { user } } = await userSupabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
@@ -100,85 +103,146 @@ export async function POST(request: NextRequest) {
         messageList.push({ order, to: phone, text });
       }
 
-      const BATCH_SIZE = 1000;
-      for (let i = 0; i < messageList.length; i += BATCH_SIZE) {
-        if (abortController.signal.aborted) break;
+      const maskPhone = (p: string) =>
+        p.replace(/(\d{3})(\d{4})(\d{4})/, "$1-****-$3");
 
-        const batch = messageList.slice(i, i + BATCH_SIZE);
+      if (provider === "phone") {
+        // ── v2: 내 휴대폰(SMS Gate 클라우드 릴레이)로 발송 (건당 무료) ──
+        // 주문마다 본문이 다르므로 1건씩 큐잉. 폰이 자체 속도제한으로 비동기 발송.
+        for (const item of messageList) {
+          if (abortController.signal.aborted) break;
+          const normalizedPhone = item.to.replace(/[^0-9]/g, "");
 
-        try {
-          const result = await sendMessages(
-            batch.map((m) => ({ to: m.to, text: m.text }))
-          );
-
-          const failedPhones = new Set(
-            (result.failedMessageList || []).map((f) => f.to.replace(/[^0-9]/g, ""))
-          );
-
-          const logInserts = [];
-          for (const item of batch) {
-            const normalizedPhone = item.to.replace(/[^0-9]/g, "");
-            const isFailed = failedPhones.has(normalizedPhone);
-            const failedInfo = isFailed
-              ? (result.failedMessageList || []).find(
-                  (f) => f.to.replace(/[^0-9]/g, "") === normalizedPhone
-                )
-              : null;
-
-            if (isFailed) {
-              failedCount++;
-            } else {
-              successCount++;
-            }
-
+          try {
+            const result = await sendGatewayMessage(item.to, item.text);
+            successCount++;
             sendEvent({
               type: "progress",
               current: successCount + failedCount,
               total,
-              phone: normalizedPhone.replace(/(\d{3})(\d{4})(\d{4})/, "$1-****-$3"),
-              status: isFailed ? "failed" : "success",
-              message: isFailed ? (failedInfo?.statusMessage || "발송 실패") : "발송 성공",
+              phone: maskPhone(normalizedPhone),
+              status: "success",
+              message: "발송 요청됨",
             });
-
-            logInserts.push({
+            await serviceSupabase.from("sms_logs").insert({
               user_id: user.id,
               batch_id: batchId,
               order_id: item.order.id,
               phone: normalizedPhone,
               message: item.text,
-              status: isFailed ? "failed" : "success",
-              error_message: failedInfo?.statusMessage || null,
-              message_id: isFailed ? null : (result.groupId || null),
+              status: "success",
+              error_message: null,
+              message_id: result.messageId || null,
+              provider: "phone",
             });
-          }
-
-          if (logInserts.length > 0) {
-            await serviceSupabase.from("sms_logs").insert(logInserts);
-          }
-        } catch (err) {
-          for (const item of batch) {
+          } catch (err) {
             failedCount++;
+            const errMsg = err instanceof Error ? err.message : String(err);
             sendEvent({
               type: "progress",
               current: successCount + failedCount,
               total,
-              phone: item.to.replace(/(\d{3})(\d{4})(\d{4})/, "$1-****-$3"),
+              phone: maskPhone(normalizedPhone),
               status: "failed",
-              message: err instanceof Error ? err.message : String(err),
+              message: errMsg,
+            });
+            await serviceSupabase.from("sms_logs").insert({
+              user_id: user.id,
+              batch_id: batchId,
+              order_id: item.order.id,
+              phone: normalizedPhone,
+              message: item.text,
+              status: "failed",
+              error_message: errMsg,
+              message_id: null,
+              provider: "phone",
             });
           }
+        }
+      } else {
+        // ── v1: SOLAPI 대량 발송 (건당 유료, send-many 최대 1000건 배치) ──
+        const BATCH_SIZE = 1000;
+        for (let i = 0; i < messageList.length; i += BATCH_SIZE) {
+          if (abortController.signal.aborted) break;
 
-          const failLogs = batch.map((item) => ({
-            user_id: user.id,
-            batch_id: batchId,
-            order_id: item.order.id,
-            phone: item.to.replace(/[^0-9]/g, ""),
-            message: item.text,
-            status: "failed",
-            error_message: err instanceof Error ? err.message : String(err),
-            message_id: null,
-          }));
-          await serviceSupabase.from("sms_logs").insert(failLogs);
+          const batch = messageList.slice(i, i + BATCH_SIZE);
+
+          try {
+            const result = await sendMessages(
+              batch.map((m) => ({ to: m.to, text: m.text }))
+            );
+
+            const failedPhones = new Set(
+              (result.failedMessageList || []).map((f) => f.to.replace(/[^0-9]/g, ""))
+            );
+
+            const logInserts = [];
+            for (const item of batch) {
+              const normalizedPhone = item.to.replace(/[^0-9]/g, "");
+              const isFailed = failedPhones.has(normalizedPhone);
+              const failedInfo = isFailed
+                ? (result.failedMessageList || []).find(
+                    (f) => f.to.replace(/[^0-9]/g, "") === normalizedPhone
+                  )
+                : null;
+
+              if (isFailed) {
+                failedCount++;
+              } else {
+                successCount++;
+              }
+
+              sendEvent({
+                type: "progress",
+                current: successCount + failedCount,
+                total,
+                phone: maskPhone(normalizedPhone),
+                status: isFailed ? "failed" : "success",
+                message: isFailed ? (failedInfo?.statusMessage || "발송 실패") : "발송 성공",
+              });
+
+              logInserts.push({
+                user_id: user.id,
+                batch_id: batchId,
+                order_id: item.order.id,
+                phone: normalizedPhone,
+                message: item.text,
+                status: isFailed ? "failed" : "success",
+                error_message: failedInfo?.statusMessage || null,
+                message_id: isFailed ? null : (result.groupId || null),
+                provider: "solapi",
+              });
+            }
+
+            if (logInserts.length > 0) {
+              await serviceSupabase.from("sms_logs").insert(logInserts);
+            }
+          } catch (err) {
+            for (const item of batch) {
+              failedCount++;
+              sendEvent({
+                type: "progress",
+                current: successCount + failedCount,
+                total,
+                phone: maskPhone(item.to.replace(/[^0-9]/g, "")),
+                status: "failed",
+                message: err instanceof Error ? err.message : String(err),
+              });
+            }
+
+            const failLogs = batch.map((item) => ({
+              user_id: user.id,
+              batch_id: batchId,
+              order_id: item.order.id,
+              phone: item.to.replace(/[^0-9]/g, ""),
+              message: item.text,
+              status: "failed",
+              error_message: err instanceof Error ? err.message : String(err),
+              message_id: null,
+              provider: "solapi",
+            }));
+            await serviceSupabase.from("sms_logs").insert(failLogs);
+          }
         }
       }
 

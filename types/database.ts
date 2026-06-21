@@ -362,5 +362,6 @@ export interface SmsLog {
   status: "success" | "failed";
   error_message: string | null;
   message_id: string | null;
+  provider: "solapi" | "phone" | null;
   created_at: string;
 }

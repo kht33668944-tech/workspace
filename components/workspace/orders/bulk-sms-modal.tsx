@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { X, MessageSquare, Send, Plus, Pencil, Trash2, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { X, MessageSquare, Send, Plus, Pencil, Trash2, CheckCircle, AlertCircle, Loader2, Smartphone, Cloud } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import type { Order, SmsTemplate } from "@/types/database";
@@ -14,6 +14,7 @@ interface BulkSmsModalProps {
 
 type Step = "compose" | "sending" | "result";
 type PhoneField = "recipient_phone" | "orderer_phone";
+type Provider = "phone" | "solapi";
 
 interface SendProgress {
   current: number;
@@ -28,6 +29,7 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
   const { showToast } = useToast();
 
   const [step, setStep] = useState<Step>("compose");
+  const [provider, setProvider] = useState<Provider>("phone");
   const [phoneField, setPhoneField] = useState<PhoneField>("recipient_phone");
   const [templates, setTemplates] = useState<SmsTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -41,6 +43,7 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
   const [failedCount, setFailedCount] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const stepRef = useRef<Step>("compose");
+  const initializedRef = useRef(false);
 
   const recipients = useMemo(() => {
     return orders.filter((o) => {
@@ -74,7 +77,7 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
   const messageType = useMemo(() => getMessageType(previewMessage || templateContent), [previewMessage, templateContent]);
   const byteLength = useMemo(() => getByteLength(previewMessage || templateContent), [previewMessage, templateContent]);
   const costPerMessage = messageType === "LMS" ? 50 : 20;
-  const estimatedCost = recipients.length * costPerMessage;
+  const estimatedCost = provider === "phone" ? 0 : recipients.length * costPerMessage;
 
   const fetchTemplates = useCallback(async () => {
     if (!session?.access_token) return;
@@ -85,7 +88,9 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
       if (res.ok) {
         const data = (await res.json()) as SmsTemplate[];
         setTemplates(data);
-        if (data.length > 0 && !selectedTemplateId) {
+        // 최초 로드 시에만 기본 템플릿 자동 선택 (이후 '새 템플릿' 클릭 등으로 재실행돼도 덮어쓰지 않음)
+        if (!initializedRef.current && data.length > 0) {
+          initializedRef.current = true;
           const defaultTpl = data.find((t) => t.is_default) || data[0];
           setSelectedTemplateId(defaultTpl.id);
           setTemplateContent(defaultTpl.content);
@@ -97,7 +102,7 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
     } finally {
       setTemplatesLoading(false);
     }
-  }, [session?.access_token, selectedTemplateId]);
+  }, [session?.access_token]);
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
@@ -166,7 +171,11 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
 
   const handleSend = async () => {
     if (!session?.access_token || recipients.length === 0 || !templateContent.trim()) return;
-    if (!confirm(`${recipients.length}건의 문자를 발송하시겠습니까?\n예상 비용: 약 ${estimatedCost.toLocaleString()}원`)) return;
+    const confirmMsg =
+      provider === "phone"
+        ? `${recipients.length}건의 문자를 휴대폰(무료)으로 발송하시겠습니까?`
+        : `${recipients.length}건의 문자를 SOLAPI로 발송하시겠습니까?\n예상 비용: 약 ${estimatedCost.toLocaleString()}원`;
+    if (!confirm(confirmMsg)) return;
 
     // 미저장 템플릿이 있으면 자동 저장
     if (isEditing && templateName.trim() && templateContent.trim()) {
@@ -193,6 +202,7 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
           orderIds: recipients.map((o) => o.id),
           templateContent: templateContent.trim(),
           phoneField,
+          provider,
         }),
         signal: controller.signal,
       });
@@ -288,6 +298,38 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
         <div className="p-5 space-y-4">
           {step === "compose" && (
             <>
+              {/* 발송 방식 선택 */}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setProvider("phone")}
+                  className={`flex-1 flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-lg border text-sm transition-colors ${
+                    provider === "phone"
+                      ? "bg-blue-600/20 border-blue-500 text-blue-300"
+                      : "bg-[var(--bg-hover)] border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <Smartphone className="w-4 h-4" />휴대폰
+                  </span>
+                  <span className="text-xs opacity-80">무료 · [Web발신] 없음</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProvider("solapi")}
+                  className={`flex-1 flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-lg border text-sm transition-colors ${
+                    provider === "solapi"
+                      ? "bg-blue-600/20 border-blue-500 text-blue-300"
+                      : "bg-[var(--bg-hover)] border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <Cloud className="w-4 h-4" />SOLAPI
+                  </span>
+                  <span className="text-xs opacity-80">건당 유료 · 항상 발송</span>
+                </button>
+              </div>
+
               {/* 수신자 정보 */}
               <div className="space-y-2">
                 <div className="text-sm text-[var(--text-secondary)]">
@@ -332,9 +374,9 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
                     className="flex-1 px-3 py-2 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] outline-none"
                     disabled={templatesLoading}
                   >
-                    <option value="">템플릿 선택...</option>
+                    <option value="" className="bg-[var(--bg-card)] text-[var(--text-primary)]">템플릿 선택...</option>
                     {templates.map((t) => (
-                      <option key={t.id} value={t.id}>
+                      <option key={t.id} value={t.id} className="bg-[var(--bg-card)] text-[var(--text-primary)]">
                         {t.name}{t.is_default ? " (기본)" : ""}
                       </option>
                     ))}
@@ -425,7 +467,9 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
                   <div className="text-xs text-[var(--text-muted)]">
                     {messageType}({byteLength}바이트)
                     {" · "}
-                    예상 비용: 약 {estimatedCost.toLocaleString()}원 ({recipients.length}건 x {costPerMessage}원)
+                    {provider === "phone"
+                      ? "무료 (휴대폰 발송)"
+                      : `예상 비용: 약 ${estimatedCost.toLocaleString()}원 (${recipients.length}건 x ${costPerMessage}원)`}
                   </div>
                 </div>
               )}
