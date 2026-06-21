@@ -12,7 +12,6 @@ const TIMEOUT_LOGIN = 30000;
 const TIMEOUT_API = 30000;
 const TIMEOUT_TRACKING = 10000;
 
-
 /**
  * Playwright 기반 지마켓 배송정보 일괄 수집
  * 1. Chromium으로 로그인
