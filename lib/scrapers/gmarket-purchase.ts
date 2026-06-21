@@ -400,6 +400,81 @@ async function applyCheckoutDiscount(page: Page) {
   }
 }
 
+/**
+ * 주문서 페이지의 "결제할인" 드롭다운 처리.
+ * - 결제할인 select(native)가 있으면 각 옵션을 적용해보고 실제 "결제할인 N원" 금액이 가장 큰 옵션을 최종 선택
+ * - 없으면 아무것도 하지 않고 기존 흐름 유지 (silent skip)
+ * 결제할인 select는 옵션 텍스트에 "결제할인"이 포함되어 배송요청 select(#delivery-request-label)와 구분된다.
+ */
+async function applyPaymentDiscount(page: Page) {
+  try {
+    // 결제할인 select 탐색 (옵션에 "결제할인" 텍스트가 있는 select)
+    const discountSelect = page
+      .locator("select")
+      .filter({ has: page.locator('option:has-text("결제할인")') })
+      .first();
+
+    if ((await discountSelect.count()) === 0) {
+      // 결제할인 드롭다운 없음 → 기존대로 진행
+      return;
+    }
+
+    // 옵션 목록 수집 (placeholder 제외)
+    const options: { value: string; text: string }[] = await discountSelect.evaluate((el) => {
+      const sel = el as HTMLSelectElement;
+      return Array.from(sel.options).map((o) => ({ value: o.value, text: o.text.trim() }));
+    });
+    const candidates = options.filter(
+      (o) => o.value && o.value !== "0" && !o.text.includes("선택해")
+    );
+
+    if (candidates.length === 0) {
+      console.log("[gmarket-purchase] 결제할인 옵션 없음 (placeholder만) → 스킵");
+      return;
+    }
+
+    // 현재 적용된 "결제할인 N원" 금액 읽기
+    const readDiscount = () =>
+      page
+        .evaluate(() => {
+          const amountEl = document.querySelector(".box__partner-card .text__partner-card");
+          const digits = (amountEl?.textContent || "").replace(/[^0-9]/g, "");
+          return digits ? parseInt(digits, 10) : 0;
+        })
+        .catch(() => 0);
+
+    let best = { value: candidates[0].value, text: candidates[0].text, amount: -1 };
+
+    if (candidates.length === 1) {
+      await discountSelect.selectOption(candidates[0].value).catch(() => {});
+      await page.waitForTimeout(800);
+      best.amount = await readDiscount();
+    } else {
+      // 옵션이 여러 개면 각각 적용해보고 실제 결제할인 금액이 가장 큰 것 선택
+      for (const opt of candidates) {
+        await discountSelect.selectOption(opt.value).catch(() => {});
+        await page.waitForTimeout(900);
+        const amount = await readDiscount();
+        console.log(`[gmarket-purchase] 결제할인 후보: "${opt.text}" → ${amount.toLocaleString()}원`);
+        if (amount > best.amount) best = { value: opt.value, text: opt.text, amount };
+      }
+      // 최대 금액 옵션으로 재선택
+      await discountSelect.selectOption(best.value).catch(() => {});
+      await page.waitForTimeout(600);
+    }
+
+    console.log(
+      `[gmarket-purchase] 결제할인 적용: "${best.text}" (${Math.max(best.amount, 0).toLocaleString()}원)`
+    );
+  } catch (e) {
+    // 결제할인은 부가 최적화이므로 실패해도 구매를 막지 않는다
+    console.log(
+      "[gmarket-purchase] 결제할인 선택 스킵 (오류 또는 미존재):",
+      e instanceof Error ? e.message : String(e)
+    );
+  }
+}
+
 /** 페이지가 닫혔을 때 context에서 활성 페이지를 찾거나 새로 생성 */
 async function recoverPage(context: BrowserContext, fallbackUrl: string): Promise<Page> {
   // 닫히지 않은 페이지 필터링
@@ -1125,6 +1200,9 @@ async function processPayment(page: Page, paymentPin: string) {
     });
   }).catch(() => {});
   await page.waitForTimeout(300);
+
+  // 결제할인 드롭다운이 있으면 최대 금액 옵션 선택 (없으면 스킵)
+  await applyPaymentDiscount(page);
 
   // "결제하기" 버튼 클릭
   const payBtn = page.locator('button:has-text("결제하기"), a:has-text("결제하기")').first();
