@@ -172,7 +172,7 @@ export async function generatePlayAutoProductExcel(
   noticeMap?: Record<string, string[]>,
   options?: { useSavedSellerCodes?: boolean; startIndex?: number },
   unitPriceInfoList?: Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }>,
-  coupangPurchaseOptions?: Array<{ hasOption: boolean; optionName: string; optionValue: string }>
+  coupangPurchaseOptions?: Array<{ hasOption: boolean; optionName: string; optionValue: string; missingRequired?: string[] }>
 ): Promise<{ buffer: ArrayBuffer; filename: string }> {
   await loadXLSX();
   const now = new Date();

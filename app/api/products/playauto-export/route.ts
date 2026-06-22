@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
     // 단, 쿠팡 옵션조합/옵션은 가격수정 양식에 들어가므로 처리 필요 — DB 캐시 우선 + 누락 시 Gemini fallback
     const productNames = products.map((p) => p.product_name as string);
 
-    type CoupangOpt = { hasOption: boolean; optionName: string; optionValue: string };
+    type CoupangOpt = { hasOption: boolean; optionName: string; optionValue: string; missingRequired?: string[] };
     let metadataList: Array<{ model: string; brand: string; manufacturer: string }>;
     let smartstoreCategoryCodes: string[];
     let unitPriceInfoList: Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }> | undefined;
@@ -155,6 +155,20 @@ export async function POST(req: NextRequest) {
       coupangPurchaseOptions = result[3];
     }
 
+    // 쿠팡 필수옵션 누락 경고 집계 (업로드 전 사전 안내 → "필수 추천 옵션" 오류 예방)
+    const warnings: Array<{ productName: string; missing: string[] }> = [];
+    if (platform === "coupang" && coupangPurchaseOptions) {
+      coupangPurchaseOptions.forEach((opt, i) => {
+        const missing = opt?.missingRequired ?? [];
+        if (missing.length > 0) {
+          warnings.push({ productName: products[i].product_name as string, missing });
+        }
+      });
+      if (warnings.length > 0) {
+        console.warn(`[playauto-export] 쿠팡 필수옵션 누락 ${warnings.length}개 상품 (업로드 시 오류 가능)`);
+      }
+    }
+
     // 사용자 커스텀 설정 (DB에 저장된 값 우선)
     let userConfig = exportConfigResult.data ?? undefined;
 
@@ -209,7 +223,7 @@ export async function POST(req: NextRequest) {
     );
 
     const base64 = arrayBufferToBase64(buffer);
-    return NextResponse.json({ base64, filename });
+    return NextResponse.json({ base64, filename, warnings });
   } catch (e) {
     console.error("[playauto-export]", e instanceof Error ? e.message : String(e));
     return NextResponse.json({ error: "서버 오류" }, { status: 500 });

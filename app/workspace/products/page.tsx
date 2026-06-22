@@ -31,6 +31,9 @@ const ExportConfigTab = dynamic(() => import("@/components/workspace/products/ex
 
 type ActiveTab = "products" | "images" | "commission" | "smartstore-category" | "price-history" | "export-config";
 
+/** 쿠팡 내보내기 시 필수옵션 누락 경고 (route의 warnings 응답 형식) */
+type ExportWarning = { productName: string; missing: string[] };
+
 export default function ProductsPage() {
   usePreventBrowserSave();
 
@@ -635,13 +638,14 @@ export default function ProductsPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({ productIds: ids, platform }),
       });
-      const json = await res.json() as { base64?: string; filename?: string; error?: string };
+      const json = await res.json() as { base64?: string; filename?: string; error?: string; warnings?: ExportWarning[] };
       if (!res.ok || !json.base64 || !json.filename) {
         alert(json.error ?? "내보내기 실패");
         return;
       }
       downloadExcelFromBase64(json.base64, json.filename);
       saveToArchive(json.filename, json.base64, ids.length);
+      showExportWarnings(json.warnings);
     } catch {
       alert("내보내기 중 오류가 발생했습니다.");
     } finally {
@@ -649,6 +653,22 @@ export default function ProductsPage() {
       setExporting(false);
       setExportStep("");
     }
+  };
+
+  // 쿠팡 필수옵션 누락 사전 경고 (업로드 시 "필수 추천 옵션" 오류 예방)
+  const showExportWarnings = (warnings?: ExportWarning[]) => {
+    if (!warnings || warnings.length === 0) return;
+    const MAX = 15;
+    const lines = warnings
+      .slice(0, MAX)
+      .map((w) => `· ${w.productName} → ${w.missing.join(", ")}`)
+      .join("\n");
+    const more = warnings.length > MAX ? `\n…외 ${warnings.length - MAX}개` : "";
+    alert(
+      `⚠️ 다음 ${warnings.length}개 상품은 쿠팡 필수옵션 값이 비어 있어 플레이오토 업로드 시 ` +
+        `"필수 추천 옵션을 모두 선택해주세요" 오류가 날 수 있습니다.\n` +
+        `상품명에 해당 정보(사이즈 등)를 보강한 뒤 다시 내보내세요.\n\n${lines}${more}`
+    );
   };
 
   const saveToArchive = (fileName: string, fileData: string, count: number) => {
@@ -679,17 +699,18 @@ export default function ProductsPage() {
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
             body: JSON.stringify({ productIds: ids, platform }),
           });
-          const json = await res.json() as { base64?: string; filename?: string; error?: string };
+          const json = await res.json() as { base64?: string; filename?: string; error?: string; warnings?: ExportWarning[] };
           if (!res.ok || !json.base64 || !json.filename) {
             throw new Error(json.error ?? `${PLATFORM_CONFIGS[platform].filenameLabel} 내보내기 실패`);
           }
-          return { platform, ...json } as { platform: PlayAutoExportPlatform; base64: string; filename: string };
+          return { platform, ...json } as { platform: PlayAutoExportPlatform; base64: string; filename: string; warnings?: ExportWarning[] };
         })
       );
       for (const r of results) {
         if (r.status === "fulfilled") {
           downloadExcelFromBase64(r.value.base64, r.value.filename);
           saveToArchive(r.value.filename, r.value.base64, ids.length);
+          showExportWarnings(r.value.warnings);
         } else {
           alert(r.reason?.message ?? "내보내기 실패");
         }
@@ -862,17 +883,18 @@ export default function ProductsPage() {
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
             body: JSON.stringify({ productIds: ids, platform, priceUpdate: true }),
           });
-          const json = await res.json() as { base64?: string; filename?: string; error?: string };
+          const json = await res.json() as { base64?: string; filename?: string; error?: string; warnings?: ExportWarning[] };
           if (!res.ok || !json.base64 || !json.filename) {
             throw new Error(json.error ?? `${PLATFORM_CONFIGS[platform].filenameLabel} 가격수정 실패`);
           }
-          return { platform, ...json } as { platform: PlayAutoExportPlatform; base64: string; filename: string };
+          return { platform, ...json } as { platform: PlayAutoExportPlatform; base64: string; filename: string; warnings?: ExportWarning[] };
         })
       );
       for (const r of results) {
         if (r.status === "fulfilled") {
           const fn = r.value.filename.replace("플레이오토_", "가격수정_");
           downloadExcelFromBase64(r.value.base64, fn);
+          showExportWarnings(r.value.warnings);
         } else {
           alert(r.reason?.message ?? "가격수정 내보내기 실패");
         }

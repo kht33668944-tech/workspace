@@ -9,6 +9,7 @@
 
 import { GoogleGenerativeAI, type GenerateContentResult, type Part } from "@google/generative-ai";
 import { COUPANG_OPTION_IDS, getCoupangCategoryByCode, buildCategoryListForPrompt, type CoupangRequiredOption } from "./coupang-category-options";
+import { QTY_OPTION_IDS, MEASURE_OPTION_UNIT_TYPES, DESCRIPTIVE_OPTION_IDS } from "./coupang-option-classification";
 import { getServiceSupabaseClient } from "./api-helpers";
 
 // ── 모델 설정 ─────────────────────────────────────────────────────────────────
@@ -664,8 +665,8 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
  */
 export async function extractCoupangPurchaseOptions(
   productNames: string[]
-): Promise<Array<{ hasOption: boolean; optionName: string; optionValue: string }>> {
-  const fallback = productNames.map(() => ({ hasOption: false, optionName: "", optionValue: "" }));
+): Promise<Array<{ hasOption: boolean; optionName: string; optionValue: string; missingRequired: string[] }>> {
+  const fallback = productNames.map(() => ({ hasOption: false, optionName: "", optionValue: "", missingRequired: [] as string[] }));
   if (!process.env.GEMINI_API_KEY || productNames.length === 0) return fallback;
 
   type ParsedItem = {
@@ -699,7 +700,9 @@ ${numbered}
 
 각 상품에 대해:
 - categoryCode: 위 목록에서 가장 적합한 카테고리코드 (숫자)
-- quantity: 총 수량 숫자 (예: 24). 상품명에서 파악 불가하면 1
+- quantity: 묶음(판매단위) 개수만. 절대 개당 매수/정수를 곱하지 마라! 상품명에서 파악 불가하면 1
+  * 핵심: "16P 8개"는 16매짜리 8묶음 → quantity=8 (128 아님!), unitValue=16
+  * "20P 5개" → quantity=5 (100 아님), unitValue=20
 - quantityUnit: 수량 단위. 반드시 "개", "박스", "세트", "팩" 중 하나만 사용!
   * 캔/병/봉/봉지/통/입 → 무조건 "개"로 변환
   * 팩은 컵라면/음료 번들일 때만 사용, 일반 식품은 "개"
@@ -713,6 +716,8 @@ ${numbered}
 - "비빔면 130g 80봉" → {"categoryCode":해당코드,"quantity":80,"quantityUnit":"개","unitValue":130,"unitType":"g"}
 - "삼다수 2L 6입" → {"categoryCode":해당코드,"quantity":6,"quantityUnit":"개","unitValue":2,"unitType":"L"}
 - "물티슈 100매 10팩" → {"categoryCode":해당코드,"quantity":10,"quantityUnit":"개","unitValue":100,"unitType":"매"}
+- "생리대 슈퍼롱 20P 5개" → {"categoryCode":해당코드,"quantity":5,"quantityUnit":"개","unitValue":20,"unitType":"매"} (절대 100 아님)
+- "생리대 중형 16P 8개" → {"categoryCode":해당코드,"quantity":8,"quantityUnit":"개","unitValue":16,"unitType":"매"} (절대 128 아님)
 - "무선이어폰" → {"categoryCode":해당코드,"quantity":1,"quantityUnit":"개","unitValue":null,"unitType":null}
 
 반드시 JSON 배열로만 출력 (설명 없이). 상품 개수: ${batch.length}개`
@@ -743,42 +748,111 @@ ${numbered}
 
   const parsedAll: ParsedItem[] = batchResults.flat();
 
-  // 2단계 + 3단계: 카테고리 데이터 기반 옵션 형식 생성
+  // 2단계: 서술형 옵션(사이즈/맛/색상 등) 값을 상품명에서 추출 (해당 옵션이 필요한 상품만)
+  const descNeeds: string[][] = productNames.map((_, i) => {
+    const cc = parsedAll[i]?.categoryCode;
+    if (!cc) return [];
+    const cat = getCoupangCategoryByCode(cc);
+    if (!cat) return [];
+    return cat.options.filter((o) => DESCRIPTIVE_OPTION_IDS.has(o.id)).map((o) => o.name);
+  });
+  const descValues = await extractDescriptiveOptionValues(productNames, descNeeds);
+
+  // 3단계: 카테고리 데이터 기반 옵션 형식 생성 (필수옵션 전체 채움)
   return productNames.map((_, i) => {
     const item = parsedAll[i];
-    if (!item?.categoryCode) return { hasOption: false, optionName: "", optionValue: "" };
+    if (!item?.categoryCode) return { hasOption: false, optionName: "", optionValue: "", missingRequired: [] };
 
     const category = getCoupangCategoryByCode(item.categoryCode);
     if (!category || category.options.length === 0) {
-      return { hasOption: false, optionName: "", optionValue: "" };
+      return { hasOption: false, optionName: "", optionValue: "", missingRequired: [] };
     }
 
-    const qty = item.quantity ?? 1;
+    // 상품명에 "개당수량(NP/N매 등) + 묶음개수(M개)"가 명시되면 묶음개수를 신뢰
+    // (Gemini가 간혹 수량을 매수×개수로 부풀리는 것을 결정적으로 교정)
+    const packCount = parsePackCountFromName(productNames[i]);
+    const qty = packCount ?? item.quantity ?? 1;
     const qtyUnit = item.quantityUnit ?? "개";
     const unitVal = item.unitValue;
     const unitType = item.unitType;
 
-    return buildCoupangOptionFromCategory(category.options, qty, qtyUnit, unitVal, unitType);
+    return buildCoupangOptionFromCategory(category.options, qty, qtyUnit, unitVal, unitType, descValues[i]);
   });
 }
 
-/** 단위 타입 → 매칭되는 쿠팡 옵션 ID 후보군 (우선순위 순) */
-const UNIT_TYPE_TO_OPTION_ID: Record<string, number[]> = {
-  g: [COUPANG_OPTION_IDS.PER_UNIT_WEIGHT, COUPANG_OPTION_IDS.MIN_WEIGHT],
-  kg: [COUPANG_OPTION_IDS.PER_UNIT_WEIGHT, COUPANG_OPTION_IDS.MIN_WEIGHT],
-  ml: [COUPANG_OPTION_IDS.PER_UNIT_CAPACITY, COUPANG_OPTION_IDS.MIN_CAPACITY, COUPANG_OPTION_IDS.CAPACITY],
-  L: [COUPANG_OPTION_IDS.PER_UNIT_CAPACITY, COUPANG_OPTION_IDS.MIN_CAPACITY, COUPANG_OPTION_IDS.CAPACITY],
-  매: [COUPANG_OPTION_IDS.PER_UNIT_COUNT, COUPANG_OPTION_IDS.GRAMMAGE],
-  장: [COUPANG_OPTION_IDS.PER_UNIT_COUNT],
-  시트: [COUPANG_OPTION_IDS.PER_UNIT_COUNT],
-  롤: [COUPANG_OPTION_IDS.PER_UNIT_COUNT],
-  정: [COUPANG_OPTION_IDS.PER_UNIT_CAPSULE],
-  캡슐: [COUPANG_OPTION_IDS.PER_UNIT_CAPSULE],
-  포: [COUPANG_OPTION_IDS.PER_UNIT_CAPSULE],
-  알: [COUPANG_OPTION_IDS.PER_UNIT_CAPSULE],
-};
+/**
+ * 상품명 끝의 묶음(판매단위) 개수 추출.
+ * "개당수량 토큰(NP / N매 / N정 등)" 뒤에 끝의 "M개"가 올 때만 M을 묶음개수로 신뢰.
+ * 예) "슈퍼롱 20P 5개" → 5, "중형 16P 8개" → 8, "14매 4개" → 4
+ * 토큰이 없거나(예: "32P", "60매") 끝이 개가 아니면 null → Gemini 값 사용.
+ */
+function parsePackCountFromName(name: string): number | null {
+  const m = name.match(/\d+\s*(?:P|매|장|시트|정|캡슐|포|롤|입)[^]*?(\d+)\s*개\s*$/i);
+  return m ? parseInt(m[1], 10) : null;
+}
 
-const QUANTITY_OPTION_IDS = new Set<number>([COUPANG_OPTION_IDS.QUANTITY, COUPANG_OPTION_IDS.TOTAL_QUANTITY]);
+/**
+ * 서술형 옵션값(사이즈/맛/색상 등)을 상품명에서 추출.
+ * 서술형 옵션이 필요한 상품만 25개씩 배치로 묶어 Gemini 병렬 호출 (비용 최소화).
+ * 반환: 상품 인덱스별 { 옵션명: 값 } 맵 (못 찾으면 빈 맵).
+ */
+async function extractDescriptiveOptionValues(
+  productNames: string[],
+  optionNamesPerProduct: string[][]
+): Promise<Array<Record<string, string>>> {
+  const result: Array<Record<string, string>> = productNames.map(() => ({}));
+  if (!process.env.GEMINI_API_KEY) return result;
+
+  type DescTarget = { name: string; idx: number; opts: string[] };
+  const targets: DescTarget[] = productNames
+    .map((name, idx) => ({ name, idx, opts: optionNamesPerProduct[idx] ?? [] }))
+    .filter((t) => t.opts.length > 0);
+  if (targets.length === 0) return result;
+
+  const BATCH_SIZE = 25;
+  const batches: DescTarget[][] = [];
+  for (let i = 0; i < targets.length; i += BATCH_SIZE) batches.push(targets.slice(i, i + BATCH_SIZE));
+
+  await Promise.all(batches.map(async (batch, batchIdx) => {
+    const listed = batch
+      .map((t, j) => `${j + 1}. 상품명:"${t.name}" / 추출항목:[${t.opts.join(", ")}]`)
+      .join("\n");
+    const res = await generateText(
+      `각 상품명에서 지정된 "추출항목"의 값을 상품명 텍스트에서만 뽑아내세요.
+
+[규칙]
+- 값은 짧은 단어로 (예: 사이즈→"대형"/"중형"/"슈퍼롱"/"오버나이트", 맛→"딸기맛", 색상→"블랙").
+- 상품명에 해당 정보가 없으면 빈 문자열 "". 추측 금지.
+
+[상품 목록]
+${listed}
+
+각 상품을 {"values":{"항목명":"값", ...}} 형태로, 추출항목 전체에 대해 키를 채워 JSON 배열로만 출력 (설명 없이).
+상품 개수: ${batch.length}개`
+    );
+    if (!res) {
+      console.warn(`[extractDescriptiveOptionValues] 배치 ${batchIdx + 1}/${batches.length} Gemini 응답 없음`);
+      return;
+    }
+    try {
+      const m = res.match(/\[[\s\S]*\]/);
+      if (!m) {
+        console.warn(`[extractDescriptiveOptionValues] 배치 ${batchIdx + 1}/${batches.length} JSON 배열 패턴 없음`);
+        return;
+      }
+      const parsed = JSON.parse(m[0]) as Array<{ values?: Record<string, string> }>;
+      if (!Array.isArray(parsed)) return;
+      batch.forEach((t, j) => {
+        const v = parsed[j]?.values;
+        if (v && typeof v === "object") result[t.idx] = v;
+      });
+    } catch (e) {
+      console.warn(`[extractDescriptiveOptionValues] 배치 ${batchIdx + 1}/${batches.length} 파싱 실패:`, e instanceof Error ? e.message : String(e));
+    }
+  }));
+
+  return result;
+}
 
 /**
  * 쿠팡 수량 단위 화이트리스트 (옵션별 허용 단위)
@@ -797,35 +871,59 @@ function normalizeQtyUnit(qtyUnit: string, qtyOptionId: number): string {
   return "개";
 }
 
-/** 카테고리 필수옵션 데이터를 기반으로 [옵션명]/값 형식 생성 */
+/**
+ * 카테고리 필수옵션 "전체"를 [옵션명...]/값... 형식으로 생성.
+ * - 수량/단위측정/서술형 각각의 출처에서 값을 채움
+ * - bundle=false(단독 필수)인데 값을 못 구하면 missingRequired에 누적 (업로드 전 경고용)
+ * - bundle=true(개당중량/용량 등 대체관계)는 적용되는 것만 채우고 미충족은 허용
+ */
 function buildCoupangOptionFromCategory(
   options: CoupangRequiredOption[],
   qty: number,
   qtyUnit: string,
   unitVal: number | null | undefined,
-  unitType: string | null | undefined
-): { hasOption: boolean; optionName: string; optionValue: string } {
-  const qtyOption = options.find(o => QUANTITY_OPTION_IDS.has(o.id));
-  if (!qtyOption) return { hasOption: false, optionName: "", optionValue: "" };
+  unitType: string | null | undefined,
+  descriptiveValues: Record<string, string> = {}
+): { hasOption: boolean; optionName: string; optionValue: string; missingRequired: string[] } {
+  // 수량 옵션이 없는 카테고리는 옵션 미생성 (기존 동작 유지)
+  if (!options.some((o) => QTY_OPTION_IDS.has(o.id))) {
+    return { hasOption: false, optionName: "", optionValue: "", missingRequired: [] };
+  }
 
-  const safeQtyUnit = normalizeQtyUnit(qtyUnit, qtyOption.id);
+  // 출력 순서 정규화: 수량(0) → 단위측정(1) → 서술형(2) → 기타(3)
+  const grp = (o: CoupangRequiredOption) =>
+    QTY_OPTION_IDS.has(o.id) ? 0 : MEASURE_OPTION_UNIT_TYPES[o.id] ? 1 : DESCRIPTIVE_OPTION_IDS.has(o.id) ? 2 : 3;
+  const ordered = [...options].sort((a, b) => grp(a) - grp(b));
 
-  const matchingIds = unitType ? (UNIT_TYPE_TO_OPTION_ID[unitType] ?? []) : [];
-  const matchedUnitOption = (unitVal && matchingIds.length > 0)
-    ? options.find(o => !QUANTITY_OPTION_IDS.has(o.id) && matchingIds.includes(o.id))
-    : undefined;
+  const names: string[] = [];
+  const values: string[] = [];
+  const missingRequired: string[] = [];
 
-  if (!matchedUnitOption) {
-    return {
-      hasOption: true,
-      optionName: `[${qtyOption.name}]`,
-      optionValue: `${qty}${safeQtyUnit}`,
-    };
+  for (const o of ordered) {
+    let value: string | null = null;
+    if (QTY_OPTION_IDS.has(o.id)) {
+      value = `${qty}${normalizeQtyUnit(qtyUnit, o.id)}`;
+    } else if (MEASURE_OPTION_UNIT_TYPES[o.id]) {
+      if (unitVal != null && unitType && MEASURE_OPTION_UNIT_TYPES[o.id].has(unitType)) {
+        value = `${unitVal}${unitType}`;
+      }
+    } else if (DESCRIPTIVE_OPTION_IDS.has(o.id)) {
+      const dv = descriptiveValues[o.name]?.trim();
+      if (dv) value = dv;
+    }
+
+    if (value) {
+      names.push(o.name);
+      values.push(value);
+    } else if (!o.bundle) {
+      missingRequired.push(o.name);
+    }
   }
 
   return {
     hasOption: true,
-    optionName: `[${qtyOption.name}=${matchedUnitOption.name}]`,
-    optionValue: `${qty}${safeQtyUnit}=${unitVal}${unitType}`,
+    optionName: `[${names.join("=")}]`,
+    optionValue: values.join("="),
+    missingRequired,
   };
 }
