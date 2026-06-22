@@ -147,6 +147,11 @@ export function formatCell(
     const computed = getComputedValue(product, key, rateMap, priceChanges);
     if (key === "price_change") {
       const status = product && priceScrapeStatus ? priceScrapeStatus[product.id] : undefined;
+      if (status === "sold_out") {
+        return React.createElement("span", {
+          className: "text-xs font-medium px-1.5 py-0.5 rounded text-amber-400 bg-amber-500/10",
+        }, "품절");
+      }
       if (status === "failed") {
         return React.createElement("span", {
           className: "text-xs font-medium px-1.5 py-0.5 rounded text-red-400 bg-red-500/10",

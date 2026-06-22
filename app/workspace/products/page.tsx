@@ -54,6 +54,7 @@ export default function ProductsPage() {
   const [scrapingPrices, setScrapingPrices] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [expandedExportSection, setExpandedExportSection] = useState<string | null>(null);
+  const [expandedV2Section, setExpandedV2Section] = useState<"import" | "export" | null>(null);
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const [importingCodes, setImportingCodes] = useState(false);
   const [platformCodeModalOpen, setPlatformCodeModalOpen] = useState(false);
@@ -204,16 +205,38 @@ export default function ProductsPage() {
     return insertProducts(rows as ProductInsert[]);
   };
 
+  // 품절 sentinel 마진(20%) / 재입고 복원 기본 마진(7%)
+  const SOLDOUT_MARGIN = 20;
+  const DEFAULT_MARGIN = 7;
+  // 최저가 갱신 결과에 따라 품절 상품은 마진 20%, 재입고(정상가 재수집) 상품은 7%로 자동 세팅
+  const applySoldOutMargins = (inStockIds: string[], soldOutIds: string[]) => {
+    const inStock = new Set(inStockIds);
+    const sold = new Set(soldOutIds);
+    if (inStock.size === 0 && sold.size === 0) return;
+    startBatchUndo();
+    for (const id of sold) {
+      const p = allProducts.find(x => x.id === id);
+      if (p && p.margin_rate !== SOLDOUT_MARGIN) updateProduct(id, { margin_rate: SOLDOUT_MARGIN });
+    }
+    for (const id of inStock) {
+      const p = allProducts.find(x => x.id === id);
+      if (p && p.margin_rate === SOLDOUT_MARGIN) updateProduct(id, { margin_rate: DEFAULT_MARGIN });
+    }
+    endBatchUndo();
+  };
+
   const runScrapeOnce = async (
     ids: string[],
     abortController: AbortController,
   ): Promise<{
     changes: Array<{ id: string; name: string; previous: number; price: number }>;
     botBlocked: Array<{ id: string; name: string }>;
+    soldOut: string[];
     stopped: boolean;
   }> => {
     const changes: Array<{ id: string; name: string; previous: number; price: number }> = [];
     const botBlocked: Array<{ id: string; name: string }> = [];
+    const soldOut: string[] = [];
     let stopped = false;
     try {
       const res = await fetch("/api/products/scrape-prices", {
@@ -227,7 +250,7 @@ export default function ProductsPage() {
       });
       if (!res.ok || !res.body) {
         pushScrapeLog("최저가 수집 실패 (서버 응답 오류)");
-        return { changes, botBlocked, stopped };
+        return { changes, botBlocked, soldOut, stopped };
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -273,10 +296,13 @@ export default function ProductsPage() {
                 botBlocked.push({ id: event.id, name: event.name });
               } else if (event.price > 0) {
                 changes.push({ id: event.id, name: event.name, previous: event.previous_price, price: event.price });
+              } else if (statusKey === "sold_out") {
+                soldOut.push(event.id);
               }
             } else if (event.type === "done") {
               const blockedText = event.bot_blocked > 0 ? `, ${event.bot_blocked}개 봇감지` : "";
-              pushScrapeLog(`완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패${blockedText}`);
+              const soldOutText = event.sold_out > 0 ? `, ${event.sold_out}개 품절` : "";
+              pushScrapeLog(`완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패${soldOutText}${blockedText}`);
             } else if (event.type === "error") {
               pushScrapeLog(`오류: ${event.message}`);
             }
@@ -291,7 +317,7 @@ export default function ProductsPage() {
         pushScrapeLog("최저가 수집 중 오류 발생");
       }
     }
-    return { changes, botBlocked, stopped };
+    return { changes, botBlocked, soldOut, stopped };
   };
 
   const handleScrapePrices = async (overrideIds?: string[]) => {
@@ -317,6 +343,7 @@ export default function ProductsPage() {
     setBotBlockedItems([]);
 
     const allChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
+    const allSoldOut: string[] = [];
     let remainingBlocked: Array<{ id: string; name: string }> = [];
     let stopped = false;
     let retryCount = 0;
@@ -332,6 +359,7 @@ export default function ProductsPage() {
         }
         const result = await runScrapeOnce(currentIds, abortController);
         allChanges.push(...result.changes);
+        allSoldOut.push(...result.soldOut);
         remainingBlocked = result.botBlocked;
         stopped = result.stopped;
         if (stopped || remainingBlocked.length === 0 || retryCount >= MAX_RETRIES) break;
@@ -341,6 +369,7 @@ export default function ProductsPage() {
     } finally {
       scrapeAbortRef.current = null;
       setScrapingPrices(false);
+      applySoldOutMargins(allChanges.map(c => c.id), allSoldOut);
       refetchPriceChanges();
       if (allChanges.length > 0) {
         setScrapeResults([...allChanges]);
@@ -365,11 +394,13 @@ export default function ProductsPage() {
   ): Promise<{
     changes: Array<{ id: string; name: string; previous: number; price: number }>;
     botBlocked: Array<{ id: string; name: string }>;
+    soldOut: string[];
     skipped: number;
     stopped: boolean;
   }> => {
     const changes: Array<{ id: string; name: string; previous: number; price: number }> = [];
     const botBlocked: Array<{ id: string; name: string }> = [];
+    const soldOut: string[] = [];
     let skipped = 0;
     let stopped = false;
     try {
@@ -384,7 +415,7 @@ export default function ProductsPage() {
       });
       if (!res.ok || !res.body) {
         pushScrapeLog("최저가 수집 실패 (서버 응답 오류)");
-        return { changes, botBlocked, skipped, stopped };
+        return { changes, botBlocked, soldOut, skipped, stopped };
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -429,6 +460,8 @@ export default function ProductsPage() {
                 botBlocked.push({ id: event.id, name: event.name });
               } else if (event.price > 0) {
                 changes.push({ id: event.id, name: event.name, previous: event.previous_price, price: event.price });
+              } else if (statusKey === "sold_out") {
+                soldOut.push(event.id);
               }
             } else if (event.type === "init") {
               pushScrapeLog(event.message);
@@ -452,7 +485,7 @@ export default function ProductsPage() {
         pushScrapeLog("최저가 수집 중 오류 발생");
       }
     }
-    return { changes, botBlocked, skipped, stopped };
+    return { changes, botBlocked, soldOut, skipped, stopped };
   };
 
   const handleScrapePricesV2 = async (overrideIds?: string[]) => {
@@ -484,6 +517,7 @@ export default function ProductsPage() {
     setBotBlockedItems([]);
 
     const allChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
+    const allSoldOut: string[] = [];
     let remainingBlocked: Array<{ id: string; name: string }> = [];
     let stopped = false;
     let retryCount = 0;
@@ -499,6 +533,7 @@ export default function ProductsPage() {
         }
         const result = await runScrapeV2Once(currentIds, abortController);
         allChanges.push(...result.changes);
+        allSoldOut.push(...result.soldOut);
         remainingBlocked = result.botBlocked;
         stopped = result.stopped;
         if (stopped || remainingBlocked.length === 0 || retryCount >= MAX_RETRIES) break;
@@ -508,6 +543,7 @@ export default function ProductsPage() {
     } finally {
       scrapeAbortRef.current = null;
       setScrapingPrices(false);
+      applySoldOutMargins(allChanges.map(c => c.id), allSoldOut);
       refetchPriceChanges();
       if (allChanges.length > 0) {
         setScrapeResults([...allChanges]);
@@ -708,6 +744,56 @@ export default function ProductsPage() {
     if (file) handlePlatformCodeFile(file);
   };
 
+  const PRICE_V2_LABELS: Record<"coupang" | "esm" | "smartstore", { label: string; rowLabel: string }> = {
+    coupang: { label: "쿠팡 양식", rowLabel: "옵션 행" },
+    esm: { label: "ESM 상품목록", rowLabel: "옥션·지마켓 행" },
+    smartstore: { label: "스마트스토어 일괄수정 엑셀", rowLabel: "스마트스토어 행" },
+  };
+
+  // 단일 플랫폼 가격수정 v2 export — 다운로드를 수행하고 안내 메시지(없으면 null)를 반환
+  const exportPriceV2Platform = async (platform: "coupang" | "esm" | "smartstore", ids: string[]): Promise<string | null> => {
+    const { label, rowLabel } = PRICE_V2_LABELS[platform];
+    const res = await fetch(`/api/${platform}-price-inventory/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify({ productIds: ids }),
+    });
+    const json = await res.json() as {
+      files?: Array<{ excelBase64: string; filename: string; rowCount: number }>;
+      excelBase64?: string;
+      filename?: string;
+      rowCount?: number;
+      fileCount?: number;
+      skippedProductIds?: string[];
+      error?: string;
+    };
+    if (!res.ok) {
+      return `${label}: ${json.error ?? "내보내기 실패"}`;
+    }
+    const files = json.files && json.files.length > 0
+      ? json.files
+      : (json.excelBase64 && json.filename
+        ? [{ excelBase64: json.excelBase64, filename: json.filename, rowCount: json.rowCount ?? 0 }]
+        : []);
+    if (files.length === 0) {
+      return `${label}: ${json.error ?? "생성된 행이 없습니다 (양식 임포트 필요)"}`;
+    }
+    for (let i = 0; i < files.length; i++) {
+      downloadExcelFromBase64(files[i].excelBase64, files[i].filename);
+      // 브라우저가 연속 다운로드를 차단하지 않도록 약간의 지연
+      if (i < files.length - 1) await new Promise(r => setTimeout(r, 250));
+    }
+    const skipped = json.skippedProductIds?.length ?? 0;
+    const fileCountMsg = files.length > 1 ? ` (${files.length}개 파일로 분할 — 양식 한 개당 500행 제한)` : "";
+    if (skipped > 0) {
+      return `${label}: 총 ${json.rowCount}행 생성${fileCountMsg}, ${skipped}개 상품은 ${rowLabel}이 없어 제외됐습니다. ${label}을 다시 임포트하세요.`;
+    }
+    if (files.length > 1) {
+      return `${label}: 총 ${json.rowCount}행${fileCountMsg}`;
+    }
+    return null;
+  };
+
   const handlePriceUpdateV2Export = async (platform: "coupang" | "esm" | "smartstore") => {
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) {
@@ -717,53 +803,38 @@ export default function ProductsPage() {
     setExportModalOpen(false);
     setPriceUpdateV2Exporting(true);
     try {
-      const res = await fetch(`/api/${platform}-price-inventory/export`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ productIds: ids }),
-      });
-      const json = await res.json() as {
-        files?: Array<{ excelBase64: string; filename: string; rowCount: number }>;
-        excelBase64?: string;
-        filename?: string;
-        rowCount?: number;
-        fileCount?: number;
-        skippedProductIds?: string[];
-        error?: string;
-      };
-      if (!res.ok) {
-        alert(json.error ?? "가격수정 v2 내보내기 실패");
-        return;
-      }
-      const files = json.files && json.files.length > 0
-        ? json.files
-        : (json.excelBase64 && json.filename
-          ? [{ excelBase64: json.excelBase64, filename: json.filename, rowCount: json.rowCount ?? 0 }]
-          : []);
-      if (files.length === 0) {
-        alert(json.error ?? "가격수정 v2 내보내기 실패");
-        return;
-      }
-      for (let i = 0; i < files.length; i++) {
-        downloadExcelFromBase64(files[i].excelBase64, files[i].filename);
-        // 브라우저가 연속 다운로드를 차단하지 않도록 약간의 지연
-        if (i < files.length - 1) await new Promise(r => setTimeout(r, 250));
-      }
-      const skipped = json.skippedProductIds?.length ?? 0;
-      const fileCountMsg = files.length > 1 ? ` (${files.length}개 파일로 분할 — 양식 한 개당 500행 제한)` : "";
-      if (skipped > 0) {
-        const label = platform === "coupang" ? "쿠팡 양식"
-          : platform === "esm" ? "ESM 상품목록"
-          : "스마트스토어 일괄수정 엑셀";
-        const rowLabel = platform === "coupang" ? "옵션 행"
-          : platform === "esm" ? "옥션·지마켓 행"
-          : "스마트스토어 행";
-        alert(`총 ${json.rowCount}행 생성${fileCountMsg}, ${skipped}개 상품은 ${rowLabel}이 없어 제외됐습니다. ${label}을 다시 임포트하세요.`);
-      } else if (files.length > 1) {
-        alert(`총 ${json.rowCount}행${fileCountMsg}`);
-      }
+      const msg = await exportPriceV2Platform(platform, ids);
+      if (msg) alert(msg);
     } catch (e) {
       alert(e instanceof Error ? e.message : "가격수정 v2 내보내기 중 오류");
+    } finally {
+      setPriceUpdateV2Exporting(false);
+    }
+  };
+
+  // 가격수정 v2 — 쿠팡·옥션/지마켓·스마트스토어 한 번에 다운로드. 한 플랫폼이 실패해도 나머지는 진행
+  const handlePriceUpdateV2ExportAll = async () => {
+    const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
+    if (ids.length === 0) {
+      alert("내보낼 상품이 없습니다.");
+      return;
+    }
+    setExportModalOpen(false);
+    setPriceUpdateV2Exporting(true);
+    const platforms: Array<"coupang" | "esm" | "smartstore"> = ["coupang", "esm", "smartstore"];
+    const msgs: string[] = [];
+    try {
+      for (const platform of platforms) {
+        try {
+          const msg = await exportPriceV2Platform(platform, ids);
+          if (msg) msgs.push(msg);
+        } catch (e) {
+          msgs.push(`${PRICE_V2_LABELS[platform].label}: ${e instanceof Error ? e.message : "오류"}`);
+        }
+        // 플랫폼 간 연속 다운로드 충돌 방지
+        await new Promise(r => setTimeout(r, 400));
+      }
+      if (msgs.length) alert(msgs.join("\n"));
     } finally {
       setPriceUpdateV2Exporting(false);
     }
@@ -981,21 +1052,31 @@ export default function ProductsPage() {
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setExportModalOpen(false)} />
                     <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl overflow-hidden max-h-[70vh] overflow-y-auto">
-                      <div className="px-3 py-2 border-b border-[var(--border)]">
-                        <span className="text-xs font-medium text-[var(--text-muted)]">플랫폼 선택</span>
-                      </div>
-                      <button onClick={() => handlePlayAutoExport("smartstore")} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-                        <span className="w-2 h-2 rounded-full bg-green-400" /> 스마트스토어
+                      {/* 플레이오토 등록 (플랫폼 선택) */}
+                      <button
+                        onClick={() => setExpandedExportSection(expandedExportSection === "playauto" ? null : "playauto")}
+                        className="w-full flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-violet-400 hover:bg-[var(--bg-hover)] transition-colors"
+                      >
+                        {expandedExportSection === "playauto" ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                        <FileSpreadsheet className="w-3 h-3" />
+                        플랫폼 선택 (대량등록)
                       </button>
-                      <button onClick={() => handlePlayAutoExport("gmarket_auction")} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-                        <span className="w-2 h-2 rounded-full bg-yellow-400" /> 지마켓·옥션·11번가
-                      </button>
-                      <button onClick={() => handlePlayAutoExport("coupang")} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-                        <span className="w-2 h-2 rounded-full bg-red-400" /> 쿠팡
-                      </button>
-                      <button onClick={handleExportAll} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-violet-400 hover:bg-violet-600/10 transition-colors font-medium border-t border-[var(--border)]">
-                        <FileSpreadsheet className="w-3.5 h-3.5" /> 전체 다운로드
-                      </button>
+                      {expandedExportSection === "playauto" && (
+                        <div>
+                          <button onClick={() => handlePlayAutoExport("smartstore")} className="w-full flex items-center gap-2 px-3 pl-7 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                            <span className="w-2 h-2 rounded-full bg-green-400" /> 스마트스토어
+                          </button>
+                          <button onClick={() => handlePlayAutoExport("gmarket_auction")} className="w-full flex items-center gap-2 px-3 pl-7 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                            <span className="w-2 h-2 rounded-full bg-yellow-400" /> 지마켓·옥션·11번가
+                          </button>
+                          <button onClick={() => handlePlayAutoExport("coupang")} className="w-full flex items-center gap-2 px-3 pl-7 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                            <span className="w-2 h-2 rounded-full bg-red-400" /> 쿠팡
+                          </button>
+                          <button onClick={handleExportAll} className="w-full flex items-center gap-2 px-3 pl-7 py-2.5 text-sm text-violet-400 hover:bg-violet-600/10 transition-colors font-medium border-t border-[var(--border)]">
+                            <FileSpreadsheet className="w-3.5 h-3.5" /> 전체 다운로드
+                          </button>
+                        </div>
+                      )}
                       {/* 가격수정 v1 */}
                       <div className="border-t border-[var(--border)]">
                         <button
@@ -1041,29 +1122,56 @@ export default function ProductsPage() {
                         </button>
                         {expandedExportSection === "v2" && (
                           <div>
-                            <button onClick={() => { setExportModalOpen(false); setCoupangImportModalOpen(true); }} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-                              <Upload className="w-3.5 h-3.5" /> 쿠팡 양식 임포트
+                            {/* 임포트 (양식 가져오기) */}
+                            <button
+                              onClick={() => setExpandedV2Section(expandedV2Section === "import" ? null : "import")}
+                              className="w-full flex items-center gap-1.5 px-3 pl-5 py-2 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+                            >
+                              {expandedV2Section === "import" ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                              <Upload className="w-3 h-3" />
+                              양식 임포트
                             </button>
-                            <button onClick={() => { setExportModalOpen(false); setEsmImportModalOpen(true); }} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-                              <Upload className="w-3.5 h-3.5" /> 옥션·지마켓 상품목록 임포트
+                            {expandedV2Section === "import" && (
+                              <div>
+                                <button onClick={() => { setExportModalOpen(false); setCoupangImportModalOpen(true); }} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                                  <Upload className="w-3.5 h-3.5" /> 쿠팡 양식 임포트
+                                </button>
+                                <button onClick={() => { setExportModalOpen(false); setEsmImportModalOpen(true); }} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                                  <Upload className="w-3.5 h-3.5" /> 옥션·지마켓 상품목록 임포트
+                                </button>
+                                <button onClick={() => { setExportModalOpen(false); setSmartstoreImportModalOpen(true); }} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                                  <Upload className="w-3.5 h-3.5" /> 스마트스토어 일괄수정 임포트
+                                </button>
+                              </div>
+                            )}
+                            {/* 대량수정 (가격수정 엑셀 다운로드) */}
+                            <button
+                              onClick={() => setExpandedV2Section(expandedV2Section === "export" ? null : "export")}
+                              className="w-full flex items-center gap-1.5 px-3 pl-5 py-2 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors border-t border-[var(--border)]"
+                            >
+                              {expandedV2Section === "export" ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                              <FileSpreadsheet className="w-3 h-3" />
+                              대량수정 다운로드
                             </button>
-                            <button onClick={() => { setExportModalOpen(false); setSmartstoreImportModalOpen(true); }} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-                              <Upload className="w-3.5 h-3.5" /> 스마트스토어 일괄수정 임포트
-                            </button>
-                            <div className="border-t border-[var(--border)]">
-                              <button onClick={() => handlePriceUpdateV2Export("coupang")} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
-                                <span className="w-2 h-2 rounded-full bg-red-400" /> {priceUpdateV2Exporting ? "생성 중..." : "쿠팡"}
-                              </button>
-                              <button onClick={() => handlePriceUpdateV2Export("esm")} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
-                                <span className="w-2 h-2 rounded-full bg-yellow-400" /> {priceUpdateV2Exporting ? "생성 중..." : "옥션·지마켓"}
-                              </button>
-                              <button onClick={() => handlePriceUpdateV2Export("smartstore")} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
-                                <span className="w-2 h-2 rounded-full bg-green-400" /> {priceUpdateV2Exporting ? "생성 중..." : "스마트스토어"}
-                              </button>
-                              <button disabled className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-disabled)] opacity-50 cursor-not-allowed" title="추후 지원 예정">
-                                <span className="w-2 h-2 rounded-full bg-red-400/40" /> 11번가 (추후 지원)
-                              </button>
-                            </div>
+                            {expandedV2Section === "export" && (
+                              <div>
+                                <button onClick={() => handlePriceUpdateV2Export("coupang")} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                                  <span className="w-2 h-2 rounded-full bg-red-400" /> {priceUpdateV2Exporting ? "생성 중..." : "쿠팡"}
+                                </button>
+                                <button onClick={() => handlePriceUpdateV2Export("esm")} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                                  <span className="w-2 h-2 rounded-full bg-yellow-400" /> {priceUpdateV2Exporting ? "생성 중..." : "옥션·지마켓"}
+                                </button>
+                                <button onClick={() => handlePriceUpdateV2Export("smartstore")} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+                                  <span className="w-2 h-2 rounded-full bg-green-400" /> {priceUpdateV2Exporting ? "생성 중..." : "스마트스토어"}
+                                </button>
+                                <button disabled className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-[var(--text-disabled)] opacity-50 cursor-not-allowed" title="추후 지원 예정">
+                                  <span className="w-2 h-2 rounded-full bg-red-400/40" /> 11번가 (추후 지원)
+                                </button>
+                                <button onClick={handlePriceUpdateV2ExportAll} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-orange-400 hover:bg-orange-600/10 transition-colors font-medium disabled:opacity-50 border-t border-[var(--border)]">
+                                  <FileSpreadsheet className="w-3.5 h-3.5" /> {priceUpdateV2Exporting ? "생성 중..." : "전체엑셀 다운로드"}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

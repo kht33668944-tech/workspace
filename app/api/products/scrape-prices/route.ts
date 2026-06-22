@@ -112,7 +112,7 @@ async function extractOhousePrice(ctx: BrowserContext, url: string): Promise<Pri
 // ── SSE API ──────────────────────────────────
 type SSEEvent =
   | { type: "progress"; id: string; name: string; price: number; previous_price: number; index: number; total: number; bot_blocked?: boolean; fail_reason?: FailReason }
-  | { type: "done"; updated: number; failed: number; unchanged: number; bot_blocked: number }
+  | { type: "done"; updated: number; failed: number; unchanged: number; bot_blocked: number; sold_out: number }
   | { type: "error"; message: string };
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -184,6 +184,7 @@ export async function POST(request: NextRequest) {
       let failed = 0;
       let unchanged = 0;
       let botBlocked = 0;
+      let soldOut = 0;
       const statusHistoryRows: Array<Record<string, unknown>> = []; // 변동없음·실패 이력 (변동은 apply 단계에서 별도 기록)
 
       await browserPool.acquire();
@@ -252,6 +253,16 @@ export async function POST(request: NextRequest) {
                   source: "scrape",
                 });
               }
+            } else if (r.failReason === "sold_out") {
+              soldOut++;
+              statusHistoryRows.push({
+                product_id: r.id,
+                previous_price: previousPrice,
+                new_price: 0,
+                change_amount: 0,
+                change_rate: 0,
+                source: "soldout",
+              });
             } else {
               failed++;
               if (previousPrice > 0) {
@@ -272,7 +283,7 @@ export async function POST(request: NextRequest) {
               name: r.product_name,
               price: r.price,
               previous_price: previousPrice,
-              index: updated + failed + unchanged + botBlocked,
+              index: updated + failed + unchanged + botBlocked + soldOut,
               total: allTargets.length,
               bot_blocked: r.botBlocked,
               fail_reason: r.failReason,
@@ -287,7 +298,7 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        send({ type: "done", updated, failed, unchanged, bot_blocked: botBlocked });
+        send({ type: "done", updated, failed, unchanged, bot_blocked: botBlocked, sold_out: soldOut });
       } catch (e) {
         send({ type: "error", message: e instanceof Error ? e.message : String(e) });
       } finally {
