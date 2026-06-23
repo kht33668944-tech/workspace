@@ -281,6 +281,11 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
     0
   );
 
+  // 선택됐고 아직 상세페이지가 없는 상품만 일괄 생성 대상 (이미 생성된 건 제외 — 시간·비용 절약)
+  const detailGenTargets = filtered.filter(
+    (p) => selectedIds.has(p.id) && !(p.has_detail_html || p.detail_image_url)
+  );
+
   // 날짜별 그룹화 (최신순)
   const groupedByDate = useMemo(() => {
     const map = new Map<string, Product[]>();
@@ -315,7 +320,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
   };
 
   const handleStartBatchDetail = () => {
-    const selected = filtered.filter((p) => selectedIds.has(p.id));
+    const selected = detailGenTargets;
     if (selected.length === 0) return;
     startBatch(
       selected.map((p) => ({
@@ -505,12 +510,17 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
           <div className="flex items-center gap-2">
             <button
               onClick={handleStartBatchDetail}
-              disabled={batchActive}
+              disabled={batchActive || detailGenTargets.length === 0}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 rounded-lg transition-colors disabled:opacity-50"
             >
               <Play className="w-4 h-4" />
-              {batchActive ? "생성 중..." : `${visibleSelectedCount}개 상세페이지 일괄 생성`}
+              {batchActive ? "생성 중..." : `${detailGenTargets.length}개 상세페이지 일괄 생성`}
             </button>
+            {visibleSelectedCount > detailGenTargets.length && (
+              <span className="text-xs text-[var(--text-muted)]">
+                ({visibleSelectedCount - detailGenTargets.length}개 생성됨 제외)
+              </span>
+            )}
             <button
               onClick={handleDeleteSelected}
               disabled={deleting}
