@@ -37,6 +37,11 @@ const SOURCE_LABELS: Record<string, string> = {
   thumbnail_gen: "썸네일 생성",
   detail_html: "상세페이지 생성",
   category_classify: "카테고리 분류",
+  product_metadata_extract: "상품 메타데이터 추출",
+  smartstore_category_suggest: "스마트스토어 카테고리 제안",
+  unit_price_extract: "단위가격 추출",
+  coupang_options_extract: "쿠팡 옵션 추출",
+  playauto_category_suggest: "플레이오토 카테고리 제안",
   ohouse_purchase: "오늘의집 자동구매",
   unknown: "미분류",
 };

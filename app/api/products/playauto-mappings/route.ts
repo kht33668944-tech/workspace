@@ -66,7 +66,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "카테고리 목록이 없습니다." }, { status: 400 });
   }
 
-  const codes = await suggestPlayautoCategories(categories, PLAYAUTO_SCHEMAS);
+  const codes = await suggestPlayautoCategories(categories, PLAYAUTO_SCHEMAS, { callSource: "playauto_category_suggest", userId: user.id });
   const suggestions = categories.map((cat, i) => ({
     user_category: cat,
     playauto_code: codes[i],

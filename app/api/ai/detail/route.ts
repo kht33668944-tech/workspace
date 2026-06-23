@@ -256,7 +256,7 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
   // 1차 Gemini 검색 + 썸네일 base64 변환을 병렬 실행
   console.log("[detail] Gemini Grounding 검색 시작:", productName);
   const [groundedResult, thumbDataUri] = await Promise.all([
-    groundedSearch(groundingPrompt),
+    groundedSearch(groundingPrompt, { callSource: "detail_html", userId: user.id }),
     thumbnailUrl ? fetchImageAsDataUri(thumbnailUrl) : Promise.resolve(null),
   ]);
 
@@ -264,9 +264,9 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
   specs = filterForbidden(specs, forbiddenWords);
   console.log("[detail] Gemini Grounding 결과:", countFilledFields(specs), "개 필드 (금지어", forbiddenWords.length, "개 적용)");
 
-  // ── 2. 결과 부족 시 2차 검색 (다른 각도로) ─────────────────────────────────
-  if (countFilledFields(specs) < 3) {
-    console.log("[detail] 1차 결과 부족, 2차 검색 시도");
+  // ── 2. 1차에서 아무 정보도 못 찾았을 때만 2차 검색 (비용 절감: 기존 <3 → ===0) ──
+  if (countFilledFields(specs) === 0) {
+    console.log("[detail] 1차 결과 없음, 2차 검색 시도");
     const fallbackPrompt = `"${productName}" 제품의 뒷면 라벨 정보를 검색해주세요.${forbiddenClause}
 
 쿠팡, 네이버 쇼핑, 11번가 등에서 이 제품의 상품정보제공고시(상품정보 테이블)를 찾아주세요.
@@ -294,7 +294,7 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
 - 확인할 수 없는 항목은 빈 문자열
 - 추가 설명 없이 JSON만 출력`;
 
-    const fallbackRaw = parseGroundedSpecs(await groundedSearch(fallbackPrompt) ?? "");
+    const fallbackRaw = parseGroundedSpecs(await groundedSearch(fallbackPrompt, { callSource: "detail_html", userId: user.id }) ?? "");
     const fallbackSpecs = fallbackRaw ? filterForbidden(fallbackRaw, forbiddenWords) : null;
     if (fallbackSpecs) {
       for (const [key, value] of Object.entries(fallbackSpecs)) {

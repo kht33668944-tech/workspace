@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 - 정방형 비율 (1:1)
 - 고해상도, 선명한 이미지`;
 
-  const generated = await generateImageFromPrompt(prompt, referenceBase64, referenceMime);
+  const generated = await generateImageFromPrompt(prompt, referenceBase64, referenceMime, { callSource: "thumbnail_gen", userId: user.id });
   if (!generated) {
     return NextResponse.json(
       { error: "이미지 생성 실패. Gemini 이미지 생성 모델 접근 권한을 확인하세요." },

@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
         let extracted: CoupangOpt[] = [];
         if (missingIdx.length > 0) {
           console.log(`[playauto-export] coupang_options 누락 ${missingIdx.length}개 → Gemini 호출`);
-          extracted = await extractCoupangPurchaseOptions(missingIdx.map((i) => productNames[i]));
+          extracted = await extractCoupangPurchaseOptions(missingIdx.map((i) => productNames[i]), { callSource: "coupang_options_extract", userId: user.id });
           // 3) DB에 캐시 저장 (응답 지연 최소화: await 안 함)
           Promise.all(missingIdx.map((idx, j) =>
             supabase.from("products")
@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
       }
     } else {
       const result = await Promise.all([
-        extractProductMetadataBatch(productNames),
+        extractProductMetadataBatch(productNames, { callSource: "product_metadata_extract", userId: user.id }),
         availableSsCodes.length > 0
           ? suggestSmartStoreCategoryCodes(
               products.map((p) => ({
@@ -139,14 +139,15 @@ export async function POST(req: NextRequest) {
                 category: (p as Record<string, unknown>).category as string,
                 source_category: (p as Record<string, unknown>).source_category as string,
               })),
-              availableSsCodes
+              availableSsCodes,
+              { callSource: "smartstore_category_suggest", userId: user.id }
             )
           : Promise.resolve(products.map(() => "")),
         platform === "smartstore"
-          ? extractUnitPriceInfo(productNames)
+          ? extractUnitPriceInfo(productNames, { callSource: "unit_price_extract", userId: user.id })
           : Promise.resolve(undefined),
         platform === "coupang"
-          ? extractCoupangPurchaseOptions(productNames)
+          ? extractCoupangPurchaseOptions(productNames, { callSource: "coupang_options_extract", userId: user.id })
           : Promise.resolve(undefined),
       ]);
       metadataList = result[0];

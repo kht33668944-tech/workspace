@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Search, X, Copy, Check, ImageOff, Upload, Trash2, Loader2,
-  Sparkles, FileText, ExternalLink, Play, ChevronDown, ChevronUp,
+  FileText, ExternalLink, Play, ChevronDown, ChevronUp,
   Star, Link2, Code2, Layers, ShieldAlert,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -206,9 +206,7 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
   const { user, session } = useAuth();
   const {
     tasks,
-    setThumbStatus,
     setDetailStatus,
-    setThumbSummary,
     batchItems,
     batchActive,
     batchVisible,
@@ -245,26 +243,6 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
       unregisterOnUpdate();
     };
   }, [onUpdate, registerOnUpdate, unregisterOnUpdate]);
-
-  const handleOptimizeThumbnail = async (product: Product) => {
-    if (!product.image_urls.length) return;
-    setThumbStatus(product.id, "loading");
-    try {
-      const res = await fetch("/api/ai/thumbnail", {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({ productId: product.id, imageUrls: product.image_urls }),
-      });
-      const data = await res.json() as { thumbnailUrl?: string; summary?: string; error?: string };
-      if (!res.ok || data.error) throw new Error(data.error ?? "실패");
-      if (mountedRef.current) onUpdate(product.id, { thumbnail_url: data.thumbnailUrl ?? null }, true);
-      setThumbSummary(product.id, data.summary ?? "완료");
-      setThumbStatus(product.id, "done");
-    } catch (e) {
-      console.error("[image-tab] 썸네일 생성 실패:", e instanceof Error ? e.message : String(e));
-      setThumbStatus(product.id, "error");
-    }
-  };
 
   const handleGenerateDetail = async (product: Product) => {
     setDetailStatus(product.id, "loading");
@@ -687,28 +665,6 @@ export default function ImageTab({ products, onUpdate, onDelete }: Props) {
 
                               {hasImages && (
                                 <>
-                                  {/* 최적 썸네일 */}
-                                  <button
-                                    onClick={() => handleOptimizeThumbnail(product)}
-                                    disabled={thumbTask?.thumbStatus === "loading"}
-                                    title={
-                                      thumbTask?.thumbStatus === "loading" ? "분석 중..." :
-                                      thumbTask?.thumbStatus === "done" ? `완료: ${thumbTask.thumbSummary}` :
-                                      "최적 썸네일 선택"
-                                    }
-                                    className={`p-1.5 rounded transition-colors disabled:opacity-50 ${
-                                      thumbTask?.thumbStatus === "done"
-                                        ? "text-emerald-400"
-                                        : thumbTask?.thumbStatus === "error"
-                                        ? "text-red-400"
-                                        : "text-[var(--text-muted)] hover:text-emerald-400 hover:bg-emerald-400/10"
-                                    }`}
-                                  >
-                                    {thumbTask?.thumbStatus === "loading"
-                                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      : <Sparkles className="w-3.5 h-3.5" />}
-                                  </button>
-
                                   {/* 상세페이지 생성 */}
                                   <button
                                     onClick={() => handleGenerateDetail(product)}

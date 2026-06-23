@@ -208,7 +208,8 @@ export async function classifyCategory(
   productName: string,
   sourceCategory: string,
   categories: string[],
-  fallbackCategory = "가공식품"
+  fallbackCategory = "가공식품",
+  options?: GeminiCallOptions
 ): Promise<string> {
   if (categories.length === 0) return fallbackCategory;
 
@@ -224,7 +225,8 @@ ${categories.map((c, i) => `${i + 1}. ${c}`).join("\n")}
 규칙:
 - 반드시 위 목록에 있는 카테고리 이름 그대로만 출력
 - 적합한 것이 없으면 "${fallbackCategory}" 출력
-- 다른 설명 없이 카테고리 이름만 한 줄 출력`
+- 다른 설명 없이 카테고리 이름만 한 줄 출력`,
+    options
   );
 
   const matched = result?.trim() ?? "";
@@ -361,7 +363,8 @@ export async function groundedSearch(
  */
 export async function suggestPlayautoCategories(
   userCategories: string[],
-  playautoSchemas: Array<{ code: string; name: string }>
+  playautoSchemas: Array<{ code: string; name: string }>,
+  options?: GeminiCallOptions
 ): Promise<string[]> {
   const fallback = userCategories.map(() => "35");
   if (!process.env.GEMINI_API_KEY || userCategories.length === 0) return fallback;
@@ -384,7 +387,8 @@ ${categoryList}
 - 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
 ["코드1", "코드2", ...]
 
-카테고리 개수: ${userCategories.length}개, 배열 항목도 반드시 ${userCategories.length}개`
+카테고리 개수: ${userCategories.length}개, 배열 항목도 반드시 ${userCategories.length}개`,
+    options
   );
 
   if (!result) return fallback;
@@ -412,7 +416,8 @@ ${categoryList}
  */
 export async function suggestSmartStoreCategoryCodes(
   products: Array<{ product_name: string; category: string; source_category: string }>,
-  availableCodes: Array<{ category_code: string; category_type: string; category_name: string }>
+  availableCodes: Array<{ category_code: string; category_type: string; category_name: string }>,
+  options?: GeminiCallOptions
 ): Promise<string[]> {
   const fallback = products.map(() => "");
   if (!process.env.GEMINI_API_KEY || products.length === 0 || availableCodes.length === 0) return fallback;
@@ -440,7 +445,8 @@ ${productList}
 - 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
 ["코드1", "코드2", ...]
 
-상품 개수: ${products.length}개, 배열 항목도 반드시 ${products.length}개`
+상품 개수: ${products.length}개, 배열 항목도 반드시 ${products.length}개`,
+    options
   );
 
   if (!result) return fallback;
@@ -466,7 +472,8 @@ ${productList}
  * 한 번의 Gemini 호출로 N개 상품 메타데이터 추출
  */
 export async function extractProductMetadataBatch(
-  productNames: string[]
+  productNames: string[],
+  options?: GeminiCallOptions
 ): Promise<Array<{ model: string; brand: string; manufacturer: string }>> {
   const empty = productNames.map(() => ({ model: "", brand: "", manufacturer: "" }));
   if (!process.env.GEMINI_API_KEY || productNames.length === 0) return empty;
@@ -490,7 +497,8 @@ ${numbered}
   {"model": "모델명2", "brand": "브랜드2", "manufacturer": "제조사2"}
 ]
 
-상품 개수: ${productNames.length}개, JSON 배열 항목도 반드시 ${productNames.length}개`
+상품 개수: ${productNames.length}개, JSON 배열 항목도 반드시 ${productNames.length}개`,
+    options
   );
 
   if (!result) return empty;
@@ -523,7 +531,8 @@ ${numbered}
  * - display=N: displayAmount=0, displayUnit=0, totalAmount=0
  */
 export async function extractUnitPriceInfo(
-  productNames: string[]
+  productNames: string[],
+  options?: GeminiCallOptions
 ): Promise<Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }>> {
   const fallback = productNames.map(() => ({ display: "N", displayAmount: 0, displayUnit: 0 as string | number, totalAmount: 0 }));
   if (!process.env.GEMINI_API_KEY || productNames.length === 0) return fallback;
@@ -559,7 +568,8 @@ display가 "N"인 경우: displayAmount:0, displayUnit:0, totalAmount:0
   {"display": "N", "displayAmount": 0, "displayUnit": 0, "totalAmount": 0}
 ]
 
-상품 개수: ${productNames.length}개, JSON 배열 항목도 반드시 ${productNames.length}개`
+상품 개수: ${productNames.length}개, JSON 배열 항목도 반드시 ${productNames.length}개`,
+    options
   );
 
   if (!result) return fallback;
@@ -602,7 +612,7 @@ display가 "N"인 경우: displayAmount:0, displayUnit:0, totalAmount:0
  * 상품명 정규화 전용 헬퍼
  * 구조: 브랜드 + 제품명 + 옵션(용량/무게) + 수량
  */
-export async function normalizeProductName(rawName: string): Promise<string | null> {
+export async function normalizeProductName(rawName: string, options?: GeminiCallOptions): Promise<string | null> {
   const prompt = `지마켓에서 크롤링한 상품명을 아래 규칙으로 정리해주세요.
 
 규칙:
@@ -624,7 +634,7 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
 
 원본: ${rawName}`;
 
-  const result = await generateText(prompt);
+  const result = await generateText(prompt, options);
   if (!result) return null;
 
   // LLM이 설명까지 포함해서 응답하는 경우 정리된 상품명만 추출
@@ -664,7 +674,8 @@ export async function normalizeProductName(rawName: string): Promise<string | nu
  * 3단계: 코드가 정확한 옵션 형식 자동 생성
  */
 export async function extractCoupangPurchaseOptions(
-  productNames: string[]
+  productNames: string[],
+  options?: GeminiCallOptions
 ): Promise<Array<{ hasOption: boolean; optionName: string; optionValue: string; missingRequired: string[] }>> {
   const fallback = productNames.map(() => ({ hasOption: false, optionName: "", optionValue: "", missingRequired: [] as string[] }));
   if (!process.env.GEMINI_API_KEY || productNames.length === 0) return fallback;
@@ -720,7 +731,8 @@ ${numbered}
 - "생리대 중형 16P 8개" → {"categoryCode":해당코드,"quantity":8,"quantityUnit":"개","unitValue":16,"unitType":"매"} (절대 128 아님)
 - "무선이어폰" → {"categoryCode":해당코드,"quantity":1,"quantityUnit":"개","unitValue":null,"unitType":null}
 
-반드시 JSON 배열로만 출력 (설명 없이). 상품 개수: ${batch.length}개`
+반드시 JSON 배열로만 출력 (설명 없이). 상품 개수: ${batch.length}개`,
+      options
     );
 
     if (!result) {
@@ -756,7 +768,7 @@ ${numbered}
     if (!cat) return [];
     return cat.options.filter((o) => DESCRIPTIVE_OPTION_IDS.has(o.id)).map((o) => o.name);
   });
-  const descValues = await extractDescriptiveOptionValues(productNames, descNeeds);
+  const descValues = await extractDescriptiveOptionValues(productNames, descNeeds, options);
 
   // 3단계: 카테고리 데이터 기반 옵션 형식 생성 (필수옵션 전체 채움)
   return productNames.map((_, i) => {
@@ -798,7 +810,8 @@ function parsePackCountFromName(name: string): number | null {
  */
 async function extractDescriptiveOptionValues(
   productNames: string[],
-  optionNamesPerProduct: string[][]
+  optionNamesPerProduct: string[][],
+  options?: GeminiCallOptions
 ): Promise<Array<Record<string, string>>> {
   const result: Array<Record<string, string>> = productNames.map(() => ({}));
   if (!process.env.GEMINI_API_KEY) return result;
@@ -828,7 +841,8 @@ async function extractDescriptiveOptionValues(
 ${listed}
 
 각 상품을 {"values":{"항목명":"값", ...}} 형태로, 추출항목 전체에 대해 키를 채워 JSON 배열로만 출력 (설명 없이).
-상품 개수: ${batch.length}개`
+상품 개수: ${batch.length}개`,
+      options
     );
     if (!res) {
       console.warn(`[extractDescriptiveOptionValues] 배치 ${batchIdx + 1}/${batches.length} Gemini 응답 없음`);
