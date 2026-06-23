@@ -871,12 +871,12 @@ ${listed}
 /**
  * 쿠팡 수량 단위 화이트리스트 (옵션별 허용 단위)
  * - 수량: 개, 박스, 세트
- * - 총 수량: 개, 박스, 세트, 팩
- * 외 단위(캔, 봉, 병 등)는 "개"로 강제 변환
+ * - 총 수량: 개, 박스, 세트 (플레이오토/쿠팡이 "팩"은 거부 → "개"로 변환)
+ * 외 단위(캔, 봉, 병, 팩 등)는 "개"로 강제 변환
  */
 const ALLOWED_QTY_UNITS: Record<number, Set<string>> = {
   [COUPANG_OPTION_IDS.QUANTITY]: new Set(["개", "박스", "세트"]),
-  [COUPANG_OPTION_IDS.TOTAL_QUANTITY]: new Set(["개", "박스", "세트", "팩"]),
+  [COUPANG_OPTION_IDS.TOTAL_QUANTITY]: new Set(["개", "박스", "세트"]),
 };
 
 function normalizeQtyUnit(qtyUnit: string, qtyOptionId: number): string {

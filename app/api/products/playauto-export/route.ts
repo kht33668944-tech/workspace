@@ -103,9 +103,15 @@ export async function POST(req: NextRequest) {
 
       if (platform === "coupang") {
         // 1) DB 캐시 읽기
+        // 과거 캐시에 총수량 단위 "팩"이 박혀있을 수 있음 → 플레이오토/쿠팡이 거부하므로 "개"로 교정
+        const fixStaleQtyUnit = (o: CoupangOpt): CoupangOpt => {
+          if (!o.optionValue || !o.optionValue.includes("팩")) return o;
+          const optionValue = o.optionValue.replace(/(\d)\s*팩(?=$|=)/g, "$1개");
+          return optionValue === o.optionValue ? o : { ...o, optionValue };
+        };
         const cached: (CoupangOpt | null)[] = products.map((p) => {
           const v = (p as Record<string, unknown>).coupang_options;
-          return (v && typeof v === "object") ? (v as CoupangOpt) : null;
+          return (v && typeof v === "object") ? fixStaleQtyUnit(v as CoupangOpt) : null;
         });
         // 2) 누락분만 Gemini 호출
         const missingIdx: number[] = [];
