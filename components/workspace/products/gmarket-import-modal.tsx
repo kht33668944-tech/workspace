@@ -1,12 +1,16 @@
 "use client";
 
 import { useState, useRef, useCallback, useMemo } from "react";
-import { X, Loader2, CheckCircle, AlertCircle, ExternalLink, Plus, RefreshCw, ArrowLeft } from "lucide-react";
+import { X, Loader2, CheckCircle, AlertCircle, ExternalLink, Plus, RefreshCw, ArrowLeft, CheckSquare, Square } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import type { GmarketProductResult, GmarketScrapeSSEEvent } from "@/app/api/scrape/gmarket-product/route";
+import type { GmarketListItem } from "@/app/api/scrape/gmarket-list/route";
 import type { ProductInsert } from "@/types/database";
 
 const MAX_URLS = 20;
+// 상세 재수집 1회 요청당 처리 개수 (서버 5분 제한 내 안전).
+// 순차+인간형 지연으로 상품당 시간이 늘어 12개로 축소. 초과 선택 시 자동으로 여러 번에 나눠 처리.
+const SCRAPE_CHUNK = 12;
 
 interface Props {
   onClose: () => void;
@@ -17,18 +21,28 @@ interface Props {
   embedded?: boolean;
 }
 
-type Stage = "input" | "loading" | "preview";
+type Stage = "input" | "select" | "loading" | "preview";
 
 interface PreviewItem extends GmarketProductResult {
   editedName: string;
   selectedCategory: string;
 }
 
+interface SelectItem extends GmarketListItem {
+  selected: boolean;
+}
+
+/** 목록(카테고리/검색) URL 판별 — 개별 상품 URL과 구분 */
+const isListUrl = (u: string) =>
+  /\/n\/(list|search)/.test(u) || /[?&](category|keyword)=/.test(u);
+
 export default function GmarketImportModal({ onClose, onImport, categories, existingUrls, embedded = false }: Props) {
   const { session } = useAuth();
   const [stage, setStage] = useState<Stage>("input");
   const [urlFields, setUrlFields] = useState<string[]>([""]);
   const [items, setItems] = useState<PreviewItem[]>([]);
+  const [listItems, setListItems] = useState<SelectItem[]>([]);
+  const [listLoading, setListLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState<string>("");
   const [loadingTotal, setLoadingTotal] = useState<number>(0);
   const [saving, setSaving] = useState(false);
@@ -40,6 +54,15 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
   const validUrls = useMemo(
     () => [...new Set(urlFields.map((u) => u.trim()).filter((u) => u.includes("gmarket.co.kr")))],
     [urlFields]
+  );
+  // 입력칸 중 목록(카테고리/검색) URL — 있으면 "목록 불러오기" 모드
+  const listUrl = useMemo(
+    () => validUrls.find((u) => isListUrl(u)) ?? null,
+    [validUrls]
+  );
+  const selectedCount = useMemo(
+    () => listItems.filter((i) => i.selected).length,
+    [listItems]
   );
   const invalidCount = useMemo(
     () => urlFields.filter((u) => u.trim() && !u.includes("gmarket.co.kr")).length,
@@ -187,65 +210,150 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
   // 스크래핑 시작 (ref로 handleKeyDown에서 참조)
   const startScrapeRef = useRef<(() => void) | null>(null);
 
-  const handleStart = useCallback(async () => {
-    if (validUrls.length === 0) {
+  const handleStart = useCallback(async (urlsOverride?: string[]) => {
+    const urls = urlsOverride ?? validUrls;
+    if (urls.length === 0) {
       setError("유효한 지마켓 URL이 없습니다.\n(예: https://www.gmarket.co.kr/Item/...)");
       return;
     }
     setError(null);
     setItems([]);
     setStage("loading");
-    setLoadingTotal(validUrls.length);
-    setLoadingStatus(`0 / ${validUrls.length} 완료`);
+    setLoadingTotal(urls.length);
+    setLoadingStatus(`0 / ${urls.length} 완료`);
 
     const controller = new AbortController();
     abortRef.current = controller;
 
+    // 30개 초과 선택 시 SCRAPE_CHUNK 단위로 나눠 순차 처리 (각 청크는 별도 요청 → 5분 제한 회피)
+    const chunks: string[][] = [];
+    for (let i = 0; i < urls.length; i += SCRAPE_CHUNK) {
+      chunks.push(urls.slice(i, i + SCRAPE_CHUNK));
+    }
+
+    let done = 0;
+    let lastError: string | null = null;
+
     try {
-      await consumeSSEStream(
-        validUrls,
-        controller.signal,
-        (result, index, total) => {
-          setItems((prev) => [
-            ...prev,
-            {
-              ...result,
-              editedName: result.product_name,
-              selectedCategory: result.matched_category ?? "",
-            },
-          ]);
-          setLoadingStatus(`${index + 1} / ${total} 완료`);
-        },
-        () => setStage("preview"),
-        (msg) => {
-          setError(msg);
-          setStage("input");
-        }
-      );
+      for (let c = 0; c < chunks.length; c++) {
+        const chunkLabel = chunks.length > 1 ? ` (${c + 1}/${chunks.length}묶음)` : "";
+        await consumeSSEStream(
+          chunks[c],
+          controller.signal,
+          (result) => {
+            setItems((prev) => [
+              ...prev,
+              {
+                ...result,
+                editedName: result.product_name,
+                selectedCategory: result.matched_category ?? "",
+              },
+            ]);
+            done += 1;
+            setLoadingStatus(`${done} / ${urls.length} 완료${chunkLabel}`);
+          },
+          () => {}, // 청크 완료 — 마지막 청크 후 한 번에 preview로 전환
+          (msg) => {
+            lastError = msg; // 청크 내 서버 오류 기록 후 다음 청크 계속
+          }
+        );
+      }
+      // 일부라도 수집됐으면 preview로, 전혀 못 가져왔으면 input으로 되돌림
+      if (done > 0) {
+        if (lastError) setError(lastError);
+        setStage("preview");
+      } else {
+        setError(lastError ?? "상품을 가져오지 못했습니다.");
+        setStage("input");
+      }
     } catch (e) {
       if ((e as Error).name === "AbortError") {
         onClose();
         return;
       }
       setError(e instanceof Error ? e.message : "스크래핑 실패");
-      setStage("input");
+      // 이미 가져온 항목이 있으면 보존
+      setStage(done > 0 ? "preview" : "input");
     }
   }, [validUrls, consumeSSEStream, onClose]);
 
-  // handleStart를 ref에 등록 (handleKeyDown에서 stale closure 없이 참조)
-  startScrapeRef.current = handleStart;
+  // 목록 URL 스크랩 → select 단계로
+  const handleLoadList = useCallback(async () => {
+    if (!listUrl) return;
+    setError(null);
+    setListLoading(true);
+    try {
+      const res = await fetch("/api/scrape/gmarket-list", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({ url: listUrl }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { items?: GmarketListItem[]; error?: string };
+      if (!res.ok) throw new Error(data.error || `서버 오류 (${res.status})`);
+
+      const fetched = data.items ?? [];
+      if (fetched.length === 0) {
+        setError("목록에서 상품을 찾지 못했습니다. URL을 확인하세요.");
+        return;
+      }
+      // 이미 등록된 상품은 기본 선택 해제
+      setListItems(
+        fetched.map((it) => ({ ...it, selected: !existingUrls?.has(it.url) }))
+      );
+      setStage("select");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "목록 불러오기 실패");
+    } finally {
+      setListLoading(false);
+    }
+  }, [listUrl, session?.access_token, existingUrls]);
+
+  // 선택 단계 → 선택된 상품 상세 재수집 시작
+  const handleSelectStart = useCallback(() => {
+    const urls = listItems.filter((i) => i.selected).map((i) => i.url);
+    if (urls.length === 0) {
+      setError("선택된 상품이 없습니다.");
+      return;
+    }
+    handleStart(urls);
+  }, [listItems, handleStart]);
+
+  // 시작 버튼 / Ctrl+Enter 주 동작: 목록 URL이면 목록 불러오기, 아니면 상세 스크랩
+  const handlePrimaryAction = useCallback(() => {
+    if (listUrl) handleLoadList();
+    else handleStart();
+  }, [listUrl, handleLoadList, handleStart]);
+
+  // handlePrimaryAction을 ref에 등록 (handleKeyDown에서 stale closure 없이 참조)
+  startScrapeRef.current = handlePrimaryAction;
 
   const handleCancel = () => {
     abortRef.current?.abort();
     onClose();
   };
 
-  // 뒤로가기: preview → input (urlFields 유지, items 초기화)
+  // 뒤로가기: preview/select → input (urlFields 유지, items 초기화)
   const handleBack = () => {
     setItems([]);
+    setListItems([]);
     setError(null);
     setStage("input");
   };
+
+  // 선택 토글 헬퍼
+  const toggleSelect = useCallback((goodscode: string) => {
+    setListItems((prev) =>
+      prev.map((i) => (i.goodscode === goodscode ? { ...i, selected: !i.selected } : i))
+    );
+  }, []);
+  const toggleSelectAll = useCallback((on: boolean) => {
+    setListItems((prev) =>
+      prev.map((i) => ({ ...i, selected: on && !existingUrls?.has(i.url) }))
+    );
+  }, [existingUrls]);
 
   // 개별 항목 재시도
   const handleRetryItem = useCallback(async (idx: number) => {
@@ -366,7 +474,8 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
               )}
             </div>
             <p className="text-xs text-[var(--text-muted)] mt-0.5">
-              {stage === "input" && "URL을 하나씩 입력하거나 여러 개를 한 번에 붙여넣으세요"}
+              {stage === "input" && (listUrl ? "목록 URL이 감지되었습니다 — 불러온 뒤 원하는 상품만 선택하세요" : "URL을 하나씩 입력하거나 여러 개를 한 번에 붙여넣으세요")}
+              {stage === "select" && `상품 ${listItems.length}개 · 선택 ${selectedCount}개`}
               {stage === "loading" && loadingStatus}
               {stage === "preview" && `성공 ${successCount}개${dupDbCount > 0 ? ` / 중복 ${dupDbCount}개 제외` : ""}${failCount > 0 ? ` / 실패 ${failCount}개` : ""}`}
             </p>
@@ -467,6 +576,83 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
               {error && (
                 <p className="text-xs text-red-400 whitespace-pre-wrap pt-1">{error}</p>
               )}
+            </div>
+          )}
+
+          {/* ── SELECT 단계 (목록에서 상품 선택) ── */}
+          {stage === "select" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => toggleSelectAll(true)}
+                    className="text-blue-400 hover:text-blue-300 transition-colors"
+                  >
+                    전체 선택
+                  </button>
+                  <span className="text-[var(--text-disabled)]">·</span>
+                  <button
+                    onClick={() => toggleSelectAll(false)}
+                    className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                  >
+                    전체 해제
+                  </button>
+                </div>
+                <span className="text-[var(--text-muted)]">
+                  선택 {selectedCount}개
+                  {selectedCount > SCRAPE_CHUNK && (
+                    <span className="text-amber-400">
+                      {" "}· {Math.ceil(selectedCount / SCRAPE_CHUNK)}묶음으로 나눠 처리
+                    </span>
+                  )}
+                </span>
+              </div>
+
+              {error && <p className="text-xs text-red-400 whitespace-pre-wrap">{error}</p>}
+
+              <div className="grid grid-cols-2 gap-2">
+                {listItems.map((item) => {
+                  const isDup = existingUrls?.has(item.url) ?? false;
+                  return (
+                    <button
+                      key={item.goodscode}
+                      onClick={() => !isDup && toggleSelect(item.goodscode)}
+                      disabled={isDup}
+                      className={`text-left rounded-xl border p-2.5 flex gap-2.5 transition-colors ${
+                        isDup
+                          ? "border-[var(--border)] bg-[var(--bg-main)] opacity-50 cursor-not-allowed"
+                          : item.selected
+                          ? "border-blue-500/60 bg-blue-500/5"
+                          : "border-[var(--border)] bg-[var(--bg-main)] hover:border-blue-400/40"
+                      }`}
+                    >
+                      <div className="w-12 h-12 rounded-lg overflow-hidden bg-[var(--bg-card)] shrink-0 border border-[var(--border)]">
+                        {item.thumbnail ? (
+                          <img src={item.thumbnail} alt="" className="w-full h-full object-cover" loading="lazy" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-[var(--text-disabled)] text-xs">없음</div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-[var(--text-primary)] line-clamp-2">{item.name}</p>
+                        <p className="text-xs text-green-400 mt-1">
+                          {item.price > 0 ? `${item.price.toLocaleString()}원` : "가격 미확인"}
+                        </p>
+                        {isDup && <span className="text-[10px] text-amber-400">등록됨</span>}
+                      </div>
+                      {!isDup && (
+                        <span className="shrink-0 self-start">
+                          {item.selected ? (
+                            <CheckSquare className="w-4 h-4 text-blue-400" />
+                          ) : (
+                            <Square className="w-4 h-4 text-[var(--text-disabled)]" />
+                          )}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -678,7 +864,7 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
         <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-[var(--border)] shrink-0">
           {/* 왼쪽 영역 */}
           <div>
-            {stage === "preview" && (
+            {(stage === "preview" || stage === "select") && (
               <button
                 onClick={handleBack}
                 disabled={isRetrying}
@@ -702,14 +888,37 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
                 </button>
                 <div className="flex flex-col items-end gap-0.5">
                   <button
-                    onClick={handleStart}
-                    disabled={validUrls.length === 0}
-                    className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                    onClick={handlePrimaryAction}
+                    disabled={validUrls.length === 0 || listLoading}
+                    className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2"
                   >
-                    스크래핑 시작 ({validUrls.length}개)
+                    {listLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {listUrl
+                      ? listLoading
+                        ? "목록 불러오는 중..."
+                        : "목록 불러오기"
+                      : `스크래핑 시작 (${validUrls.length}개)`}
                   </button>
                   <span className="text-[10px] text-[var(--text-disabled)]">Ctrl+Enter로 시작</span>
                 </div>
+              </>
+            )}
+
+            {stage === "select" && (
+              <>
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  닫기
+                </button>
+                <button
+                  onClick={handleSelectStart}
+                  disabled={selectedCount === 0}
+                  className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                >
+                  선택 상품 가져오기 ({selectedCount}개)
+                </button>
               </>
             )}
 

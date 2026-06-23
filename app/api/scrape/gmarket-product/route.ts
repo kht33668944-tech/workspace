@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { BrowserContext, Cookie } from "playwright";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { BrowserContext, Page } from "playwright";
 import { normalizeProductName as llmNormalizeProductName, classifyCategory } from "@/lib/gemini";
-import { launchBrowser, createGmarketContext } from "@/lib/scrapers/browser";
+import { launchPatchedBrowser, createPatchedGmarketContext } from "@/lib/scrapers/browser";
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
-import { decrypt } from "@/lib/crypto";
-import { loadSession, saveSession } from "@/lib/scrapers/session-manager";
+import { ensureLogin } from "@/lib/scrapers/gmarket-session";
 
 export const maxDuration = 300;
 
@@ -30,153 +28,6 @@ export type GmarketScrapeSSEEvent =
   | { type: "item_done"; result: GmarketProductResult; index: number; total: number }
   | { type: "done" }
   | { type: "error"; message: string };
-
-// ── G마켓 로그인 세션 캐시 (모듈 레벨 — 서버 프로세스 재시작 전까지 유지) ──────
-let gmarketCookieCache: Cookie[] | null = null;
-let gmarketCookieCachedAt = 0;
-const COOKIE_TTL_MS = 4 * 60 * 60 * 1000; // 4시간
-
-/** purchase_credentials 테이블에서 G마켓 계정 정보 조회 */
-async function getGmarketCredential(): Promise<{ id: string; pw: string } | null> {
-  try {
-    const serviceClient = getServiceSupabaseClient();
-    const { data } = await serviceClient
-      .from("purchase_credentials")
-      .select("login_id, login_pw_encrypted")
-      .eq("platform", "gmarket")
-      .limit(1)
-      .single();
-
-    if (!data?.login_id || !data.login_pw_encrypted) return null;
-    const pw = decrypt(data.login_pw_encrypted);
-    return { id: data.login_id, pw };
-  } catch (e) {
-    console.warn("[gmarket-login] 계정 조회 실패:", e instanceof Error ? e.message : String(e));
-    return null;
-  }
-}
-
-/**
- * G마켓 로그인 수행.
- * gmarket-purchase.ts와 동일한 URL/selector 사용.
- */
-async function loginToGmarket(context: BrowserContext): Promise<boolean> {
-  const cred = await getGmarketCredential();
-  if (!cred) {
-    console.warn("[gmarket-login] 구매처 계정관리에 지마켓 계정이 없습니다 — 로그인 건너뜀");
-    return false;
-  }
-
-  const page = await context.newPage();
-  try {
-    await page.goto("https://signinssl.gmarket.co.kr/login/login", {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
-    });
-    await page.waitForTimeout(1500 + Math.random() * 500);
-
-    // 아이디 / 비밀번호 입력 (gmarket-purchase.ts와 동일 selector)
-    const loginInput = page.getByPlaceholder("아이디");
-    await loginInput.waitFor({ state: "visible", timeout: 30000 });
-    await loginInput.fill(cred.id);
-    await page.locator("#typeMemberInputPassword").fill(cred.pw);
-
-    // 로그인 버튼 클릭 후 URL 변경 대기
-    await Promise.all([
-      page
-        .waitForURL((url) => !url.toString().includes("login/login"), { timeout: 30000 })
-        .catch(() => null),
-      page.getByRole("button", { name: "로그인", exact: false }).first().click(),
-    ]);
-
-    await page.waitForTimeout(1500);
-
-    const finalUrl = page.url();
-    const success = !finalUrl.includes("login/login");
-    console.log(`[gmarket-login] ${success ? "성공" : "실패"} — URL: ${finalUrl}`);
-    return success;
-  } catch (e) {
-    console.error("[gmarket-login] 오류:", e instanceof Error ? e.message : String(e));
-    return false;
-  } finally {
-    await page.close();
-  }
-}
-
-/**
- * G마켓 로그인 세션을 보장.
- * L1: 모듈 메모리 캐시 (4h)
- * L2: Supabase DB 세션 (24h, Railway 재시작 후에도 유효)
- * L3: 재로그인
- */
-/** 실제 로그인 여부 확인 (지마켓 마이페이지 접근 시도) */
-async function verifyLogin(context: BrowserContext): Promise<boolean> {
-  const page = await context.newPage();
-  try {
-    await page.goto("https://www.gmarket.co.kr", { waitUntil: "domcontentloaded", timeout: 15000 });
-    const loggedIn = await page.evaluate(() => {
-      // 로그아웃 버튼이 있으면 로그인 상태
-      return !!document.querySelector(".link__logout, .btn-logout, [class*='logout']");
-    }).catch(() => false);
-    return loggedIn;
-  } catch {
-    return false;
-  } finally {
-    await page.close();
-  }
-}
-
-async function ensureGmarketLogin(
-  context: BrowserContext,
-  supabase: SupabaseClient,
-  loginId: string
-): Promise<void> {
-  console.log(`[gmarket-login] ensureGmarketLogin 시작 (loginId: ${loginId || "없음"})`);
-  const now = Date.now();
-
-  // L1: 모듈 캐시 (프로세스 내, 4시간 유효)
-  if (gmarketCookieCache && now - gmarketCookieCachedAt < COOKIE_TTL_MS) {
-    await context.addCookies(gmarketCookieCache);
-    if (await verifyLogin(context)) {
-      console.log("[gmarket-login] L1 메모리 캐시 복원 ✅");
-      return;
-    }
-    console.warn("[gmarket-login] L1 캐시 만료 → 재로그인 필요");
-    gmarketCookieCache = null;
-  }
-
-  // L2: Supabase DB 세션
-  if (loginId) {
-    const dbCookies = await loadSession(supabase, "gmarket", loginId);
-    if (dbCookies) {
-      await context.addCookies(dbCookies);
-      if (await verifyLogin(context)) {
-        gmarketCookieCache = dbCookies;
-        gmarketCookieCachedAt = now;
-        console.log("[gmarket-login] L2 DB 세션 복원 ✅");
-        return;
-      }
-      console.warn("[gmarket-login] L2 DB 세션 만료 → 재로그인 필요");
-    }
-  }
-
-  // L3: 재로그인
-  console.log("[gmarket-login] L3 재로그인 시도");
-  const ok = await loginToGmarket(context);
-  if (ok && await verifyLogin(context)) {
-    const cookies = await context.cookies();
-    gmarketCookieCache = cookies;
-    gmarketCookieCachedAt = Date.now();
-    console.log(`[gmarket-login] L3 재로그인 완료 ✅ (쿠키 ${cookies.length}개)`);
-    if (loginId) {
-      saveSession(supabase, "gmarket", loginId, cookies).catch((e) =>
-        console.warn("[gmarket-login] DB 세션 저장 실패:", e instanceof Error ? e.message : String(e))
-      );
-    }
-  } else {
-    console.error("[gmarket-login] ❌ 로그인 실패 — 비로그인 상태로 스크래핑 진행");
-  }
-}
 
 /** 지마켓 상품명 정규화: 불필요한 접두사 / 괄호 텍스트 제거 */
 function normalizeProductName(raw: string): string {
@@ -222,6 +73,9 @@ function normalizeProductName(raw: string): string {
 
 /** 지마켓 이미지 URL을 최대 해상도(1000px)로 변환 */
 function toHighResImageUrl(url: string): string {
+  // 추가 이미지(moreimg)의 _NN.jpg는 인덱스이지 해상도가 아니므로 변환 금지(_1000.jpg는 404).
+  // 고해상도는 이미 exlarge_moreimg 경로로 확보됨.
+  if (url.includes("moreimg")) return url;
   if (/\/still\/\d+/.test(url)) {
     return url.replace(/(\/still\/)(\d+)/, "$11000");
   }
@@ -271,6 +125,22 @@ async function uploadImageToStorage(
 }
 
 /**
+ * 봇 확인 인터스티셜("잠시만 기다리십시오")이 사라지고 실제 상품 DOM이 뜰 때까지 대기.
+ * waitForFunction은 챌린지 통과 후 리로드(navigation)되어도 자동 재주입되어 견딘다.
+ * 챌린지는 통과 시 보통 1.5~7초 내 끝나므로 12초면 충분. 그 이상이면 차단으로 간주(빠른 실패).
+ */
+async function waitForRealContent(page: Page): Promise<void> {
+  await page
+    .waitForFunction(
+      () =>
+        !/잠시만 기다리/.test(document.title) &&
+        !!document.querySelector('.box__price, .itemtit, meta[property="og:title"]'),
+      { timeout: 12000 }
+    )
+    .catch(() => {});
+}
+
+/**
  * 단일 지마켓 상품 페이지 스크래핑.
  * context는 외부에서 주입 (로그인된 세션 재사용).
  */
@@ -284,26 +154,30 @@ async function scrapeGmarketProduct(
   const page = await context.newPage();
 
   try {
-    // 이미지·폰트·미디어 차단 → 페이지 로드 속도 개선
-    await page.route("**/*", (route) => {
-      const type = route.request().resourceType();
-      if (["image", "media", "font"].includes(type)) {
-        route.abort();
-      } else {
-        route.continue();
-      }
-    });
-
+    // ⚠️ 리소스 차단(page.route abort) 미사용.
+    // 실브라우저는 모든 리소스를 로드하므로, image/media/font를 abort하면
+    // Cloudflare가 비정상 요청 지문으로 감지해 봇 챌린지를 띄운다(구매자동화는 차단 안 함).
+    // 이미지 URL은 HTML 텍스트 정규식으로 추출하므로 차단 불필요.
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // 판매가 요소 대기 (서버렌더링이므로 빠르게 잡힘)
-    await page.waitForSelector(".box__price strong.price_real", {
-      timeout: 5000,
-    }).catch(() => {});
+    // 인간형 지연: 페이지 진입 후 바로 조작하지 않고 잠시 대기 (구매자동화 패턴)
+    await page.waitForTimeout(1500 + Math.floor(Math.random() * 2000));
+
+    // 봇 확인 인터스티셜 리로드까지 견디며 실제 상품 DOM 대기
+    await waitForRealContent(page);
+
+    // 대기 후에도 여전히 봇 확인 페이지면 차단된 것 → 상위에서 컨텍스트 갱신 후 재시도
+    const pageTitle = await page.title().catch(() => "");
+    if (/잠시만 기다리|Just a moment/.test(pageTitle)) {
+      await page.close().catch(() => {});
+      return {
+        url, product_name: "", price: 0, category: "", matched_category: "",
+        thumbnail_url: null, image_urls: [], error: "bot_blocked",
+      };
+    }
 
     // ── DOM 데이터 한 번에 추출 (evaluate 1회) ─────────
-    const { rawName, category, rawPrice, rawImageUrls } = await page.evaluate(
-      (): { rawName: string; category: string; rawPrice: number; rawImageUrls: string[] } => {
+    const extractDom = (): { rawName: string; category: string; rawPrice: number; rawImageUrls: string[] } => {
         // 상품명
         const ogTitle = document.querySelector<HTMLMetaElement>(
           'meta[property="og:title"]'
@@ -356,26 +230,47 @@ async function scrapeGmarketProduct(
           }
         }
 
-        // 이미지 URL 수집 (실제 로딩은 route로 막았으므로 src 속성만 읽음)
-        const urls = new Set<string>();
-        const ogImage = document.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content;
-        if (ogImage) urls.add(ogImage);
-        for (const sel of [
-          ".gallery img", ".item-photo img", ".itemphoto img",
-          '[class*="gallery"] img', '[class*="photo"] img',
-          '[class*="slide"] img', ".swiper-slide img",
-          ".thumb-list img", ".thumbnail-list img", '[class*="thumb"] img',
-        ]) {
-          document.querySelectorAll<HTMLImageElement>(sel).forEach((img) => {
-            const src = img.dataset.src || img.dataset.lazySrc || img.src;
-            if (src && src.startsWith("http") && !src.includes("icon") && !src.includes("logo") && !src.includes("btn") && !src.includes("blank")) {
-              urls.add(src);
-            }
-          });
+        // 이미지 URL 수집.
+        // 메인 대표 이미지(og:image / still)는 프로모션 배지가 이미지에 합성돼 있어 제외.
+        // 추가 이미지(moreimg, _NN.jpg)만 수집 — 배지 없는 깨끗한 상품컷.
+        // ⚠️ 갤러리 썸네일 <img>는 이미지 차단 시 src가 안 채워지므로 DOM 대신
+        //    HTML 텍스트에서 정규식으로 추출 (JSON 이스케이프 \/ 도 복원).
+        // URL 예: //gdimg1.gmarket.co.kr/goods_image2/shop_moreimg/462/802/{code}/{code}_00.jpg?ver=...
+        // 변형(shop/middle/small/large/exlarge)은 CDN이 on-demand 생성 → 최고해상도 exlarge로 통일.
+        const html = document.documentElement.outerHTML.replace(/\\\//g, "/");
+        const re = /(?:https?:)?\/\/[^"'\s)\\]*?goods_image2\/[a-z]+_moreimg\/[^"'\s)\\]*?\.(?:jpg|jpeg|png|webp)/gi;
+        const seen = new Set<string>();
+        const collected: string[] = [];
+        for (const m of html.match(re) || []) {
+          let u = m.split("?")[0];
+          if (u.startsWith("//")) u = "https:" + u; // 프로토콜 상대 URL 보정
+          u = u.replace(/\/[a-z]+_moreimg\//i, "/exlarge_moreimg/"); // 고해상도 통일
+          if (u.includes("icon") || u.includes("logo") || u.includes("btn") || u.includes("blank")) continue;
+          if (!seen.has(u)) { seen.add(u); collected.push(u); }
         }
-        return { rawName, category, rawPrice, rawImageUrls: Array.from(urls) };
+        collected.sort(); // _00, _01, _02 … 인덱스 순 (썸네일 = _00)
+        // 추가 이미지가 하나도 없으면 썸네일이 비지 않도록 og:image(대표)라도 사용
+        let rawImageUrls = collected;
+        if (rawImageUrls.length === 0) {
+          const ogImage = document.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content;
+          if (ogImage) rawImageUrls = [ogImage];
+        }
+        return { rawName, category, rawPrice, rawImageUrls };
+    };
+
+    // 챌린지 리로드와 evaluate가 겹쳐 "Execution context was destroyed"가 나면 1회 재시도
+    let extracted: { rawName: string; category: string; rawPrice: number; rawImageUrls: string[] };
+    try {
+      extracted = await page.evaluate(extractDom);
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("Execution context was destroyed")) {
+        await waitForRealContent(page);
+        extracted = await page.evaluate(extractDom);
+      } else {
+        throw e;
       }
-    );
+    }
+    const { rawName, category, rawPrice, rawImageUrls } = extracted;
 
     await page.close(); // DOM 추출 완료 후 바로 닫기 (업로드 대기 불필요)
 
@@ -384,13 +279,14 @@ async function scrapeGmarketProduct(
 
     // ── LLM 호출 병렬화 + 이미지 업로드 동시 실행 ───────────
     const regexName = normalizeProductName(rawName);
-    const limitedImageUrls = rawImageUrls.slice(0, 5).map(toHighResImageUrl);
+    // 메인 썸네일 + 추가 이미지 3장 = 총 4장만 (순서대로, AI 미사용)
+    const limitedImageUrls = rawImageUrls.slice(0, 4).map(toHighResImageUrl);
     const timestamp = Date.now();
 
     const VALID_IMG_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"]);
     const [product_name, matched_category, uploadResults] = await Promise.all([
-      llmNormalizeProductName(regexName).then((n) => n ?? regexName),
-      classifyCategory(regexName, category, categories),
+      llmNormalizeProductName(regexName, { callSource: "product_name_normalize", userId }).then((n) => n ?? regexName),
+      classifyCategory(regexName, category, categories, "가공식품", { callSource: "category_classify", userId }),
       Promise.all(
         limitedImageUrls.map((imgUrl, idx) => {
           const rawExt = imgUrl.split("?")[0].split(".").pop()?.replace(/[^a-z]/gi, "")?.toLowerCase() || "";
@@ -414,6 +310,9 @@ async function scrapeGmarketProduct(
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    // 페이지/컨텍스트가 닫힌 경우(사용자가 탭을 닫거나 컨텍스트 재생성 등)는
+    // 빨간 실패 대신 봇차단과 동일하게 취급 → 새 컨텍스트로 조용히 재시도.
+    const isClosed = /has been closed|Target (page|closed)|Execution context was destroyed/i.test(msg);
     console.error(`[gmarket-product] 스크래핑 실패 (${url}):`, msg);
     return {
       url,
@@ -423,7 +322,7 @@ async function scrapeGmarketProduct(
       matched_category: "",
       thumbnail_url: null,
       image_urls: [],
-      error: msg,
+      error: isClosed ? "bot_blocked" : msg,
     };
   } finally {
     if (!page.isClosed()) await page.close();
@@ -441,6 +340,7 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "인증 실패" }, { status: 401 });
   }
+  const userId = user.id;
 
   const body = (await request.json()) as ScrapeRequest;
   if (!body.urls || body.urls.length === 0) {
@@ -457,9 +357,6 @@ export async function POST(request: NextRequest) {
   const serviceClient = getServiceSupabaseClient();
   const categories = Array.isArray(body.categories) ? body.categories : [];
 
-  // 로그인 ID 미리 조회 (session-manager에 전달용)
-  const cred = await getGmarketCredential();
-
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -473,29 +370,97 @@ export async function POST(request: NextRequest) {
       }
 
       await browserPool.acquire();
-      const browser = await launchBrowser();
-      const context = await createGmarketContext(browser);
+      const browser = await launchPatchedBrowser();
+      let context = await createPatchedGmarketContext(browser);
+
+      // 봇 확인 인터스티셜("잠시만 기다리십시오") 통과 준비:
+      // 로그인 + 상품 페이지 워밍업으로 cf_clearance 쿠키를 컨텍스트에 확보.
+      // (로그인된 세션이 챌린지 통과율을 크게 높임)
+      async function prepareContext(ctx: BrowserContext) {
+        await ensureLogin(ctx, userId);
+        const warm = await ctx.newPage();
+        try {
+          await warm.goto("https://item.gmarket.co.kr/Item?goodscode=4628023357", {
+            waitUntil: "domcontentloaded",
+            timeout: 30000,
+          });
+          await warm
+            .waitForFunction(() => !/잠시만 기다리/.test(document.title), { timeout: 12000 })
+            .catch(() => {});
+        } catch (e) {
+          console.warn("[gmarket-product] 워밍업 실패(무시):", e instanceof Error ? e.message : String(e));
+        } finally {
+          await warm.close().catch(() => {});
+        }
+      }
 
       try {
-        await ensureGmarketLogin(context, supabase, cred?.id ?? "");
+        await prepareContext(context);
 
-        const CONCURRENCY = 4;
+        // 순차 처리(1) + 인간형 지연으로 Cloudflare rate/behavior 챌린지 회피 (구매자동화 패턴)
+        const CONCURRENCY = 1;
+        const BOT_BLOCK_RESET_THRESHOLD = 3; // 봇감지 누적 시 컨텍스트 재생성
         let doneCount = 0;
+        let ctxBotBlocks = 0;
+        const retryUrls: string[] = [];
 
+        // 1차 처리
         for (let i = 0; i < validUrls.length; i += CONCURRENCY) {
-          // 클라이언트가 연결을 끊었으면 중단
           if (request.signal.aborted) break;
+
+          // 봇 감지가 누적되면 컨텍스트 재생성 + 재로그인 (새 세션으로 통과 시도)
+          if (ctxBotBlocks >= BOT_BLOCK_RESET_THRESHOLD) {
+            console.log(`[gmarket-product] 봇감지 ${ctxBotBlocks}회 → 컨텍스트 재생성`);
+            await context.close().catch(() => {});
+            context = await createPatchedGmarketContext(browser);
+            await prepareContext(context);
+            ctxBotBlocks = 0;
+          }
 
           const batch = validUrls.slice(i, i + CONCURRENCY);
           const batchResults = await Promise.all(
             batch.map((url) =>
-              scrapeGmarketProduct(url, user.id, serviceClient, context, categories)
+              scrapeGmarketProduct(url, userId, serviceClient, context, categories)
             )
           );
 
           batchResults.forEach((result) => {
-            send({ type: "item_done", result, index: doneCount++, total: validUrls.length });
+            if (result.error === "bot_blocked") {
+              ctxBotBlocks++;
+              retryUrls.push(result.url); // 차단 항목은 새 컨텍스트로 재시도
+            } else {
+              send({ type: "item_done", result, index: doneCount++, total: validUrls.length });
+            }
           });
+        }
+
+        // 봇 차단된 항목 재시도 (매 라운드 새 컨텍스트, 최대 2라운드)
+        for (let round = 0; round < 2 && retryUrls.length > 0 && !request.signal.aborted; round++) {
+          console.log(`[gmarket-product] 봇차단 재시도 라운드 ${round + 1}: ${retryUrls.length}건`);
+          // 백오프: 곧바로 재시도하면 요청 폭증으로 차단이 악화되므로 잠시 대기 후 새 세션으로 진입
+          await new Promise((r) => setTimeout(r, 8000 + Math.floor(Math.random() * 7000)));
+          await context.close().catch(() => {});
+          context = await createPatchedGmarketContext(browser);
+          await prepareContext(context);
+
+          const pending = retryUrls.splice(0);
+          for (let i = 0; i < pending.length; i += CONCURRENCY) {
+            if (request.signal.aborted) break;
+            const batch = pending.slice(i, i + CONCURRENCY);
+            const batchResults = await Promise.all(
+              batch.map((url) =>
+                scrapeGmarketProduct(url, userId, serviceClient, context, categories)
+              )
+            );
+            batchResults.forEach((result) => {
+              if (result.error === "bot_blocked" && round < 1) {
+                retryUrls.push(result.url); // 다음 라운드로
+              } else {
+                // 마지막 라운드까지 차단되면 error 그대로 전송 (UI에 실패 표시)
+                send({ type: "item_done", result, index: doneCount++, total: validUrls.length });
+              }
+            });
+          }
         }
 
         send({ type: "done" });

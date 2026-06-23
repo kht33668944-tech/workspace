@@ -43,6 +43,11 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# local Codex and MCP secrets
+.codex/
+.mcp.json
+.mcp.local.json
+
 # vercel
 .vercel
 
