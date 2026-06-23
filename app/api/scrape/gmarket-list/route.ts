@@ -23,7 +23,7 @@ export interface GmarketListItem {
 async function extractListItems(page: Page): Promise<GmarketListItem[]> {
   // lazy 로딩 대비: 카드가 보일 때까지 대기 후 몇 번 스크롤
   await page
-    .waitForSelector(".box__component-itemcard", { timeout: 15000 })
+    .waitForSelector(".box__itemcard, .box__component-itemcard", { timeout: 15000 })
     .catch(() => {});
   for (let i = 0; i < 3; i++) {
     await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight)).catch(() => {});
@@ -31,7 +31,6 @@ async function extractListItems(page: Page): Promise<GmarketListItem[]> {
   }
 
   return page.evaluate(() => {
-    const cards = Array.from(document.querySelectorAll(".box__component-itemcard"));
     const seen = new Set<string>();
     const items: {
       goodscode: string;
@@ -41,43 +40,80 @@ async function extractListItems(page: Page): Promise<GmarketListItem[]> {
       price: number;
     }[] = [];
 
-    for (const card of cards) {
-      const a = card.querySelector<HTMLAnchorElement>('a.link__item[href*="goodscode"]');
-      if (!a) continue;
-      const href = a.href;
-      if (/buyboxtype=ad/.test(href)) continue; // 광고 제외
+    const cleanText = (s: string | null | undefined) => (s || "").replace(/\s+/g, " ").trim();
 
-      const gc = (href.match(/goodscode=(\d+)/) || [])[1];
-      if (!gc || seen.has(gc)) continue;
+    // 광고 카드 제외: box__category-ad / link__category-ad / 앵커의 data-montelena-acode
+    // (실제 상품 카드 .box__itemcard는 data-montelena-acode가 div에만 있고 앵커엔 없음)
+    const isAd = (a: HTMLAnchorElement, card: Element | null | undefined) =>
+      /buyboxtype=ad/.test(a.href) ||
+      a.className.includes("category-ad") ||
+      a.hasAttribute("data-montelena-acode") ||
+      !!(card && card.className.includes("category-ad"));
+
+    // 상품명: .item_name에서 브랜드 배지(.box__brand)·접근성 텍스트를 제거한 순수 상품명.
+    // (스타배송 카드는 img alt가 비어 있어 alt는 보조로만 사용)
+    const pickName = (
+      card: Element | null | undefined,
+      a: HTMLAnchorElement,
+      img: HTMLImageElement | null | undefined
+    ): string => {
+      const nameEl = card?.querySelector(
+        '.item_name, [id^="itemCard_title"], [class*="itemcard-title"], [class*="text__item-title"]'
+      );
+      if (nameEl) {
+        const clone = nameEl.cloneNode(true) as Element;
+        clone.querySelectorAll(".box__brand, .for-a11y, .text__official").forEach((e) => e.remove());
+        const t = cleanText(clone.textContent);
+        if (t) return t;
+      }
+      const alt = cleanText(img?.getAttribute("alt"));
+      if (alt && alt !== "광고") return alt;
+      return cleanText(a.getAttribute("title") || a.getAttribute("aria-label"));
+    };
+
+    const pickThumb = (img: HTMLImageElement | null | undefined): string => {
+      let t = img?.getAttribute("src") || img?.getAttribute("data-original") || img?.getAttribute("data-src") || "";
+      if (t.startsWith("//")) t = "https:" + t;
+      return t;
+    };
+
+    // 가격: 쿠폰적용가(할인 후)는 .box__price strong(=15,900). 원가는 box__price-original의 span이라 제외.
+    // strong이 없는 구형 레이아웃은 .text__value로 보조.
+    const pickPrice = (card: Element | null | undefined): number => {
+      const el =
+        card?.querySelector('.box__price strong, [class*="box__price"] strong') ||
+        card?.querySelector('.text__value, [class*="text__value"]');
+      return el?.textContent ? parseInt(el.textContent.replace(/[^0-9]/g, ""), 10) || 0 : 0;
+    };
+
+    const pushFromAnchor = (a: HTMLAnchorElement, card: Element | null | undefined) => {
+      if (isAd(a, card)) return;
+      const gc = (a.href.match(/goodscode=(\d+)/) || [])[1];
+      if (!gc || seen.has(gc)) return;
       seen.add(gc);
-
-      // 상품명: 목록 텍스트 영역 우선, 없으면 링크 텍스트
-      const nameEl = card.querySelector(
-        '[class*="text__item"], .text__item, [class*="itemcard-title"]'
-      );
-      const name = (nameEl?.textContent || a.textContent || "").trim();
-
-      // 썸네일: img src (프로토콜 상대 URL 보정)
-      const img = card.querySelector<HTMLImageElement>("img");
-      let thumbnail = img?.getAttribute("src") || img?.getAttribute("data-original") || "";
-      if (thumbnail.startsWith("//")) thumbnail = "https:" + thumbnail;
-
-      // 목록 표시가
-      const priceEl = card.querySelector(
-        '[class*="text__value"], .text__value, [class*="box__price"] strong'
-      );
-      const price = priceEl?.textContent
-        ? parseInt(priceEl.textContent.replace(/[^0-9]/g, ""), 10) || 0
-        : 0;
-
+      const img = card?.querySelector<HTMLImageElement>("img") ?? null;
       items.push({
         goodscode: gc,
         url: `https://item.gmarket.co.kr/Item?goodscode=${gc}`,
-        name,
-        thumbnail,
-        price,
+        name: pickName(card, a, img),
+        thumbnail: pickThumb(img),
+        price: pickPrice(card),
       });
+    };
+
+    // 1차: 상품 카드 컨테이너 (.box__itemcard = 스타배송/신규, .box__component-itemcard = 구형)
+    for (const card of Array.from(document.querySelectorAll(".box__itemcard, .box__component-itemcard"))) {
+      const a = card.querySelector<HTMLAnchorElement>('a[href*="goodscode="]');
+      if (a) pushFromAnchor(a, card);
     }
+
+    // 폴백: 0개면 페이지 전역 goodscode 링크 스캔
+    if (items.length === 0) {
+      for (const a of Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="goodscode="]'))) {
+        pushFromAnchor(a, a.closest(".box__itemcard, .box__component-itemcard, li, div") || a.parentElement);
+      }
+    }
+
     return items;
   });
 }

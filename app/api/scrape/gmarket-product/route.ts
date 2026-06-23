@@ -274,6 +274,16 @@ async function scrapeGmarketProduct(
 
     await page.close(); // DOM 추출 완료 후 바로 닫기 (업로드 대기 불필요)
 
+    // 상품명이 비면 상품 페이지가 아님(목록/카테고리 URL 등) → Gemini 호출 없이 실패 처리.
+    // (빈 이름을 normalizeProductName에 넘기면 모델이 "…함수를 제공합니다" 메타 응답을 뱉어 가짜 상품이 생성됨)
+    if (!rawName.trim()) {
+      console.warn(`[gmarket-product] 상품명 추출 실패(상품 페이지 아님 추정): ${url.slice(0, 80)}`);
+      return {
+        url, product_name: "", price: 0, category: "", matched_category: "",
+        thumbnail_url: null, image_urls: [], error: "not_a_product",
+      };
+    }
+
     const price = typeof rawPrice === "number" && rawPrice > 0 ? rawPrice : 0;
     console.log(`[gmarket-product] 가격추출: price=${price}, url=${url.slice(0, 80)}`);
 

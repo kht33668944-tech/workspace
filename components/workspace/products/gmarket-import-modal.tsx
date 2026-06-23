@@ -32,9 +32,14 @@ interface SelectItem extends GmarketListItem {
   selected: boolean;
 }
 
+/** URL에서 goodscode(상품 고유번호) 추출 — 추적 파라미터 차이를 무시한 중복 판정용 */
+const goodscodeOf = (u: string) => (u.match(/goodscode=(\d+)/) || [])[1] || "";
+
 /** 목록(카테고리/검색) URL 판별 — 개별 상품 URL과 구분 */
 const isListUrl = (u: string) =>
-  /\/n\/(list|search)/.test(u) || /[?&](category|keyword)=/.test(u);
+  /\/n\/(list|search|best|category|stardelivery|brand)/.test(u) ||
+  /\/category(\b|\/|\?|$)/.test(u) ||
+  /[?&](category|keyword)=/.test(u);
 
 export default function GmarketImportModal({ onClose, onImport, categories, existingUrls, embedded = false }: Props) {
   const { session } = useAuth();
@@ -60,6 +65,16 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
     () => validUrls.find((u) => isListUrl(u)) ?? null,
     [validUrls]
   );
+  // 이미 등록된 상품 중복 판정은 URL 문자열이 아니라 goodscode 기준.
+  // (저장된 purchase_url에 추적 파라미터 ?spm=... 가 붙어 있어도 동일 상품으로 인식)
+  const existingGoodscodes = useMemo(() => {
+    const s = new Set<string>();
+    existingUrls?.forEach((u) => {
+      const gc = goodscodeOf(u);
+      if (gc) s.add(gc);
+    });
+    return s;
+  }, [existingUrls]);
   const selectedCount = useMemo(
     () => listItems.filter((i) => i.selected).length,
     [listItems]
@@ -301,7 +316,7 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
       }
       // 이미 등록된 상품은 기본 선택 해제
       setListItems(
-        fetched.map((it) => ({ ...it, selected: !existingUrls?.has(it.url) }))
+        fetched.map((it) => ({ ...it, selected: !existingGoodscodes.has(it.goodscode) }))
       );
       setStage("select");
     } catch (e) {
@@ -309,7 +324,7 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
     } finally {
       setListLoading(false);
     }
-  }, [listUrl, session?.access_token, existingUrls]);
+  }, [listUrl, session?.access_token, existingGoodscodes]);
 
   // 선택 단계 → 선택된 상품 상세 재수집 시작
   const handleSelectStart = useCallback(() => {
@@ -351,9 +366,9 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
   }, []);
   const toggleSelectAll = useCallback((on: boolean) => {
     setListItems((prev) =>
-      prev.map((i) => ({ ...i, selected: on && !existingUrls?.has(i.url) }))
+      prev.map((i) => ({ ...i, selected: on && !existingGoodscodes.has(i.goodscode) }))
     );
-  }, [existingUrls]);
+  }, [existingGoodscodes]);
 
   // 개별 항목 재시도
   const handleRetryItem = useCallback(async (idx: number) => {
@@ -436,9 +451,11 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
   };
 
   const duplicateUrls = useMemo(() => {
-    if (!existingUrls) return new Set<string>();
-    return new Set(items.filter((i) => !i.error && existingUrls.has(i.url)).map((i) => i.url));
-  }, [items, existingUrls]);
+    if (existingGoodscodes.size === 0) return new Set<string>();
+    return new Set(
+      items.filter((i) => !i.error && existingGoodscodes.has(goodscodeOf(i.url))).map((i) => i.url)
+    );
+  }, [items, existingGoodscodes]);
 
   const successCount = items.filter((i) => !i.error && !duplicateUrls.has(i.url)).length;
   const failCount = items.filter((i) => !!i.error).length;
@@ -612,7 +629,7 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
 
               <div className="grid grid-cols-2 gap-2">
                 {listItems.map((item) => {
-                  const isDup = existingUrls?.has(item.url) ?? false;
+                  const isDup = existingGoodscodes.has(item.goodscode);
                   return (
                     <button
                       key={item.goodscode}
