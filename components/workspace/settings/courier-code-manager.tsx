@@ -30,6 +30,9 @@ export default function CourierCodeManager() {
           // 저장된 데이터가 없으면 기본값 로드
           loadDefaults();
         }
+      } else {
+        // 401/500 등 실패 시에도 빈 테이블 대신 기본값 표시
+        loadDefaults();
       }
     } catch {
       loadDefaults();

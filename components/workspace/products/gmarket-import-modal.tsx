@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useCallback, useMemo } from "react";
-import { X, Loader2, CheckCircle, AlertCircle, ExternalLink, Plus, RefreshCw, ArrowLeft, CheckSquare, Square } from "lucide-react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { X, Loader2, CheckCircle, AlertCircle, ExternalLink, Plus, RefreshCw, ArrowLeft, CheckSquare, Square, Minimize2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import type { GmarketProductResult, GmarketScrapeSSEEvent } from "@/app/api/scrape/gmarket-product/route";
 import type { GmarketListItem } from "@/app/api/scrape/gmarket-list/route";
@@ -19,6 +19,10 @@ interface Props {
   existingUrls?: Set<string>;
   /** MobileSheet 내부에 임베드될 때 true — 자체 fixed 오버레이/래퍼 제거 */
   embedded?: boolean;
+  /** 최소화(작업 유지) — 백그라운드 호스트에서 주입 */
+  onMinimize?: () => void;
+  /** 진행 요약 보고 (배지 표시용) — 백그라운드 호스트에서 주입 */
+  onProgress?: (p: { done: number; total: number; label: string; finished: boolean }) => void;
 }
 
 type Stage = "input" | "select" | "loading" | "preview";
@@ -41,7 +45,7 @@ const isListUrl = (u: string) =>
   /\/category(\b|\/|\?|$)/.test(u) ||
   /[?&](category|keyword)=/.test(u);
 
-export default function GmarketImportModal({ onClose, onImport, categories, existingUrls, embedded = false }: Props) {
+export default function GmarketImportModal({ onClose, onImport, categories, existingUrls, embedded = false, onMinimize, onProgress }: Props) {
   const { session } = useAuth();
   const [stage, setStage] = useState<Stage>("input");
   const [urlFields, setUrlFields] = useState<string[]>([""]);
@@ -464,6 +468,16 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
   // loading 단계 진행률
   const loadingPercent = loadingTotal > 0 ? Math.round((items.length / loadingTotal) * 100) : 0;
 
+  // 진행 요약을 호스트(배지)로 보고
+  useEffect(() => {
+    if (!onProgress) return;
+    if (stage === "loading") {
+      onProgress({ done: items.length, total: loadingTotal, label: "지마켓 가져오기", finished: false });
+    } else if (stage === "preview") {
+      onProgress({ done: items.length, total: items.length, label: "지마켓 가져오기", finished: true });
+    }
+  }, [stage, items.length, loadingTotal, onProgress]);
+
   const inner = (
     <div className={embedded ? "flex flex-col" : "bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col shadow-2xl"}>
         {/* Header — embedded 모드에서는 MobileSheet 타이틀이 대신함 */}
@@ -497,12 +511,23 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
               {stage === "preview" && `성공 ${successCount}개${dupDbCount > 0 ? ` / 중복 ${dupDbCount}개 제외` : ""}${failCount > 0 ? ` / 실패 ${failCount}개` : ""}`}
             </p>
           </div>
-          <button
-            onClick={stage === "loading" ? handleCancel : onClose}
-            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {onMinimize && (
+              <button
+                onClick={onMinimize}
+                title="최소화 (작업은 계속됩니다)"
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <Minimize2 className="w-5 h-5" />
+              </button>
+            )}
+            <button
+              onClick={stage === "loading" ? handleCancel : onClose}
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
         )}
 

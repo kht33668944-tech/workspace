@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import XLSX from "xlsx-js-style";
-import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { getAccessToken, getSupabaseClient, fetchAllRows } from "@/lib/api-helpers";
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
@@ -48,15 +48,17 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 3. 사용자 상품 조회
-    const { data: products, error: fetchErr } = await supabase
-      .from("products")
-      .select("id, product_name, platform_codes, seller_code");
-    if (fetchErr) throw fetchErr;
+    // 3. 사용자 상품 조회 (RLS 스코프 + 1000행 초과 누락 방지: 전건 페이지네이션)
+    const products = await fetchAllRows<{ id: string; product_name: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>(
+      (from, to) => supabase
+        .from("products")
+        .select("id, product_name, platform_codes, seller_code")
+        .range(from, to),
+    );
 
     // 상품명 → product Map
     const productMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>();
-    for (const p of products ?? []) {
+    for (const p of products) {
       productMap.set(p.product_name, { id: p.id, platform_codes: p.platform_codes, seller_code: p.seller_code as Record<string, string> | null });
     }
 

@@ -29,7 +29,12 @@ export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
-  const body = (await request.json()) as SendRequest;
+  let body: SendRequest;
+  try {
+    body = (await request.json()) as SendRequest;
+  } catch {
+    return NextResponse.json({ error: "잘못된 요청 형식입니다." }, { status: 400 });
+  }
   if (!body.orderIds || body.orderIds.length === 0) {
     return NextResponse.json({ error: "발송 대상이 없습니다." }, { status: 400 });
   }

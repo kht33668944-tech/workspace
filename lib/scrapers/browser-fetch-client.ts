@@ -54,7 +54,8 @@ export class GmarketBrowserFetchClient {
     try {
       const result = await this.page.evaluate(async (fetchUrl: string) => {
         try {
-          const res = await fetch(fetchUrl, { credentials: "include" });
+          // 외부 API 무응답 시 무한 대기 방지 (15초 상한)
+          const res = await fetch(fetchUrl, { credentials: "include", signal: AbortSignal.timeout(15000) });
           const html = await res.text();
           return { html, status: res.status, error: null };
         } catch (e) {

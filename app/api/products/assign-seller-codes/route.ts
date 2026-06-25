@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { getAccessToken, getSupabaseClient, fetchAllRows } from "@/lib/api-helpers";
 
 const PLATFORM_GROUPS = ["smartstore", "esm", "coupang"] as const;
 
@@ -27,14 +27,18 @@ export async function POST(request: NextRequest) {
     const dateStr = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
 
     // 오늘 날짜의 seller_code 최대 순번 조회 (모든 그룹 통합)
-    const { data: allWithCode } = await supabase
-      .from("products")
-      .select("seller_code")
-      .eq("user_id", user.id)
-      .not("seller_code", "is", null);
+    // 1000행 초과 시 잘리면 globalMax가 작게 나와 중복 코드 발급 → 전건 페이지네이션
+    const allWithCode = await fetchAllRows<{ seller_code: Record<string, string> | null }>(
+      (from, to) => supabase
+        .from("products")
+        .select("seller_code")
+        .eq("user_id", user.id)
+        .not("seller_code", "is", null)
+        .range(from, to),
+    );
 
     let globalMax = 0;
-    for (const p of allWithCode ?? []) {
+    for (const p of allWithCode) {
       const codes = p.seller_code as Record<string, string> | null;
       if (!codes) continue;
       for (const code of Object.values(codes)) {

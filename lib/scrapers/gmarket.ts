@@ -189,7 +189,7 @@ export async function collectGmarketTracking(
 
     console.log("[gmarket] 수집 완료:", `성공=${result.success.length}, 실패=${result.failed.length}, 미발견=${result.notFound.length}`);
   } catch (err) {
-    console.error("[gmarket] 수집 오류:", err);
+    console.error("[gmarket] 수집 오류:", err instanceof Error ? err.message : String(err));
     // 아직 처리 안 된 주문번호를 실패로
     for (const no of orderNos) {
       const noStr = String(no);

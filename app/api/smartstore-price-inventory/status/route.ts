@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { getAccessToken, getSupabaseClient, fetchAllRows } from "@/lib/api-helpers";
 
 export const maxDuration = 30;
 
@@ -22,14 +22,16 @@ export async function GET(request: NextRequest) {
       .limit(1);
     const lastImportedAt = latest?.[0]?.updated_at ?? null;
 
-    // 매칭된 상품 + 스마트스토어 상품번호
-    const { data: matchedRows, error: rowsErr } = await supabase
-      .from("smartstore_price_inventory")
-      .select("product_id, smartstore_product_id, option_type")
-      .not("product_id", "is", null);
-    if (rowsErr) throw rowsErr;
+    // 매칭된 상품 + 스마트스토어 상품번호 — 1000행 초과 무음 절단 방지: 전건 페이지네이션
+    const matchedRows = await fetchAllRows<{ product_id: string | null; smartstore_product_id: string | null; option_type: string | null }>(
+      (from, to) => supabase
+        .from("smartstore_price_inventory")
+        .select("product_id, smartstore_product_id, option_type")
+        .not("product_id", "is", null)
+        .range(from, to),
+    );
 
-    const productIds = [...new Set((matchedRows ?? []).map(r => r.product_id).filter((x): x is string => !!x))];
+    const productIds = [...new Set(matchedRows.map(r => r.product_id).filter((x): x is string => !!x))];
     const productNameMap = new Map<string, string>();
     if (productIds.length > 0) {
       const CHUNK = 200;
@@ -42,7 +44,7 @@ export async function GET(request: NextRequest) {
 
     // 상품 1개당 1행이 원칙이지만 동일 product_id에 여러 smartstore_product_id가 매핑될 수도 있어 그룹화
     const byProductId = new Map<string, { ids: string[]; hasOption: boolean }>();
-    for (const r of matchedRows ?? []) {
+    for (const r of matchedRows) {
       if (!r.product_id) continue;
       const entry = byProductId.get(r.product_id) ?? { ids: [], hasOption: false };
       if (r.smartstore_product_id) entry.ids.push(r.smartstore_product_id);

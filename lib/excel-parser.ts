@@ -24,6 +24,19 @@ interface RawRow {
   [key: string]: string | number | undefined;
 }
 
+// 금액/수량 셀을 숫자로 파싱. 콤마/통화기호 제거 후 변환.
+// "무료"/"-" 등 파싱 불가 값은 0이 아니라 경고 로깅 후 0 사용 (조용한 손실 방지).
+function parseNumericCell(value: string | number, engKey: string): number {
+  if (typeof value === "number") return Math.round(value);
+  const cleaned = String(value).replace(/[,\s₩원]/g, "");
+  const n = Number.parseFloat(cleaned);
+  if (!Number.isFinite(n)) {
+    console.warn(`[엑셀 파서] 숫자 변환 실패 (${engKey}): "${value}" → 0 처리`);
+    return 0;
+  }
+  return Math.round(n);
+}
+
 export interface ParsedExcelResult {
   sheetNames: string[];
   orders: OrderInsert[];
@@ -375,11 +388,11 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
       case "revenue":
       case "settlement":
       case "cost":
-        mapped[engKey] = typeof value === "number" ? Math.round(value) : parseInt(String(value).replace(/,/g, ""), 10) || 0;
+        mapped[engKey] = parseNumericCell(value, engKey);
         break;
       case "margin":
         // 마진은 수식일 수 있음 — 숫자로 변환, 나중에 settlement - cost로 재계산
-        mapped[engKey] = typeof value === "number" ? Math.round(value) : parseInt(String(value).replace(/,/g, ""), 10) || 0;
+        mapped[engKey] = parseNumericCell(value, engKey);
         break;
       case "order_date":
         mapped[engKey] = parseDate(value);
@@ -421,7 +434,10 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
   if (mapped.revenue === undefined) mapped.revenue = 0;
 
   // 정산예정금액 자동 계산 (판매처별 수수료율)
-  if (!mapped.settlement || mapped.settlement === 0) {
+  // 사용자가 엑셀에 정산 컬럼을 제공한 경우(매핑됨)에는 그 값을 존중 — 정상 0원 정산을 덮어쓰지 않음.
+  // 컬럼 자체가 없을 때만 매출×수수료율로 자동 계산.
+  const hasSettlementColumn = Object.values(headerMap).includes("settlement");
+  if (!hasSettlementColumn) {
     const revenue = (mapped.revenue as number) || 0;
     const mp = typeof mapped.marketplace === "string" ? mapped.marketplace : "";
     const rate = SETTLEMENT_RATES.find(([key]) => mp.includes(key));
@@ -456,7 +472,7 @@ function parseDate(value: string | number | undefined): string | null {
   if (typeof value === "number") {
     const date = XLSX.SSF.parse_date_code(value);
     if (date) {
-      return `${date.y}-${String(date.m).padStart(2, "0")}-${String(date.d).padStart(2, "0")}T${String(date.H || 0).padStart(2, "0")}:${String(date.M || 0).padStart(2, "0")}:${String(date.S || 0).padStart(2, "0")}Z`;
+      return `${date.y}-${String(date.m).padStart(2, "0")}-${String(date.d).padStart(2, "0")}T${String(date.H || 0).padStart(2, "0")}:${String(date.M || 0).padStart(2, "0")}:${String(date.S || 0).padStart(2, "0")}+09:00`;
     }
     return null;
   }
@@ -468,21 +484,21 @@ function parseDate(value: string | number | undefined): string | null {
   const dateTimeMatch = str.match(/^(\d{4})[-/.]+(\d{1,2})[-/.]+(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
   if (dateTimeMatch) {
     const [, y, m, d, h, min, sec] = dateTimeMatch;
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T${h.padStart(2, "0")}:${min.padStart(2, "0")}:${(sec || "0").padStart(2, "0")}Z`;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T${h.padStart(2, "0")}:${min.padStart(2, "0")}:${(sec || "0").padStart(2, "0")}+09:00`;
   }
 
   // "2026-03-05" or "2026.03.05" or "2026/03/05"
   const dateMatch = str.match(/^(\d{4})[-/.]+(\d{1,2})[-/.]+(\d{1,2})/);
   if (dateMatch) {
     const [, y, m, d] = dateMatch;
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T00:00:00Z`;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T00:00:00+09:00`;
   }
 
   // "03/05/2026" or "03-05-2026" (MM/DD/YYYY)
   const mdyMatch = str.match(/^(\d{1,2})[-/.]+(\d{1,2})[-/.]+(\d{4})/);
   if (mdyMatch) {
     const [, m, d, y] = mdyMatch;
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T00:00:00Z`;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}T00:00:00+09:00`;
   }
 
   const d = new Date(str);

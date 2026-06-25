@@ -59,17 +59,26 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. 수수료 + 가격 계산
-    const { data: rates } = await supabase.from("commission_rates").select("*");
+    const { data: rates, error: ratesErr } = await supabase.from("commission_rates").select("*");
+    if (ratesErr) throw ratesErr;
     const rateMap = buildRateMap((rates ?? []) as CommissionRate[]);
 
     const priceByProductId = new Map<string, number>();
+    const noPriceProductIds: string[] = [];
     for (const p of products) {
       const settlement = calcSettlementPrice(p.lowest_price, p.margin_rate);
       const rate = (rateMap[p.category] ?? {}).esm ?? 0;
-      const computed = p.fixed_price_esm != null
-        ? p.fixed_price_esm
-        : (rate > 0 ? calcPlatformPrice(settlement, rate) : p.lowest_price);
-      priceByProductId.set(p.id, computed);
+      if (p.fixed_price_esm != null) {
+        priceByProductId.set(p.id, p.fixed_price_esm);
+      } else if (rate > 0) {
+        priceByProductId.set(p.id, calcPlatformPrice(settlement, rate));
+      } else {
+        // 수수료율도 고정가도 없음 → 원가(최저가) 판매 방지: 제외 + 경고
+        noPriceProductIds.push(p.id);
+      }
+    }
+    if (noPriceProductIds.length > 0) {
+      console.warn(`[esm-price-inventory/export] 수수료율·고정가 없어 제외된 상품 ${noPriceProductIds.length}개 (원가 판매 방지)`);
     }
 
     const matchedProductIds = new Set(inventoryRows.map(r => r.product_id).filter((x): x is string => !!x));

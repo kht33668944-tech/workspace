@@ -27,3 +27,26 @@ export function getServiceSupabaseClient(): SupabaseClient {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
+
+/**
+ * Supabase는 단일 select가 기본 1000행까지만 반환한다.
+ * buildQuery(from, to)로 .range()를 적용한 쿼리를 만들어 전건을 페이지네이션 조회한다.
+ * 매칭/집계용 전수 조회에 사용 (1000행 초과 시 조용한 누락 방지).
+ */
+export async function fetchAllRows<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  pageSize = 1000,
+): Promise<T[]> {
+  const all: T[] = [];
+  let from = 0;
+  // 안전장치: 100페이지(=10만 행) 상한
+  for (let page = 0; page < 100; page++) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}

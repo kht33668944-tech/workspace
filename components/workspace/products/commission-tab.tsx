@@ -46,7 +46,7 @@ export default function CommissionTab() {
         setMappings(map);
       })
       .catch(() => {});
-  }, [userId]);
+  }, [userId, accessToken]);
 
   const handleMappingChange = (cat: string, code: string) => {
     setMappings((prev) => ({ ...prev, [cat]: code }));

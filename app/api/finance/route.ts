@@ -109,9 +109,10 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (prev) {
-      const prevCards = prev.cards as CardEntry[];
-      const prevPlatforms = prev.platforms as PlatformEntry[];
-      const prevCash = prev.cash as CashEntry[];
+      // 과거 스냅샷에 필드가 누락됐을 수 있어 빈 배열로 방어 (reduce 런타임 예외 방지)
+      const prevCards = (prev.cards ?? []) as CardEntry[];
+      const prevPlatforms = (prev.platforms ?? []) as PlatformEntry[];
+      const prevCash = (prev.cash ?? []) as CashEntry[];
 
       // 전날 카드 납부액 합계 (돈 나감 → 현금 감소)
       const totalPaymentMade = prevCards.reduce((s, c) => s + (c.payment_made ?? 0), 0);

@@ -15,8 +15,11 @@ export function recalcTotals(
 
 export function getNextPaymentDay(day: number): { daysLeft: number; dateStr: string } {
   const now = new Date();
-  const thisMonth = new Date(now.getFullYear(), now.getMonth(), day);
-  const target = thisMonth > now ? thisMonth : new Date(now.getFullYear(), now.getMonth() + 1, day);
+  // 결제일이 해당 월 말일보다 크면 말일로 클램프 (예: 2월 31일 → 2월 28/29일)
+  const dayInMonth = (year: number, month: number) =>
+    new Date(year, month, Math.min(day, new Date(year, month + 1, 0).getDate()));
+  const thisMonth = dayInMonth(now.getFullYear(), now.getMonth());
+  const target = thisMonth > now ? thisMonth : dayInMonth(now.getFullYear(), now.getMonth() + 1);
   const diff = Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
   const m = String(target.getMonth() + 1).padStart(2, "0");
   const d = String(target.getDate()).padStart(2, "0");

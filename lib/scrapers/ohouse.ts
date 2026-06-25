@@ -40,6 +40,7 @@ async function isSessionValid(context: BrowserContext): Promise<boolean> {
     const apiResult = await page.evaluate(async () => {
       const res = await fetch("/order/v1/front/orders/list?cursor=&pageSize=1&period=&optionStatus=&searchWord=", {
         credentials: "include",
+        signal: AbortSignal.timeout(15000),
       });
       return res.ok;
     });
@@ -164,7 +165,8 @@ export async function collectOhouseTracking(
       }
       const apiUrl = `${ORDER_LIST_API}?cursor=${cursor}&pageSize=20&period=&optionStatus=&searchWord=`;
       const apiResponse = await listPage.evaluate(async (url: string) => {
-        const res = await fetch(url, { credentials: "include" });
+        // 무응답 시 무한 대기 방지 (15초 상한)
+        const res = await fetch(url, { credentials: "include", signal: AbortSignal.timeout(15000) });
         if (!res.ok) return null;
         return res.json();
       }, apiUrl);
@@ -303,7 +305,7 @@ export async function collectOhouseTracking(
 
     console.log("[ohouse] 수집 완료:", `성공=${result.success.length}, 실패=${result.failed.length}, 미발견=${result.notFound.length}`);
   } catch (err) {
-    console.error("[ohouse] 수집 오류:", err);
+    console.error("[ohouse] 수집 오류:", err instanceof Error ? err.message : String(err));
     for (const no of orderNos) {
       const noStr = String(no);
       if (

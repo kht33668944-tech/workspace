@@ -214,7 +214,7 @@ export async function collectAuctionTracking(
     }
     console.log("[auction] 수집 완료:", `성공=${result.success.length}, 실패=${result.failed.length}, 미발견=${result.notFound.length}`);
   } catch (err) {
-    console.error("[auction] 수집 오류:", err);
+    console.error("[auction] 수집 오류:", err instanceof Error ? err.message : String(err));
     for (const no of orderNos) {
       const noStr = String(no);
       if (!result.success.some(s => s.orderNo === noStr) &&

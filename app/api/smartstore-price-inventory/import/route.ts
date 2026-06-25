@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import XLSX from "xlsx-js-style";
-import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { getAccessToken, getSupabaseClient, fetchAllRows } from "@/lib/api-helpers";
 import {
   COL,
   TOTAL_COLS,
@@ -85,10 +85,16 @@ export async function POST(request: NextRequest) {
     if (userErr || !userData.user) return NextResponse.json({ error: "인증 실패" }, { status: 401 });
     const userId = userData.user.id;
 
-    const { data: products, error: pErr } = await supabase.from("products").select("id, product_name");
-    if (pErr) throw pErr;
+    // 상품명 → product_id 매핑 (1000행 초과 누락 방지: 전건 페이지네이션)
+    const products = await fetchAllRows<{ id: string; product_name: string }>(
+      (from, to) => supabase
+        .from("products")
+        .select("id, product_name")
+        .eq("user_id", userId)
+        .range(from, to),
+    );
     const productMap = new Map<string, string>();
-    for (const p of products ?? []) productMap.set(normalizeName(p.product_name), p.id);
+    for (const p of products) productMap.set(normalizeName(p.product_name), p.id);
 
     const inserts: SmartstorePriceInventoryInsert[] = [];
     const unmatchedSet = new Set<string>();

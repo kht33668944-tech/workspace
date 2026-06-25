@@ -8,16 +8,14 @@ import { useCommissions } from "@/hooks/use-commissions";
 import { buildRateMap } from "@/lib/product-calculations";
 import { useAiTask } from "@/context/AiTaskContext";
 import { useAuth } from "@/context/AuthContext";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useGmarketImportController } from "@/context/modal-controllers";
 import ProductTable from "@/components/workspace/products/product-table";
 import FilterBar from "@/components/ui/filter-bar";
-import MobileSheet from "@/components/ui/mobile-sheet";
 import dynamic from "next/dynamic";
 
 const CommissionTab = dynamic(() => import("@/components/workspace/products/commission-tab"), { ssr: false });
 const ImageTab = dynamic(() => import("@/components/workspace/products/image-tab"), { ssr: false });
 const SmartStoreCategoryTab = dynamic(() => import("@/components/workspace/products/smartstore-category-tab"), { ssr: false });
-const GmarketImportModal = dynamic(() => import("@/components/workspace/products/gmarket-import-modal"), { ssr: false });
 const CoupangPriceImportModal = dynamic(() => import("@/components/workspace/products/coupang-price-import-modal"), { ssr: false });
 const EsmPriceImportModal = dynamic(() => import("@/components/workspace/products/esm-price-import-modal"), { ssr: false });
 const SmartstorePriceImportModal = dynamic(() => import("@/components/workspace/products/smartstore-price-import-modal"), { ssr: false });
@@ -37,8 +35,8 @@ type ExportWarning = { productName: string; missing: string[] };
 export default function ProductsPage() {
   usePreventBrowserSave();
 
-  const isMobile = useIsMobile();
   const { session } = useAuth();
+  const gmarketImport = useGmarketImportController();
   const {
     batchItems, batchActive, batchVisible,
     startBatch, dismissBatch, clearBatch,
@@ -53,7 +51,6 @@ export default function ProductsPage() {
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportStep, setExportStep] = useState("");
-  const [importModalOpen, setImportModalOpen] = useState(false);
   const [scrapingPrices, setScrapingPrices] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [expandedExportSection, setExpandedExportSection] = useState<string | null>(null);
@@ -207,6 +204,13 @@ export default function ProductsPage() {
   const handleImport = async (rows: Omit<ProductInsert, "user_id">[]) => {
     return insertProducts(rows as ProductInsert[]);
   };
+
+  // 지마켓 가져오기 백그라운드 호스트가 호출할 import 핸들러 등록 (페이지 마운트 중에만 유효).
+  // dep array 없이 매 렌더마다 최신 handleImport(현재 products 기준 중복필터 포함)를 등록.
+  useEffect(() => {
+    gmarketImport.registerHandler(handleImport);
+    return () => gmarketImport.registerHandler(null);
+  });
 
   // 품절 sentinel 마진(20%) / 재입고 복원 기본 마진(7%)
   const SOLDOUT_MARGIN = 20;
@@ -1210,7 +1214,10 @@ export default function ProductsPage() {
                 {importingCodes ? "가져오는 중..." : "플랫폼 코드 가져오기"}
               </button>
               <button
-                onClick={() => setImportModalOpen(true)}
+                onClick={() => gmarketImport.open({
+                  categories,
+                  existingUrls: new Set(allProducts.map(p => p.purchase_url).filter((u): u is string => Boolean(u))),
+                })}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
               >
                 <Download className="w-4 h-4" />
@@ -1388,32 +1395,7 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* 지마켓 가져오기 모달 */}
-      {importModalOpen && (
-        isMobile ? (
-          <MobileSheet
-            open={importModalOpen}
-            onClose={() => setImportModalOpen(false)}
-            title="지마켓 상품 가져오기"
-            maxHeight="90vh"
-          >
-            <GmarketImportModal
-              onClose={() => setImportModalOpen(false)}
-              onImport={handleImport}
-              categories={categories}
-              existingUrls={new Set(allProducts.map(p => p.purchase_url).filter(Boolean))}
-              embedded
-            />
-          </MobileSheet>
-        ) : (
-          <GmarketImportModal
-            onClose={() => setImportModalOpen(false)}
-            onImport={handleImport}
-            categories={categories}
-            existingUrls={new Set(allProducts.map(p => p.purchase_url).filter(Boolean))}
-          />
-        )
-      )}
+      {/* 지마켓 가져오기 모달은 레이아웃의 GmarketImportHost에서 렌더 (백그라운드 유지) */}
 
       {/* 쿠팡 가격수정 v2 양식 임포트 모달 */}
       {coupangImportModalOpen && (

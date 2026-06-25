@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import { generateImageFromPrompt } from "@/lib/gemini";
+import { isSafeRemoteImageUrl } from "@/lib/sanitize";
 import sharp from "sharp";
 
 export const maxDuration = 120;
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
   // 참조 이미지 base64 변환
   let referenceBase64: string | undefined;
   let referenceMime = "image/jpeg";
-  if (thumbnailUrl) {
+  if (thumbnailUrl && isSafeRemoteImageUrl(thumbnailUrl)) {
     try {
       const res = await fetch(thumbnailUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
       if (res.ok) {

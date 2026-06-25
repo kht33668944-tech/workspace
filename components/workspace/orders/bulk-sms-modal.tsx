@@ -106,6 +106,9 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
+  // 언마운트 시 진행 중 발송 중단 (post-unmount setState 방지)
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
+
   const handleTemplateChange = (id: string) => {
     const tpl = templates.find((t) => t.id === id);
     if (tpl) {
@@ -221,6 +224,7 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
       const decoder = new TextDecoder();
       let buffer = "";
 
+      try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -262,6 +266,9 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
       if (stepRef.current !== "result") {
         setStep("result");
         stepRef.current = "result";
+      }
+      } finally {
+        reader.releaseLock();
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {

@@ -50,6 +50,7 @@ export async function PUT(
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: "스냅샷을 찾을 수 없습니다." }, { status: 404 });
 
   // 전일 스냅샷도 함께 반환
   const { data: prevSnapshot } = await supabase

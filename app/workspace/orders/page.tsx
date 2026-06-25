@@ -23,10 +23,9 @@ import dynamic from "next/dynamic";
 
 const ExcelImport = dynamic(() => import("@/components/workspace/orders/excel-import"), { ssr: false });
 const SettlementImportModal = dynamic(() => import("@/components/workspace/orders/settlement-import-modal"), { ssr: false });
-const TrackingCollectModal = dynamic(() => import("@/components/workspace/orders/tracking-collect-modal"), { ssr: false });
-const AutoPurchaseModal = dynamic(() => import("@/components/workspace/orders/auto-purchase-modal"), { ssr: false });
 const BulkSmsModal = dynamic(() => import("@/components/workspace/orders/bulk-sms-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
+import { useAutoPurchaseController, useTrackingCollectController } from "@/context/modal-controllers";
 import type { Order, OrderInsert } from "@/types/database";
 
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
@@ -107,9 +106,9 @@ function OrdersPageInner() {
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(saved?.columnFilters ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [sidePanelOrder, setSidePanelOrder] = useState<Order | null>(null);
-  const [showTrackingCollect, setShowTrackingCollect] = useState(false);
-  const [showAutoPurchase, setShowAutoPurchase] = useState(false);
   const [showBulkSms, setShowBulkSms] = useState(false);
+  const autoPurchase = useAutoPurchaseController();
+  const trackingCollect = useTrackingCollectController();
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showAutoMenu, setShowAutoMenu] = useState(false);
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
@@ -233,6 +232,16 @@ function OrdersPageInner() {
     dateTo: selectedDateTo,
     columnFilters,
   });
+
+  // 자동구매·운송장수집(백그라운드) 완료 시 발주서 갱신 (initial 0은 무시)
+  useEffect(() => {
+    if (autoPurchase.completionTick > 0) refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPurchase.completionTick]);
+  useEffect(() => {
+    if (trackingCollect.completionTick > 0) refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackingCollect.completionTick]);
 
   const stats = useMemo(() => {
     const totalRevenue = orders.reduce((sum, o) => sum + (o.revenue || 0), 0);
@@ -564,7 +573,7 @@ function OrdersPageInner() {
             {showAutoMenu && (
               <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl py-1 min-w-44">
                 <button
-                  onClick={() => { setShowAutoMenu(false); setShowAutoPurchase(true); }}
+                  onClick={() => { setShowAutoMenu(false); autoPurchase.open({ orders: orders.filter((o) => selectedIds.has(o.id)) }); }}
                   disabled={selectedIds.size === 0}
                   className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
@@ -572,7 +581,7 @@ function OrdersPageInner() {
                   구매 자동화{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
                 </button>
                 <button
-                  onClick={() => { setShowAutoMenu(false); setShowTrackingCollect(true); }}
+                  onClick={() => { setShowAutoMenu(false); trackingCollect.open({ orders, courierCodeMap }); }}
                   className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                 >
                   <Truck className="w-4 h-4 text-purple-400" />
@@ -745,16 +754,7 @@ function OrdersPageInner() {
           onClose={() => setShowBulkSms(false)}
         />
       )}
-      {showAutoPurchase && (
-        <AutoPurchaseModal
-          orders={orders.filter((o) => selectedIds.has(o.id))}
-          onClose={() => setShowAutoPurchase(false)}
-          onComplete={() => {
-            setShowAutoPurchase(false);
-            refetch();
-          }}
-        />
-      )}
+      {/* 자동구매 모달은 레이아웃의 AutoPurchaseHost에서 렌더 (백그라운드 유지) */}
       {selectedIds.size > 0 && (
         <BulkEditBar
           count={selectedIds.size}
@@ -762,35 +762,7 @@ function OrdersPageInner() {
           onClearSelection={handleClearSelection}
         />
       )}
-      {showTrackingCollect && (
-        <TrackingCollectModal
-          orders={orders}
-          courierCodeMap={courierCodeMap}
-          onClose={() => setShowTrackingCollect(false)}
-          onApply={async (updates) => {
-            // 서버에서 이미 발주서 반영 완료 — 클라이언트는 UI 갱신만
-            if (updates.length > 0) {
-              // 레거시 호환: 혹시 updates가 넘어오면 기존 로직 실행
-              const { data: { session } } = await supabase.auth.getSession();
-              const res = await fetch("/api/orders/bulk-update-tracking", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-                },
-                body: JSON.stringify({ updates }),
-              });
-              const data = await res.json();
-              if (!res.ok) {
-                alert(`업데이트 실패: ${data.error}`);
-              } else if (data.failCount > 0) {
-                alert(`업데이트: 성공 ${data.successCount}건, 실패 ${data.failCount}건\n${data.errors?.slice(0, 5).join("\n")}`);
-              }
-            }
-            await refetch();
-          }}
-        />
-      )}
+      {/* 운송장수집 모달은 레이아웃의 TrackingCollectHost에서 렌더 (백그라운드 유지) */}
     </div>
   );
 }

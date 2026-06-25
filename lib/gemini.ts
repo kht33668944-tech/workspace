@@ -53,13 +53,16 @@ function recordUsage(params: {
   void (async () => {
     try {
       const usage = params.result?.response.usageMetadata;
+      // gemini-2.5-flash의 thinking(사고) 토큰은 candidatesTokenCount에 포함되지 않고
+      // 별도(thoughtsTokenCount)로 출력 단가로 과금됨 → 출력 토큰에 합산해 비용 과소집계 방지
+      const thoughtsTokens = (usage as { thoughtsTokenCount?: number } | undefined)?.thoughtsTokenCount ?? 0;
       const supabase = getServiceSupabaseClient();
       await supabase.from("gemini_usage").insert({
         user_id: params.userId ?? null,
         call_source: params.callSource ?? "unknown",
         model: params.model,
         prompt_tokens: usage?.promptTokenCount ?? 0,
-        candidate_tokens: usage?.candidatesTokenCount ?? 0,
+        candidate_tokens: (usage?.candidatesTokenCount ?? 0) + thoughtsTokens,
         is_image: params.isImage ?? false,
         image_count: params.imageCount ?? 0,
       });

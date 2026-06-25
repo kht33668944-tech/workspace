@@ -3,6 +3,7 @@ import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/l
 import { groundedSearch } from "@/lib/gemini";
 import { launchBrowser } from "@/lib/scrapers/browser";
 import { browserPool } from "@/lib/scrapers/browser-pool";
+import { isSafeRemoteImageUrl } from "@/lib/sanitize";
 
 export const maxDuration = 300;
 
@@ -120,6 +121,7 @@ function parseGroundedSpecs(raw: string): ProductSpecs | null {
 
 /** 이미지 URL → base64 data URI 변환 */
 async function fetchImageAsDataUri(url: string): Promise<string | null> {
+  if (!isSafeRemoteImageUrl(url)) return null; // SSRF 방어: 내부망/메타데이터 접근 차단
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
@@ -204,9 +206,14 @@ export async function POST(request: NextRequest) {
 
   // ── 0. 금지어 목록 조회 ─────────────────────────────────────────────────
   const serviceForForbidden = getServiceSupabaseClient();
-  const { data: forbiddenRows } = await serviceForForbidden
+  const { data: forbiddenRows, error: forbiddenErr } = await serviceForForbidden
     .from("forbidden_words")
     .select("word");
+  if (forbiddenErr) {
+    // 조회 실패 시 금지어 필터가 조용히 무력화되지 않도록 명시적으로 차단
+    console.error("[ai/detail] 금지어 목록 조회 실패:", forbiddenErr.message);
+    return NextResponse.json({ error: "금지어 목록 조회 실패 — 상세페이지 생성을 중단합니다." }, { status: 500 });
+  }
   const forbiddenWords: string[] = (forbiddenRows ?? [])
     .map((r: { word: string }) => r.word)
     .filter((w): w is string => typeof w === "string" && w.trim().length > 0);

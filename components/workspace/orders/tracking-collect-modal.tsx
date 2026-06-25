@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { X, Truck, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, KeyRound, Settings, Download, FileSpreadsheet, Square } from "lucide-react";
+import { X, Truck, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, KeyRound, Settings, Download, FileSpreadsheet, Square, Minimize2 } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import type { Order, PurchaseCredential } from "@/types/database";
@@ -14,6 +14,10 @@ interface TrackingCollectModalProps {
   courierCodeMap?: Record<string, number>;
   onClose: () => void;
   onApply: (updates: { purchase_order_no: string; courier: string; tracking_no: string }[]) => Promise<void>;
+  /** 최소화(작업 유지) — 백그라운드 호스트에서 주입 */
+  onMinimize?: () => void;
+  /** 진행 요약 보고 (배지 표시용) — 백그라운드 호스트에서 주입 */
+  onProgress?: (p: { done: number; total: number; label: string; finished: boolean }) => void;
 }
 
 type Step = "config" | "collecting" | "result";
@@ -27,7 +31,7 @@ const PLATFORM_NAME_MAP: Record<string, Platform> = {
   "오늘의집": "ohouse",
 };
 
-export default function TrackingCollectModal({ orders, courierCodeMap = {}, onClose, onApply }: TrackingCollectModalProps) {
+export default function TrackingCollectModal({ orders, courierCodeMap = {}, onClose, onApply, onMinimize, onProgress }: TrackingCollectModalProps) {
   const { session } = useAuth();
   const [step, setStep] = useState<Step>("config");
   const [credentials, setCredentials] = useState<PurchaseCredential[]>([]);
@@ -75,6 +79,9 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     fetchCredentials();
   }, [fetchCredentials]);
 
+  // 언마운트 시 진행 중 수집 중단 (post-unmount setState 방지)
+  useEffect(() => () => { abortControllerRef.current?.abort(); }, []);
+
   // 운송장 미수집 주문 (플랫폼 무관)
   const pendingOrders = useMemo(() => {
     return orders.filter(
@@ -103,6 +110,14 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       })
       .filter((g): g is NonNullable<typeof g> => g !== null);
   }, [credentials, pendingOrders]);
+
+  // 진행 요약을 호스트(배지)로 보고 — config 단계에서는 보고 안 함
+  useEffect(() => {
+    if (!onProgress) return;
+    if (step === "config") return;
+    const total = manualMode ? 1 : autoCollectGroups.length;
+    onProgress({ done: results.length, total, label: "운송장 수집", finished: step === "result" });
+  }, [step, results.length, manualMode, autoCollectGroups.length, onProgress]);
 
   // 어느 계정에도 매칭되지 않은 미수집 주문
   const unmatchedOrders = useMemo(() => {
@@ -215,6 +230,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
 
     setResults(allResults);
     setStep("result");
+    setIsStopping(false); // 중단 버튼 상태 복원 — "중단 중..." 고착 방지
   };
 
   // 수동 수집 시작
@@ -243,7 +259,10 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       const orderNos = manualTargets.map((o) => o.purchase_order_no!);
       const res = await fetch("/api/orders/collect-tracking", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`,
+        },
         body: JSON.stringify({ platform, loginId, loginPw, orderNos }),
         signal: controller.signal,
       });
@@ -270,6 +289,9 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
         setError(`오류: ${err instanceof Error ? err.message : String(err)}`);
         setStep("config");
       }
+    } finally {
+      // 중단 버튼 상태 복원 — "중단 중..." 고착 방지
+      setIsStopping(false);
     }
   };
 
@@ -314,7 +336,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
         });
       }
     } catch (err) {
-      console.error("엑셀 내보내기 실패:", err);
+      console.error("[tracking-collect] 엑셀 내보내기 실패:", err instanceof Error ? err.message : String(err));
     } finally {
       setExporting(null);
     }
@@ -356,7 +378,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
         }
       }
     } catch (err) {
-      console.error("자동 엑셀 내보내기 실패:", err);
+      console.error("[tracking-collect] 자동 엑셀 내보내기 실패:", err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -389,9 +411,20 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
               <Truck className="w-5 h-5 text-blue-400" />
               <h2 className="text-base font-semibold text-[var(--text-primary)]">배송정보 자동 수집</h2>
             </div>
-            <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              {onMinimize && (
+                <button
+                  onClick={onMinimize}
+                  title="최소화 (작업은 계속됩니다)"
+                  className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                >
+                  <Minimize2 className="w-5 h-5" />
+                </button>
+              )}
+              <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Content */}

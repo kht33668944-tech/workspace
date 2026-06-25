@@ -13,7 +13,12 @@ export function calcNetMargin(lowestPrice: number, marginRate: number): number {
 
 /** 플랫폼 판매가 = 정산가 / (1 - 총수수료/100), 100원 단위 올림 */
 export function calcPlatformPrice(settlementPrice: number, totalRate: number): number {
-  if (totalRate <= 0 || totalRate >= 100) return settlementPrice;
+  // 음수이거나 100 이상이면 데이터 오류 — 수수료 미반영 판매가가 조용히 나가지 않도록 경고
+  if (totalRate < 0 || totalRate >= 100) {
+    console.warn(`[product-calculations] 비정상 총수수료율(${totalRate}%) → 수수료 미반영. commission_rates 확인 필요`);
+    return settlementPrice;
+  }
+  if (totalRate === 0) return settlementPrice;
   return Math.ceil(settlementPrice / (1 - totalRate / 100) / 100) * 100;
 }
 

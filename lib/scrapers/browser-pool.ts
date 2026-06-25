@@ -26,7 +26,8 @@ class BrowserPool {
   }
 
   release(): void {
-    this.running--;
+    // 음수 가드: acquire 없이 release가 중복 호출돼도 동시성 한도가 망가지지 않도록
+    if (this.running > 0) this.running--;
     const next = this.waitQueue.shift();
     if (next) next();
   }

@@ -63,10 +63,12 @@ export default function FinanceSummaryTab({ snapshot, fetchTrendData }: FinanceS
       const now = new Date();
       const weekAgo = new Date(now);
       weekAgo.setDate(weekAgo.getDate() - 7);
+      // 로컬(KST) 기준 YYYY-MM-DD — toISOString()(UTC)은 저녁 시간대에 하루 밀림
+      const weekAgoStr = `${weekAgo.getFullYear()}-${String(weekAgo.getMonth() + 1).padStart(2, "0")}-${String(weekAgo.getDate()).padStart(2, "0")}`;
       const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 
       setSummary({
-        weekStart: snapshots.find((s) => s.date >= weekAgo.toISOString().slice(0, 10)) ?? null,
+        weekStart: snapshots.find((s) => s.date >= weekAgoStr) ?? null,
         weekEnd: snapshots[snapshots.length - 1] ?? null,
         monthStart: snapshots.find((s) => s.date >= monthStart) ?? null,
         monthEnd: snapshots[snapshots.length - 1] ?? null,

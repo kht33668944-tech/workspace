@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { getAccessToken, getSupabaseClient, fetchAllRows } from "@/lib/api-helpers";
 
 export const maxDuration = 30;
 
@@ -22,14 +22,16 @@ export async function GET(request: NextRequest) {
       .limit(1);
     const lastImportedAt = latest?.[0]?.updated_at ?? null;
 
-    // product_id별 site별 행 수 집계 (매칭된 행만)
-    const { data: matchedRows, error: rowsErr } = await supabase
-      .from("esm_price_inventory")
-      .select("product_id, site")
-      .not("product_id", "is", null);
-    if (rowsErr) throw rowsErr;
+    // product_id별 site별 행 수 집계 (매칭된 행만) — 1000행 초과 무음 절단 방지: 전건 페이지네이션
+    const matchedRows = await fetchAllRows<{ product_id: string | null; site: string }>(
+      (from, to) => supabase
+        .from("esm_price_inventory")
+        .select("product_id, site")
+        .not("product_id", "is", null)
+        .range(from, to),
+    );
 
-    const productIds = [...new Set((matchedRows ?? []).map(r => r.product_id).filter((x): x is string => !!x))];
+    const productIds = [...new Set(matchedRows.map(r => r.product_id).filter((x): x is string => !!x))];
     const productNameMap = new Map<string, string>();
     if (productIds.length > 0) {
       const CHUNK = 200;
@@ -42,7 +44,7 @@ export async function GET(request: NextRequest) {
 
     // 상품별 옥션/지마켓 카운트
     const statByProductId = new Map<string, { auction: number; gmarket: number }>();
-    for (const r of matchedRows ?? []) {
+    for (const r of matchedRows) {
       if (!r.product_id) continue;
       const entry = statByProductId.get(r.product_id) ?? { auction: 0, gmarket: 0 };
       if (r.site === "옥션") entry.auction++;

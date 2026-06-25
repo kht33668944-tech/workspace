@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { X, ShoppingCart, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, AlertTriangle, Square } from "lucide-react";
+import { X, ShoppingCart, CheckCircle, AlertCircle, Loader2, Eye, EyeOff, AlertTriangle, Square, Minimize2 } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import type { Order, PurchaseCredential, PurchasePlatform } from "@/types/database";
@@ -12,6 +12,10 @@ interface AutoPurchaseModalProps {
   orders: Order[];
   onClose: () => void;
   onComplete: () => void;
+  /** 최소화(작업 유지) — 백그라운드 호스트에서 주입 */
+  onMinimize?: () => void;
+  /** 진행 요약 보고 (배지 표시용) — 백그라운드 호스트에서 주입 */
+  onProgress?: (p: { done: number; total: number; label: string; finished: boolean }) => void;
 }
 
 type Step = "config" | "processing" | "result";
@@ -60,7 +64,7 @@ interface OrderGroup {
   orders: Order[];
 }
 
-export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoPurchaseModalProps) {
+export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinimize, onProgress }: AutoPurchaseModalProps) {
   const { session } = useAuth();
   const [step, setStep] = useState<Step>("config");
   const [credentials, setCredentials] = useState<PurchaseCredential[]>([]);
@@ -102,6 +106,20 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
   useEffect(() => {
     fetchCredentials();
   }, [fetchCredentials]);
+
+  // 언마운트 시 진행 중 자동구매 중단 (post-unmount setState 방지)
+  useEffect(() => () => { abortControllerRef.current?.abort(); }, []);
+
+  // 진행 요약을 호스트(배지)로 보고 — config 단계에서는 보고 안 함
+  useEffect(() => {
+    if (!onProgress) return;
+    if (step === "config") return;
+    const total = orderStatuses.length;
+    const done = orderStatuses.filter(
+      (s) => s.status === "success" || s.status === "failed" || s.status === "cancelled"
+    ).length;
+    onProgress({ done, total, label: "자동구매", finished: step === "result" });
+  }, [step, orderStatuses, onProgress]);
 
   // 구매 가능 주문건 필터: purchase_url 있고, purchase_order_no 비어있는 것
   const purchasableOrders = useMemo(() => {
@@ -234,7 +252,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
             } else if (event.type === "db_updated" && event.orderId) {
               // DB 업데이트 완료 알림 (UI에서는 이미 progress로 반영됨)
               if (event.status === "error") {
-                console.warn(`DB 업데이트 실패: ${event.orderId} - ${event.message}`);
+                console.warn(`[auto-purchase] DB 업데이트 실패: ${event.orderId} - ${event.message}`);
               }
             } else if (event.type === "done" || event.type === "cancelled") {
               isCancelled = event.type === "cancelled";
@@ -457,9 +475,20 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete }: AutoP
               {step === "result" && "결과"}
             </span>
           </div>
-          <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {onMinimize && (
+              <button
+                onClick={onMinimize}
+                title="최소화 (작업은 계속됩니다)"
+                className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <Minimize2 className="w-5 h-5" />
+              </button>
+            )}
+            <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}

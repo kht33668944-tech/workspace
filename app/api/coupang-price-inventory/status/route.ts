@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { getAccessToken, getSupabaseClient, fetchAllRows } from "@/lib/api-helpers";
 
 export const maxDuration = 30;
 
@@ -23,15 +23,17 @@ export async function GET(request: NextRequest) {
       .limit(1);
     const lastImportedAt = latest?.[0]?.updated_at ?? null;
 
-    // product_id별 옵션 수 (매칭된 행만)
-    const { data: matchedRows, error: rowsErr } = await supabase
-      .from("coupang_price_inventory")
-      .select("product_id, registered_name")
-      .not("product_id", "is", null);
-    if (rowsErr) throw rowsErr;
+    // product_id별 옵션 수 (매칭된 행만) — 1000행 초과 무음 절단 방지: 전건 페이지네이션
+    const matchedRows = await fetchAllRows<{ product_id: string | null; registered_name: string }>(
+      (from, to) => supabase
+        .from("coupang_price_inventory")
+        .select("product_id, registered_name")
+        .not("product_id", "is", null)
+        .range(from, to),
+    );
 
     // products 이름 조회 (매칭된 product_id들만)
-    const productIds = [...new Set((matchedRows ?? []).map(r => r.product_id).filter((x): x is string => !!x))];
+    const productIds = [...new Set(matchedRows.map(r => r.product_id).filter((x): x is string => !!x))];
     const productNameMap = new Map<string, string>();
     if (productIds.length > 0) {
       const CHUNK = 200;
@@ -44,7 +46,7 @@ export async function GET(request: NextRequest) {
 
     // 집계
     const optionCountByProductId = new Map<string, number>();
-    for (const r of matchedRows ?? []) {
+    for (const r of matchedRows) {
       if (!r.product_id) continue;
       optionCountByProductId.set(r.product_id, (optionCountByProductId.get(r.product_id) ?? 0) + 1);
     }

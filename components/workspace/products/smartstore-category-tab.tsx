@@ -38,9 +38,9 @@ export default function SmartStoreCategoryTab() {
 
   // 초기 로드
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !accessToken) return; // 토큰 지연 도착 시에도 재실행되도록 의존성에 포함
     setLoading(true);
-    fetch("/api/products/smartstore-categories", { headers: authHeader })
+    fetch("/api/products/smartstore-categories", { headers: { Authorization: `Bearer ${accessToken}` } })
       .then((r) => r.json())
       .then((json: { codes?: SmartStoreCategoryCode[] }) => {
         setRows(
@@ -54,8 +54,7 @@ export default function SmartStoreCategoryTab() {
         );
       })
       .finally(() => setLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, accessToken]);
 
   // 검색 필터링 (대소문자 무시)
   const filtered = useMemo(() => {

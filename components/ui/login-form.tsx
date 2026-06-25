@@ -68,8 +68,9 @@ export function SmokeyBackground({
   className = "",
 }: SmokeyBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-  const [isHovering, setIsHovering] = useState(false);
+  // 마우스 상태는 ref로 관리 — state로 두면 이동마다 effect가 재실행되어 WebGL 전체가 재초기화됨
+  const mousePositionRef = useRef({ x: 0, y: 0 });
+  const isHoveringRef = useRef(false);
 
   const hexToRgb = (hex: string): [number, number, number] => {
     const r = parseInt(hex.substring(1, 3), 16) / 255;
@@ -84,7 +85,7 @@ export function SmokeyBackground({
 
     const gl = canvas.getContext("webgl");
     if (!gl) {
-      console.error("WebGL not supported");
+      console.error("[SmokeyBackground] WebGL not supported");
       return;
     }
 
@@ -94,7 +95,7 @@ export function SmokeyBackground({
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
       if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error("Shader compilation error:", gl.getShaderInfoLog(shader));
+        console.error("[SmokeyBackground] Shader compilation error:", gl.getShaderInfoLog(shader));
         gl.deleteShader(shader);
         return null;
       }
@@ -112,7 +113,7 @@ export function SmokeyBackground({
     gl.linkProgram(program);
 
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      console.error("Program linking error:", gl.getProgramInfoLog(program));
+      console.error("[SmokeyBackground] Program linking error:", gl.getProgramInfoLog(program));
       return;
     }
 
@@ -152,10 +153,12 @@ export function SmokeyBackground({
 
       gl.uniform2f(iResolutionLocation, width, height);
       gl.uniform1f(iTimeLocation, currentTime);
+      const hovering = isHoveringRef.current;
+      const mouse = mousePositionRef.current;
       gl.uniform2f(
         iMouseLocation,
-        isHovering ? mousePosition.x : width / 2,
-        isHovering ? height - mousePosition.y : height / 2
+        hovering ? mouse.x : width / 2,
+        hovering ? height - mouse.y : height / 2
       );
 
       gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -164,10 +167,10 @@ export function SmokeyBackground({
 
     const handleMouseMove = (event: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      setMousePosition({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+      mousePositionRef.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     };
-    const handleMouseEnter = () => setIsHovering(true);
-    const handleMouseLeave = () => setIsHovering(false);
+    const handleMouseEnter = () => { isHoveringRef.current = true; };
+    const handleMouseLeave = () => { isHoveringRef.current = false; };
 
     canvas.addEventListener("mousemove", handleMouseMove);
     canvas.addEventListener("mouseenter", handleMouseEnter);
@@ -180,8 +183,13 @@ export function SmokeyBackground({
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("mouseenter", handleMouseEnter);
       canvas.removeEventListener("mouseleave", handleMouseLeave);
+      // GL 리소스 해제 (재초기화 시 누수 방지)
+      gl.deleteBuffer(positionBuffer);
+      gl.deleteProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
     };
-  }, [isHovering, mousePosition, color]);
+  }, [color]);
 
   const finalBlurClass = blurClassMap[backdropBlurAmount as BlurSize] || blurClassMap["sm"];
 

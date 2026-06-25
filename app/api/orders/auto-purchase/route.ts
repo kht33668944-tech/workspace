@@ -164,10 +164,12 @@ export async function POST(request: NextRequest) {
           if (cost !== undefined) updateData.cost = cost;
           if (paymentMethod) updateData.payment_method = paymentMethod;
 
-          const { error } = await supabase
-            .from("orders")
-            .update(updateData)
-            .eq("id", orderId);
+          // service_role(RLS 우회)이므로 소유권 스코핑을 명시.
+          // userId가 있으면 user_id로 한 번 더 제한(IDOR 방어), 만료 JWT로 userId가 없으면
+          // 기존 동작(id-only) 유지 — "JWT 만료와 무관 동작" 의도 보존.
+          let updateQuery = supabase.from("orders").update(updateData).eq("id", orderId);
+          if (userId) updateQuery = updateQuery.eq("user_id", userId);
+          const { error } = await updateQuery;
 
           if (error) {
             console.error(`[auto-purchase] DB 업데이트 실패 (${orderId}):`, error.message);
