@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { X, Loader2, CheckCircle, AlertCircle, ExternalLink, Plus, RefreshCw, ArrowLeft, CheckSquare, Square, Minimize2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
 import type { GmarketProductResult, GmarketScrapeSSEEvent } from "@/app/api/scrape/gmarket-product/route";
 import type { GmarketListItem } from "@/app/api/scrape/gmarket-list/route";
 import type { ProductInsert } from "@/types/database";
@@ -14,7 +15,7 @@ const SCRAPE_CHUNK = 12;
 
 interface Props {
   onClose: () => void;
-  onImport: (rows: Omit<ProductInsert, "user_id">[]) => Promise<{ error: string | null }>;
+  onImport: (rows: Omit<ProductInsert, "user_id">[]) => Promise<{ error: string | null; skipped?: string[] }>;
   categories: string[];
   existingUrls?: Set<string>;
   /** MobileSheet 내부에 임베드될 때 true — 자체 fixed 오버레이/래퍼 제거 */
@@ -47,6 +48,7 @@ const isListUrl = (u: string) =>
 
 export default function GmarketImportModal({ onClose, onImport, categories, existingUrls, embedded = false, onMinimize, onProgress }: Props) {
   const { session } = useAuth();
+  const { showToast } = useToast();
   const [stage, setStage] = useState<Stage>("input");
   const [urlFields, setUrlFields] = useState<string[]>([""]);
   const [items, setItems] = useState<PreviewItem[]>([]);
@@ -445,11 +447,18 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
       registration_status: "등록전",
     }));
 
-    const { error: importError } = await onImport(rows);
+    const { error: importError, skipped } = await onImport(rows);
     if (importError) {
       setError(importError);
       setSaving(false);
       return;
+    }
+    const skippedCount = skipped?.length ?? 0;
+    const registered = rows.length - skippedCount;
+    if (skippedCount > 0) {
+      showToast(`${registered}개 등록 완료 · 상품명 중복 ${skippedCount}개 제외됨`, "warning", 6000);
+    } else {
+      showToast(`${registered}개 상품 등록 완료`, "success");
     }
     onClose();
   };

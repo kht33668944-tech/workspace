@@ -33,7 +33,7 @@ export interface GmarketImportInput {
 // import 핸들러: products 페이지가 마운트 중일 때 등록 (DB insert + 로컬 캐시)
 export type GmarketImportHandler = (
   rows: Omit<ProductInsert, "user_id">[]
-) => Promise<{ error: string | null }>;
+) => Promise<{ error: string | null; skipped?: string[] }>;
 const gmarketImport = createModalController<GmarketImportInput, GmarketImportHandler>("GmarketImport");
 export const GmarketImportProvider = gmarketImport.Provider;
 export const useGmarketImportController = gmarketImport.useController;
