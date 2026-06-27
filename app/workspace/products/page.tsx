@@ -28,6 +28,7 @@ const PriceHistoryTab = dynamic(() => import("@/components/workspace/products/pr
 const ExportConfigTab = dynamic(() => import("@/components/workspace/products/export-config-tab"), { ssr: false });
 
 type ActiveTab = "products" | "images" | "commission" | "smartstore-category" | "price-history" | "export-config";
+type RetryItem = { id: string; name: string };
 
 /** 쿠팡 내보내기 시 필수옵션 누락 경고 (route의 warnings 응답 형식) */
 type ExportWarning = { productName: string; missing: string[] };
@@ -68,7 +69,7 @@ export default function ProductsPage() {
   const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(null);
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
   const [scrapeResultModalOpen, setScrapeResultModalOpen] = useState(false);
-  const [botBlockedItems, setBotBlockedItems] = useState<Array<{ id: string; name: string }>>([]);
+  const [botBlockedItems, setBotBlockedItems] = useState<RetryItem[]>([]);
   const [applyingPrices, setApplyingPrices] = useState(false);
   const [scrapeLog, setScrapeLog] = useState<string[]>([]);
   const [scrapeLogCollapsed, setScrapeLogCollapsed] = useState(false);
@@ -400,13 +401,15 @@ export default function ProductsPage() {
     abortController: AbortController,
   ): Promise<{
     changes: Array<{ id: string; name: string; previous: number; price: number }>;
-    botBlocked: Array<{ id: string; name: string }>;
+    botBlocked: RetryItem[];
+    failedItems: RetryItem[];
     soldOut: string[];
     skipped: number;
     stopped: boolean;
   }> => {
     const changes: Array<{ id: string; name: string; previous: number; price: number }> = [];
-    const botBlocked: Array<{ id: string; name: string }> = [];
+    const botBlocked: RetryItem[] = [];
+    const failedItems: RetryItem[] = [];
     const soldOut: string[] = [];
     let skipped = 0;
     let stopped = false;
@@ -422,7 +425,7 @@ export default function ProductsPage() {
       });
       if (!res.ok || !res.body) {
         pushScrapeLog("최저가 수집 실패 (서버 응답 오류)");
-        return { changes, botBlocked, soldOut, skipped, stopped };
+        return { changes, botBlocked, failedItems, soldOut, skipped, stopped };
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -469,6 +472,8 @@ export default function ProductsPage() {
                 changes.push({ id: event.id, name: event.name, previous: event.previous_price, price: event.price });
               } else if (statusKey === "sold_out") {
                 soldOut.push(event.id);
+              } else if (statusKey === "failed") {
+                failedItems.push({ id: event.id, name: event.name });
               }
             } else if (event.type === "init") {
               pushScrapeLog(event.message);
@@ -492,7 +497,7 @@ export default function ProductsPage() {
         pushScrapeLog("최저가 수집 중 오류 발생");
       }
     }
-    return { changes, botBlocked, soldOut, skipped, stopped };
+    return { changes, botBlocked, failedItems, soldOut, skipped, stopped };
   };
 
   const handleScrapePricesV2 = async (overrideIds?: string[]) => {
@@ -518,33 +523,36 @@ export default function ProductsPage() {
       setScrapeStatus(new Map());
       setScrapeTotal(ids.length);
     } else {
-      pushScrapeLog(`CF차단 ${ids.length}개 다시 시도 중...`);
+      pushScrapeLog(`재시도 대상 ${ids.length}개 다시 시도 중...`);
     }
     setScrapeLogCollapsed(false);
     setBotBlockedItems([]);
 
     const allChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
     const allSoldOut: string[] = [];
-    let remainingBlocked: Array<{ id: string; name: string }> = [];
+    let remainingRetryItems: RetryItem[] = [];
     let stopped = false;
     let retryCount = 0;
-    const MAX_RETRIES = 3;
 
     try {
       let currentIds = ids;
       while (currentIds.length > 0) {
         if (retryCount > 0) {
-          pushScrapeLog(`CF차단 ${currentIds.length}개 자동 재시도 (${retryCount}/${MAX_RETRIES})...`);
+          pushScrapeLog(`CF차단/실패 ${currentIds.length}개 자동 재시도 (${retryCount}회차)...`);
           await new Promise(r => setTimeout(r, 3000));
           if (abortController.signal.aborted) { stopped = true; break; }
         }
         const result = await runScrapeV2Once(currentIds, abortController);
         allChanges.push(...result.changes);
         allSoldOut.push(...result.soldOut);
-        remainingBlocked = result.botBlocked;
+        const retryMap = new Map<string, RetryItem>();
+        for (const item of [...result.botBlocked, ...result.failedItems]) {
+          retryMap.set(item.id, item);
+        }
+        remainingRetryItems = [...retryMap.values()];
         stopped = result.stopped;
-        if (stopped || remainingBlocked.length === 0 || retryCount >= MAX_RETRIES) break;
-        currentIds = remainingBlocked.map(b => b.id);
+        if (stopped || remainingRetryItems.length === 0) break;
+        currentIds = remainingRetryItems.map(b => b.id);
         retryCount++;
       }
     } finally {
@@ -557,13 +565,13 @@ export default function ProductsPage() {
         setScrapeResultModalOpen(true);
         setScrapeLogCollapsed(true);
       }
-      if (remainingBlocked.length > 0) {
-        setBotBlockedItems(remainingBlocked);
-        pushScrapeLog(`CF차단 ${remainingBlocked.length}개 미완료 (${retryCount}회 재시도 후) - 수동 재시도 가능`);
+      if (remainingRetryItems.length > 0) {
+        setBotBlockedItems(remainingRetryItems);
+        pushScrapeLog(`CF차단/실패 ${remainingRetryItems.length}개 남음 (${retryCount}회 재시도 후) - 수동 재시도 가능`);
       } else if (retryCount > 0 && !stopped) {
-        pushScrapeLog(`CF차단 전체 해소 (${retryCount}회 재시도)`);
+        pushScrapeLog(`CF차단/실패 전체 해소 (${retryCount}회 재시도)`);
       }
-      if (!stopped && allChanges.length === 0 && remainingBlocked.length === 0) {
+      if (!stopped && allChanges.length === 0 && remainingRetryItems.length === 0) {
         setTimeout(() => setScrapeLog([]), 3000);
       }
     }
@@ -1478,7 +1486,7 @@ export default function ProductsPage() {
                   <button
                     onClick={() => { setBotBlockedItems([]); setScrapeLog([]); setScrapeStatus(new Map()); setScrapeTotal(0); }}
                     className="px-2 py-1 min-h-[32px] text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
-                    aria-label="봇감지 목록 닫기"
+                    aria-label="재시도 목록 닫기"
                   >
                     닫기
                   </button>
