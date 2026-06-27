@@ -4,3 +4,7 @@ node_modules
 .sessions
 .env.local
 .env*.local
+.claude
+.codex
+.mcp.json
+.mcp.local.json
