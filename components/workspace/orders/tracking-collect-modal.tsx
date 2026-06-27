@@ -31,6 +31,8 @@ const PLATFORM_NAME_MAP: Record<string, Platform> = {
   "오늘의집": "ohouse",
 };
 
+const normalizeLoginId = (value: string | null | undefined) => value?.trim().toLowerCase() ?? "";
+
 export default function TrackingCollectModal({ orders, courierCodeMap = {}, onClose, onApply, onMinimize, onProgress }: TrackingCollectModalProps) {
   const { session } = useAuth();
   const [step, setStep] = useState<Step>("config");
@@ -97,12 +99,12 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
         if (!SUPPORTED_PLATFORMS.includes(p)) return null;
 
         const platformName = p === "gmarket" ? "지마켓" : p === "auction" ? "옥션" : "오늘의집";
-        // 해당 플랫폼 주문 중, purchase_id가 이 계정의 login_id를 포함하는 것만
+        const loginId = normalizeLoginId(cred.login_id);
+        // 해당 플랫폼 주문 중, 구매아이디가 이 계정과 정확히 같은 것만
         const targets = pendingOrders.filter(
           (o) =>
             o.purchase_source === platformName &&
-            o.purchase_id &&
-            o.purchase_id.includes(cred.login_id)
+            normalizeLoginId(o.purchase_id) === loginId
         );
 
         if (targets.length === 0) return null;

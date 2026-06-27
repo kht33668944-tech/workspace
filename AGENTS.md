@@ -137,4 +137,4 @@ npm run deploy:check # Railway 배포 상태 확인
 - 에러 로깅 시 bare error 객체 금지 → `e instanceof Error ? e.message : String(e)` 패턴 사용
 - console.log/error/warn에 `[컴포넌트명]` 접두어 필수
 - LLM 필요 시 항상 Gemini API 사용 (비용 절감)
-- 상품명: 특수문자 금지, 한글/영문/숫자/공백만 허용
+- 상품명: 특수문자 금지, 한글/영문/숫자/공백만 허용. 단 `250.5g`처럼 숫자 사이 소수점은 용량 표기이므로 유지

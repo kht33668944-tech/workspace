@@ -580,11 +580,12 @@ function OrdersPageInner() {
                   구매 자동화{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
                 </button>
                 <button
-                  onClick={() => { setShowAutoMenu(false); trackingCollect.open({ orders, courierCodeMap }); }}
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                  onClick={() => { setShowAutoMenu(false); trackingCollect.open({ orders: orders.filter((o) => selectedIds.has(o.id)), courierCodeMap }); }}
+                  disabled={selectedIds.size === 0}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   <Truck className="w-4 h-4 text-purple-400" />
-                  배송조회 수집
+                  배송조회 수집{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
                 </button>
                 <button
                   onClick={() => { setShowAutoMenu(false); setShowBulkSms(true); }}
