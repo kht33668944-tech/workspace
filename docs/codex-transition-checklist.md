@@ -28,6 +28,28 @@ npm run verify
 
 화면이나 자동화 동작을 바꾼 경우에는 개발 서버를 켜고 브라우저에서 직접 확인한다.
 
+## 배포 확인
+
+GitHub `main`에 push하면 Railway 자동 배포가 시작된다. push 직후에는 바로 완료되지 않을 수 있으므로 아래 순서로 확인한다.
+
+```bash
+npm run deploy:list
+npm run deploy:check
+```
+
+완료 기준:
+
+- 최신 배포가 `SUCCESS`다.
+- `npm run deploy:check`에서 서비스가 `Online`이다.
+- `https://resell-manager-production.up.railway.app` 응답이 정상이다.
+
+주의:
+
+- `INITIALIZING` 또는 `BUILDING`은 보통 오류가 아니라 진행 중 상태다.
+- 짧은 시간에 여러 번 push하면 이전 배포가 `REMOVED`될 수 있다. 이것은 새 배포가 앞 배포를 대체했다는 뜻일 수 있다.
+- `railway up` 수동 배포는 자동 배포가 실제 실패했거나 오래 멈춘 것을 확인한 뒤에만 사용한다.
+- Railway CLI가 연결되지 않았다면 `railway link`로 `resell-manager / production / manager`에 연결한 뒤 확인한다.
+
 ## 남겨둔 참고
 
 - `docs/superpowers/`에는 이전 설계/계획 문서가 남아 있다.

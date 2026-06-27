@@ -30,6 +30,7 @@ npm run start    # 프로덕션 서버
 npm run lint     # ESLint
 npm run typecheck # 타입 체크
 npm run verify   # lint + typecheck
+npm run deploy:check # Railway 배포 상태 확인
 ```
 
 테스트 프레임워크 없음(jest/vitest/playwright test 설정 없음). 검증은 수동/E2E.
@@ -100,6 +101,10 @@ npm run verify   # lint + typecheck
 
 - **Railway** (Docker, asia-southeast1) — git push 자동 배포, Dockerfile 멀티스테이지 빌드
 - **Supabase** (ap-northeast-2) — project: `ygunjfbtyowsumtxkukr`
+- 이 로컬 workspace는 Railway `resell-manager / production / manager`에 링크되어 있다.
+- 배포 완료 판단은 `npm run deploy:check`에서 service status가 `SUCCESS`, Railway status가 `Online`인지 확인한다.
+- push 직후 `INITIALIZING` 또는 `BUILDING`은 오류가 아니라 진행 중 상태일 수 있다. 짧은 시간에 여러 번 push하면 이전 배포가 `REMOVED`될 수 있으므로 실패로 단정하지 않는다.
+- `railway up` 수동 배포는 GitHub 자동 배포가 실제로 실패했거나 장시간 멈춘 것이 확인된 경우에만 사용한다.
 
 ## 환경변수 (`.env.local`)
 
