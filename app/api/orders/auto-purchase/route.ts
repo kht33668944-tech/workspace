@@ -29,7 +29,7 @@ interface SSEEvent {
   cost?: number;
   paymentMethod?: string;
   success?: { orderId: string; purchaseOrderNo: string; cost?: number; paymentMethod?: string }[];
-  failed?: { orderId: string; reason: string }[];
+  failed?: { orderId: string; reason: string; purchaseOrderNo?: string; cost?: number; paymentMethod?: string }[];
   successCount?: number;
   failCount?: number;
 }
@@ -227,6 +227,31 @@ export async function POST(request: NextRequest) {
           // 실패/취소 건 구매 로그 기록
           for (const f of allFailed) {
             const orderInfo = body.orders.find(o => o.orderId === f.orderId);
+            if (f.purchaseOrderNo && !signal.aborted) {
+              const partialUpdate: Record<string, unknown> = {
+                purchase_order_no: f.purchaseOrderNo,
+                delivery_status: "부분구매",
+              };
+              if (f.cost !== undefined) partialUpdate.cost = f.cost;
+              if (f.paymentMethod) partialUpdate.payment_method = f.paymentMethod;
+
+              let partialQuery = supabase.from("orders").update(partialUpdate).eq("id", f.orderId);
+              if (userId) partialQuery = partialQuery.eq("user_id", userId);
+              const { error: partialErr } = await partialQuery;
+              if (partialErr) {
+                console.error(`[auto-purchase] 부분구매 DB 업데이트 실패 (${f.orderId}):`, partialErr.message);
+              } else {
+                sendEvent({
+                  type: "db_updated",
+                  orderId: f.orderId,
+                  status: "partial",
+                  purchaseOrderNo: f.purchaseOrderNo,
+                  cost: f.cost,
+                  paymentMethod: f.paymentMethod,
+                });
+              }
+            }
+
             await supabase.from("purchase_logs").insert({
               user_id: userId,
               batch_id: batchId,
@@ -234,6 +259,9 @@ export async function POST(request: NextRequest) {
               platform,
               login_id: loginId,
               status: signal.aborted ? "cancelled" : "failed",
+              purchase_order_no: f.purchaseOrderNo ?? null,
+              cost: f.cost ?? null,
+              payment_method: f.paymentMethod ?? null,
               error_message: f.reason,
               product_name: orderInfo?.productName ?? null,
               recipient_name: orderInfo?.recipientName ?? null,

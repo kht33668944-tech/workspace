@@ -1,5 +1,6 @@
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { chromium as patchedChromium } from "patchright";
+import { execFile, execFileSync } from "child_process";
 
 /**
  * G마켓 전용 BrowserContext 생성.
@@ -27,12 +28,123 @@ const CHROME_USER_AGENT =
  * 환경변수 기반 브라우저 런치 팩토리
  * - BROWSER_HEADLESS: "false"면 headless 해제 (기본: true)
  * - BROWSER_CHANNEL: "chrome" 등 지정 시 시스템 브라우저 사용 (기본: Playwright 내장 Chromium)
+ * - BROWSER_START_MINIMIZED: "false"면 headed 브라우저를 일반 창으로 시작 (기본: 최소화)
  */
+function getHeadedWindowArgs(headless: boolean): string[] {
+  if (headless) return [];
+  if (process.env.BROWSER_START_MINIMIZED === "false") return [];
+  return ["--start-minimized", "--window-position=-32000,-32000"];
+}
+
+function shouldStartMinimized(headless: boolean): boolean {
+  return !headless && process.platform === "win32" && process.env.BROWSER_START_MINIMIZED !== "false";
+}
+
+function getBrowserProcessSnapshot(): Set<number> {
+  if (process.platform !== "win32") return new Set();
+
+  try {
+    const output = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-Process -Name chrome,msedge,chromium -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id",
+      ],
+      { encoding: "utf8", windowsHide: true }
+    );
+
+    return new Set(
+      output
+        .split(/\s+/)
+        .map((v) => Number(v))
+        .filter((v) => Number.isFinite(v))
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function minimizeNewBrowserWindows(previousPids: Set<number>): void {
+  if (process.platform !== "win32") return;
+
+  const before = [...previousPids].join(",");
+  const beforeArray = before ? `@(${before})` : "@()";
+  const script = `
+$before = ${beforeArray}
+$targets = @(Get-CimInstance Win32_Process | Where-Object {
+  $_.Name -in @("chrome.exe", "msedge.exe", "chromium.exe") -and
+  $before -notcontains $_.ProcessId -and
+  $_.CommandLine -match "playwright_|remote-debugging-pipe|ms-playwright"
+} | Select-Object -ExpandProperty ProcessId)
+if ($targets.Count -eq 0) { exit 0 }
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class WindowTools {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int x; public int y; }
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int left; public int top; public int right; public int bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct WINDOWPLACEMENT {
+    public int length;
+    public int flags;
+    public int showCmd;
+    public POINT ptMinPosition;
+    public POINT ptMaxPosition;
+    public RECT rcNormalPosition;
+  }
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+  [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+  [DllImport("user32.dll")] public static extern bool SetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+}
+"@
+[WindowTools]::EnumWindows({
+  param([IntPtr]$hWnd, [IntPtr]$lParam)
+  if ([WindowTools]::IsWindowVisible($hWnd)) {
+    [uint32]$windowPid = 0
+    [void][WindowTools]::GetWindowThreadProcessId($hWnd, [ref]$windowPid)
+    if ($targets -contains [int]$windowPid) {
+      $placement = New-Object WindowTools+WINDOWPLACEMENT
+      $placement.length = [Runtime.InteropServices.Marshal]::SizeOf([type][WindowTools+WINDOWPLACEMENT])
+      [void][WindowTools]::GetWindowPlacement($hWnd, [ref]$placement)
+      $placement.showCmd = 2
+      $placement.rcNormalPosition.left = 80
+      $placement.rcNormalPosition.top = 60
+      $placement.rcNormalPosition.right = 1600
+      $placement.rcNormalPosition.bottom = 980
+      [void][WindowTools]::SetWindowPlacement($hWnd, [ref]$placement)
+      [void][WindowTools]::ShowWindowAsync($hWnd, 6)
+    }
+  }
+  return $true
+}, [IntPtr]::Zero) | Out-Null
+`;
+
+  execFile(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
+    { windowsHide: true },
+    () => {}
+  );
+}
+
+function scheduleMinimizeNewBrowserWindows(previousPids: Set<number>, headless: boolean): void {
+  if (!shouldStartMinimized(headless)) return;
+  for (const delay of [150, 500, 1200, 2500, 5000]) {
+    setTimeout(() => minimizeNewBrowserWindows(previousPids), delay).unref();
+  }
+}
+
 export async function launchBrowser(): Promise<Browser> {
   const headless = process.env.BROWSER_HEADLESS !== "false";
   const channel = process.env.BROWSER_CHANNEL || undefined;
+  const previousPids = shouldStartMinimized(headless) ? getBrowserProcessSnapshot() : new Set<number>();
 
-  return chromium.launch({
+  const browser = await chromium.launch({
     headless,
     ...(channel && { channel }),
     args: [
@@ -43,8 +155,11 @@ export async function launchBrowser(): Promise<Browser> {
       "--window-size=1920,1080",
       "--disable-extensions",
       "--disable-gpu",
+      ...getHeadedWindowArgs(headless),
     ],
   });
+  scheduleMinimizeNewBrowserWindows(previousPids, headless);
+  return browser;
 }
 
 /**
@@ -124,16 +239,20 @@ export async function createStealthContext(browser: Browser): Promise<BrowserCon
 export async function launchPatchedBrowser(): Promise<Browser> {
   const headless = process.env.BROWSER_HEADLESS !== "false";
   const channel = process.env.BROWSER_CHANNEL || undefined;
+  const previousPids = shouldStartMinimized(headless) ? getBrowserProcessSnapshot() : new Set<number>();
 
-  return patchedChromium.launch({
+  const browser = await patchedChromium.launch({
     headless,
     ...(channel && { channel }),
     args: [
       "--no-sandbox",
       "--disable-dev-shm-usage",
       "--window-size=1920,1080",
+      ...getHeadedWindowArgs(headless),
     ],
   }) as unknown as Browser;
+  scheduleMinimizeNewBrowserWindows(previousPids, headless);
+  return browser;
 }
 
 /**

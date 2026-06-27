@@ -267,6 +267,9 @@ function LogRow({ log }: { log: PurchaseLog }) {
           {log.error_message}
         </span>
       )}
+      {log.status === "failed" && log.purchase_order_no && (
+        <span className="text-yellow-400 shrink-0">부분구매: {log.purchase_order_no}</span>
+      )}
       {log.status === "cancelled" && (
         <span className="text-yellow-400 shrink-0">중단됨</span>
       )}

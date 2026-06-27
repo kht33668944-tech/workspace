@@ -46,7 +46,7 @@ export interface PurchaseOrderInfo {
 
 export interface PurchaseResult {
   success: { orderId: string; purchaseOrderNo: string; cost?: number; paymentMethod?: string }[];
-  failed: { orderId: string; reason: string }[];
+  failed: { orderId: string; reason: string; purchaseOrderNo?: string; cost?: number; paymentMethod?: string }[];
 }
 
 export interface AutoPurchaseRequest {

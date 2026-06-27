@@ -3,6 +3,7 @@ import { launchBrowser } from "./browser";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
 import { loadSession, saveSession, loadFileSession, saveFileSession } from "./session-manager";
+import { formatAutomationError } from "./error-messages";
 
 const LOGIN_URL = "https://ohou.se/users/sign_in";
 
@@ -104,7 +105,7 @@ export async function purchaseOhouse(
       }
     } catch (err) {
       await browser.close();
-      const reason = err instanceof Error ? err.message : String(err);
+      const reason = formatAutomationError(err);
       for (const order of orders) {
         result.failed.push({ orderId: order.orderId, reason });
         onProgress?.(order.orderId, "failed", reason);
@@ -177,11 +178,20 @@ export async function purchaseOhouse(
         );
         console.log(`[ohouse-purchase] 주문 성공: ${order.orderId} → ${lastOrderNo} (총 원가: ${finalCost ?? "미확인"}, ${totalQty}개)`);
       } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        const failMsg = totalQty > 1 ? `${reason} (${successCount}/${totalQty}개 구매 후 실패)` : reason;
-        result.failed.push({ orderId: order.orderId, reason: failMsg });
+        const reason = formatAutomationError(err);
+        const partialInfo = successCount > 0 && totalQty > 1
+          ? ` (${successCount}/${totalQty}개 구매 후 실패${lastOrderNo ? `, 구매된 주문번호: ${lastOrderNo}` : ""})`
+          : "";
+        const failMsg = `${reason}${partialInfo}`;
+        result.failed.push({
+          orderId: order.orderId,
+          reason: failMsg,
+          purchaseOrderNo: lastOrderNo || undefined,
+          cost: totalCost > 0 ? totalCost : undefined,
+          paymentMethod: lastPaymentMethod,
+        });
         onProgress?.(order.orderId, "failed", failMsg);
-        console.error(`[ohouse-purchase] 주문 실패: ${order.orderId}`, failMsg);
+        console.error(`[ohouse-purchase] 주문 실패: ${order.orderId}`, failMsg, err instanceof Error ? err.message : String(err));
       }
     }
 
@@ -193,7 +203,7 @@ export async function purchaseOhouse(
       await saveFileSession("ohouse", loginId, updatedCookies);
     }
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
+    const reason = formatAutomationError(err);
     for (const order of orders) {
       if (!result.success.some(s => s.orderId === order.orderId) &&
           !result.failed.some(f => f.orderId === order.orderId)) {

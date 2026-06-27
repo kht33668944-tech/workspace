@@ -4,6 +4,7 @@ import sharp from "sharp";
 import type TesseractType from "tesseract.js";
 import path from "path";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
+import { formatAutomationError } from "./error-messages";
 
 // Next.js(Turbopack)에서 tesseract.js 워커 경로가 C:\ROOT\로 변환되는 문제 해결
 const TESSERACT_WORKER_PATH = process.env.TESSERACT_WORKER_PATH || path.resolve(
@@ -133,11 +134,20 @@ export async function purchaseGmarket(
           }
         }
       } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        const failMsg = totalQty > 1 ? `${reason} (${successCount}/${totalQty}개 구매 후 실패)` : reason;
-        result.failed.push({ orderId: order.orderId, reason: failMsg });
+        const reason = formatAutomationError(err);
+        const partialInfo = successCount > 0 && totalQty > 1
+          ? ` (${successCount}/${totalQty}개 구매 후 실패${lastOrderNo ? `, 구매된 주문번호: ${lastOrderNo}` : ""})`
+          : "";
+        const failMsg = `${reason}${partialInfo}`;
+        result.failed.push({
+          orderId: order.orderId,
+          reason: failMsg,
+          purchaseOrderNo: lastOrderNo || undefined,
+          cost: totalCost > 0 ? totalCost : undefined,
+          paymentMethod: lastPaymentMethod,
+        });
         onProgress?.(order.orderId, "failed", failMsg);
-        console.error(`[gmarket-purchase] 주문 실패: ${order.orderId}`, failMsg);
+        console.error(`[gmarket-purchase] 주문 실패: ${order.orderId}`, failMsg, err instanceof Error ? err.message : String(err));
 
         // 실패 후 페이지 상태 복구 시도
         try {
@@ -164,7 +174,7 @@ export async function purchaseGmarket(
       }
     }
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
+    const reason = formatAutomationError(err);
     // 로그인 실패 등 전체 실패
     for (const order of orders) {
       if (!result.success.some(s => s.orderId === order.orderId) &&
@@ -249,6 +259,7 @@ async function processSingleOrder(
   console.log(`[gmarket-purchase] 상품 페이지 이동: ${order.productUrl}${isRepeatPurchase ? " (반복구매)" : ""}`);
   await activePage.goto(order.productUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
   await activePage.waitForTimeout(2000);
+  await assertGmarketPurchasePage(activePage);
 
   // 2. 쿠폰 수집
   await collectCoupons(activePage);
@@ -756,6 +767,7 @@ async function clickPurchaseButton(page: Page) {
     window.scrollTo(0, 0);
   });
   await page.waitForTimeout(500);
+  await assertGmarketPurchasePage(page);
 
   // "선택" 버튼 먼저 클릭 (수량 확정, class=bt_select)
   const selectBtn = page.locator('button.bt_select').first();
@@ -781,6 +793,23 @@ async function clickPurchaseButton(page: Page) {
   await page.waitForURL((url) => url.toString().includes("order") || url.toString().includes("checkout"), { timeout: 30000 }).catch(() => null);
   await page.waitForTimeout(3000);
   console.log("[gmarket-purchase] 주문결제 페이지 이동 완료");
+}
+
+async function assertGmarketPurchasePage(page: Page) {
+  const status = await page.evaluate(() => {
+    const text = document.body?.innerText || "";
+    return {
+      isBotCheck: /봇\\(Bot\\)|봇 확인|간단한 확인 안내|검토번호|자동으로 작동하는 프로그램/.test(text),
+      isSoldOut: /품절|일시품절|판매종료|판매가 종료|구매할 수 없는/.test(text),
+    };
+  }).catch(() => ({ isBotCheck: false, isSoldOut: false }));
+
+  if (status.isBotCheck) {
+    throw new Error("지마켓에서 봇 확인 화면이 떠서 구매를 계속할 수 없습니다. 이미 일부 구매가 됐다면 구매내역에서 실제 주문 수량을 확인한 뒤 다시 진행해야 합니다.");
+  }
+  if (status.isSoldOut) {
+    throw new Error("상품이 품절 또는 판매종료 상태라 구매할 수 없습니다.");
+  }
 }
 
 // ═══════════════════════════════════

@@ -51,8 +51,11 @@ GEMINI_API_KEY
 ```text
 BROWSER_HEADLESS=false
 BROWSER_CHANNEL=chrome
+BROWSER_START_MINIMIZED=true
 MAX_BROWSER_INSTANCES=2
 ```
+
+`BROWSER_START_MINIMIZED`는 자동구매/운송장 수집용 브라우저를 작업표시줄에 최소화해서 시작할지 정합니다. 기본값은 최소화이며, 디버깅할 때만 `false`로 바꾸면 일반 창으로 뜹니다.
 
 ## Codex 작업 원칙
 
