@@ -290,7 +290,7 @@ async function processSingleOrder(
   await processPayment(activePage, paymentPin);
 
   // 8. 주문내역에서 주문번호 + 결제방식 + 원가 한번에 추출
-  const orderInfo = await extractOrderInfo(activePage, context);
+  const orderInfo = await extractOrderInfo(activePage);
 
   return orderInfo;
 }
@@ -1563,7 +1563,7 @@ function extractCardBrand(text: string): string | undefined {
   return undefined;
 }
 
-async function extractOrderInfo(page: Page, _context: BrowserContext): Promise<SingleOrderResult> {
+async function extractOrderInfo(page: Page): Promise<SingleOrderResult> {
   // 결제 완료 후 주문내역 API에서 주문번호 + payNo를 추출하고,
   // 주문 상세 페이지(/ko/pc/detail/basic/{payNo})에서 결제방식 + 원가를 추출
 

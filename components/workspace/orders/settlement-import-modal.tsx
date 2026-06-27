@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useMemo } from "react";
-import { Upload, X, FileSpreadsheet, Check, AlertTriangle, ChevronDown } from "lucide-react";
+import { Upload, X, FileSpreadsheet, Check } from "lucide-react";
 import { parseSettlementExcel } from "@/lib/excel-parser";
 import type { SettlementRow } from "@/lib/excel-parser";
 import type { Order, OrderUpdate } from "@/types/database";

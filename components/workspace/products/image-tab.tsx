@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import Image from "next/image";
 import {
   Search, X, Copy, Check, ImageOff, Upload, Trash2, Loader2,
   FileText, ExternalLink, Play, ChevronDown, ChevronUp,
@@ -93,11 +94,13 @@ function ImageCell({ url, isThumb, onDelete, onSetThumbAndKeepOnly, onSetThumbOn
           isThumb ? "border-blue-500" : "border-[var(--border)]"
         }`}
       >
-        <img
+        <Image
           src={url}
           alt=""
-          loading="lazy"
-          className="w-full h-full object-cover cursor-pointer"
+          fill
+          unoptimized
+          sizes="96px"
+          className="object-cover cursor-pointer"
           onClick={() => window.open(url, "_blank")}
         />
         {isThumb && (
@@ -157,11 +160,13 @@ function DetailImageCell({ url, onClear }: { url: string; onClear: () => void })
   return (
     <div className="flex flex-col gap-0.5 shrink-0">
       <div className="relative w-24 h-24 rounded-lg overflow-hidden border-2 border-amber-500">
-        <img
+        <Image
           src={url}
           alt=""
-          loading="lazy"
-          className="w-full h-full object-cover cursor-pointer"
+          fill
+          unoptimized
+          sizes="96px"
+          className="object-cover cursor-pointer"
           onClick={() => window.open(url, "_blank")}
         />
         <div className="absolute top-0.5 left-0.5 bg-amber-500 rounded text-[8px] text-white px-1 leading-4 pointer-events-none">

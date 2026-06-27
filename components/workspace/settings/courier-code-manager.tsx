@@ -177,7 +177,7 @@ export default function CourierCodeManager() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredCodes.map((c, i) => {
+                    {filteredCodes.map((c) => {
                       const realIdx = codes.indexOf(c);
                       return (
                         <tr

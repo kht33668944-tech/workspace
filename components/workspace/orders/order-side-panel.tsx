@@ -22,7 +22,7 @@ interface OrderSidePanelProps {
   onClose: () => void;
 }
 
-export function OrderSidePanelContent({ order, onUpdate, onClose }: OrderSidePanelProps) {
+export function OrderSidePanelContent({ order, onUpdate }: OrderSidePanelProps) {
   const [logInput, setLogInput] = useState("");
   const logsEndRef = useRef<HTMLDivElement>(null);
 

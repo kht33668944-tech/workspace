@@ -25,9 +25,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   // 언마운트 시 모든 타이머 정리
   useEffect(() => {
+    const timeouts = timeoutsRef.current;
     return () => {
-      timeoutsRef.current.forEach((t) => clearTimeout(t));
-      timeoutsRef.current.clear();
+      timeouts.forEach((t) => clearTimeout(t));
+      timeouts.clear();
     };
   }, []);
 

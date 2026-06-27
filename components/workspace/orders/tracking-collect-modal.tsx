@@ -143,13 +143,15 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
   }, [pendingOrders, platform]);
 
   // 전체 결과 합산
-  const mergedResult: ScrapeResult | null = results.length > 0
-    ? {
+  const mergedResult: ScrapeResult | null = useMemo(() => {
+    return results.length > 0
+      ? {
         success: results.flatMap((r) => r.success),
         failed: results.flatMap((r) => r.failed),
         notFound: results.flatMap((r) => r.notFound),
       }
-    : null;
+      : null;
+  }, [results]);
 
   // 자동 수집 시작
   const handleAutoCollect = async () => {

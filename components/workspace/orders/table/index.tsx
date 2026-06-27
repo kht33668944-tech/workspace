@@ -15,7 +15,7 @@ const PAGE_SIZE = 100;
 
 function OrderTable({
   orders: rawOrders, allOrders, loading, selectedIds, onSelectToggle, onSelectAll, onUpdate,
-  onUndo, onDeleteSelected: _onDeleteSelected, onStartBatchUndo, onEndBatchUndo, onRowClick, columnFilters, onColumnFilterChange,
+  onUndo, onStartBatchUndo, onEndBatchUndo, onRowClick, columnFilters, onColumnFilterChange,
 }: OrderTableProps) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const o: Record<string, number> = {};
@@ -34,7 +34,6 @@ function OrderTable({
   const isMobile = useIsMobile();
   // 모바일에서도 전체 컬럼 표시 (가로 스크롤로 접근)
   const visibleColumns = COLUMNS;
-  const visibleColCount = visibleColumns.length;
 
   const tableRef = useRef<HTMLDivElement>(null);
   const [scrolledRight, setScrolledRight] = useState(false);
@@ -155,7 +154,7 @@ function OrderTable({
   }, []);
 
   // 투명 input에서 타이핑 시작 → 편집 모드로 전환 (IME 조합 상태 유지)
-  const handleStartEdit = useCallback((row: number, col: number) => {
+  const handleStartEdit = useCallback(() => {
     setEditing(true);
     setInitialChar(null);
   }, []);

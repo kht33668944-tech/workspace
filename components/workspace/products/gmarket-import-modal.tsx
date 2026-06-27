@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import Image from "next/image";
 import { X, Loader2, CheckCircle, AlertCircle, ExternalLink, Plus, RefreshCw, ArrowLeft, CheckSquare, Square, Minimize2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
@@ -430,7 +431,7 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
     setSaving(true);
     setError(null);
 
-    const rows: Omit<ProductInsert, "user_id">[] = successItems.map((item, idx) => ({
+    const rows: Omit<ProductInsert, "user_id">[] = successItems.map((item) => ({
       product_name: item.editedName || item.product_name,
       lowest_price: item.price ?? 0,
       margin_rate: 0,
@@ -677,9 +678,9 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
                           : "border-[var(--border)] bg-[var(--bg-main)] hover:border-blue-400/40"
                       }`}
                     >
-                      <div className="w-12 h-12 rounded-lg overflow-hidden bg-[var(--bg-card)] shrink-0 border border-[var(--border)]">
+                      <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-[var(--bg-card)] shrink-0 border border-[var(--border)]">
                         {item.thumbnail ? (
-                          <img src={item.thumbnail} alt="" className="w-full h-full object-cover" loading="lazy" />
+                          <Image src={item.thumbnail} alt="" fill unoptimized sizes="48px" className="object-cover" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-[var(--text-disabled)] text-xs">없음</div>
                         )}
@@ -741,9 +742,9 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
                           : "border-[var(--border)] bg-[var(--bg-main)]"
                       }`}
                     >
-                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-[var(--bg-card)] shrink-0 border border-[var(--border)]">
+                      <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-[var(--bg-card)] shrink-0 border border-[var(--border)]">
                         {item.thumbnail_url ? (
-                          <img src={item.thumbnail_url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                          <Image src={item.thumbnail_url} alt="" fill unoptimized sizes="40px" className="object-cover" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-[var(--text-disabled)] text-xs">없음</div>
                         )}
@@ -792,13 +793,15 @@ export default function GmarketImportModal({ onClose, onImport, categories, exis
                   }`}
                 >
                   {/* 썸네일 */}
-                  <div className="w-16 h-16 rounded-lg overflow-hidden bg-[var(--bg-card)] shrink-0 border border-[var(--border)]">
+                  <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-[var(--bg-card)] shrink-0 border border-[var(--border)]">
                     {item.thumbnail_url ? (
-                      <img
+                      <Image
                         src={item.thumbnail_url}
                         alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
+                        fill
+                        unoptimized
+                        sizes="64px"
+                        className="object-cover"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-[var(--text-disabled)] text-xs">

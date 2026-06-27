@@ -1,6 +1,21 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Codex when working in this repository. Keep this file short because it is read often.
+
+## 사용자 응대 절대 규칙
+
+- 사용자는 비개발자다. 답변은 쉬운 말로, 결과와 영향 중심으로 짧게 설명한다.
+- 코드/명령어 세부사항은 필요할 때만 간단히 적는다.
+- 사용자가 같이 공부해야 할 부분은 한두 문장으로 쉽게 설명한다.
+- 사용자가 "알아서 해줘"라고 하면 안전한 범위에서 먼저 실행한다.
+- 결제, 삭제, 외부 전송, 권한 변경, 운영 DB 변경처럼 되돌리기 어려운 일은 실행 직전에 확인한다.
+
+## Codex 전환 원칙
+
+- 앞으로의 기준 문서는 `AGENTS.md`다. `CLAUDE.md`는 과거 Claude Code 호환용 참고 문서로만 본다.
+- Claude 전용 설정(`.claude/`)은 사용자가 요청하지 않으면 수정하거나 삭제하지 않는다.
+- 로컬 Codex 설정(`.codex/`)과 MCP 비밀값은 커밋하지 않는다.
+- 다시 쓸 수 있는 결정과 절차는 `obsidian-llm-wiki` skill로 `C:\Users\kht33\Documents\Obsidian Vault`에 한국어로 기록한다.
 
 ## 프로젝트 개요
 
@@ -13,7 +28,8 @@ npm run dev      # 개발 서버
 npm run build    # 프로덕션 빌드
 npm run start    # 프로덕션 서버
 npm run lint     # ESLint
-npx tsc --noEmit # 타입 체크
+npm run typecheck # 타입 체크
+npm run verify   # lint + typecheck
 ```
 
 테스트 프레임워크 없음(jest/vitest/playwright test 설정 없음). 검증은 수동/E2E.
@@ -91,12 +107,12 @@ npx tsc --noEmit # 타입 체크
 
 **선택 (로컬 개발):** `BROWSER_HEADLESS=false`, `BROWSER_CHANNEL=chrome`, `MAX_BROWSER_INSTANCES=2`
 
-## MCP 규칙
+## 도구 사용 규칙
 
-- 코드 작성 → context7 최신 문서 참고
-- 복잡한 오류 → sequential-thinking
-- UI 오류 → chrome-devtools
-- 스크래핑 → playwright
+- 코드 작성 시 현재 repo 패턴을 우선하고, 최신 외부 문서가 필요한 경우 공식 문서를 확인한다.
+- 복잡한 오류는 단계별로 원인을 좁힌다.
+- UI 오류는 브라우저에서 직접 확인한다.
+- 스크래핑/자동구매는 Playwright/patchright 구조와 기존 `lib/scrapers/` 패턴을 따른다.
 
 ## 자동화 운영 규칙
 

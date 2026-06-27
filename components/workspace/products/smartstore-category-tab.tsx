@@ -119,14 +119,6 @@ export default function SmartStoreCategoryTab() {
     });
   }
 
-  function handleSelectAll() {
-    if (selectedIds.size === filtered.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filtered.map((r) => r.id ?? "")));
-    }
-  }
-
   function toggleCollapse(type: string) {
     setCollapsedTypes((prev) => {
       const next = new Set(prev);
