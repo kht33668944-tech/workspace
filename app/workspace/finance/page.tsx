@@ -1,23 +1,28 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useFinance } from "@/hooks/use-finance";
 import FinanceKpiCards from "@/components/workspace/finance/finance-kpi-cards";
 import FinanceDateNav from "@/components/workspace/finance/finance-date-nav";
 import FinanceDetailTab from "@/components/workspace/finance/finance-detail-tab";
 import FinanceTrendTab from "@/components/workspace/finance/finance-trend-tab";
 import FinanceSummaryTab from "@/components/workspace/finance/finance-summary-tab";
+import OrderProfitTab from "@/components/workspace/finance/order-profit-tab";
 
-type Tab = "detail" | "trend" | "summary";
+type Tab = "detail" | "trend" | "summary" | "order-profit";
 
 function FinancePageInner() {
   const finance = useFinance();
-  const [activeTab, setActiveTab] = useState<Tab>("detail");
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") === "order-profit" ? "order-profit" : "detail";
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "detail", label: "상세 입력" },
     { key: "trend", label: "추이" },
     { key: "summary", label: "요약" },
+    { key: "order-profit", label: "주문 손익" },
   ];
 
   return (
@@ -61,7 +66,7 @@ function FinancePageInner() {
       </div>
 
       {/* 탭 콘텐츠 */}
-      {!finance.loading && !finance.snapshot ? (
+      {!finance.loading && !finance.snapshot && activeTab !== "order-profit" ? (
         <div className="flex flex-col items-center justify-center py-16 text-[var(--text-muted)]">
           <p className="text-lg mb-2">
             {finance.selectedDate} 스냅샷이 없습니다
@@ -88,6 +93,7 @@ function FinancePageInner() {
               fetchTrendData={finance.fetchTrendData}
             />
           )}
+          {activeTab === "order-profit" && <OrderProfitTab />}
         </>
       )}
     </div>

@@ -25,6 +25,9 @@ export interface Order {
   courier: string | null;
   tracking_no: string | null;
   delivery_status: string;
+  purchased_at: string | null;
+  delivered_at: string | null;
+  returned_at: string | null;
   is_duplicate: boolean;
   consultation_logs: ConsultationLog[];
   order_month: string | null; // generated: YYYY-MM
@@ -39,7 +42,12 @@ export interface ConsultationLog {
   content: string;
 }
 
-export type OrderInsert = Omit<Order, "id" | "margin" | "order_month" | "is_duplicate" | "created_at" | "updated_at"> & { is_duplicate?: boolean };
+export type OrderInsert = Omit<Order, "id" | "margin" | "order_month" | "is_duplicate" | "created_at" | "updated_at" | "purchased_at" | "delivered_at" | "returned_at"> & {
+  is_duplicate?: boolean;
+  purchased_at?: string | null;
+  delivered_at?: string | null;
+  returned_at?: string | null;
+};
 
 export type OrderUpdate = Partial<Omit<Order, "id" | "user_id" | "margin" | "order_month" | "created_at" | "updated_at">>;
 
@@ -289,7 +297,7 @@ export interface PriceHistory {
   new_price: number;
   change_amount: number;  // new_price - previous_price
   change_rate: number;    // 변동률 (%)
-  source: "scrape" | "impit_scrape" | "manual" | "soldout";
+  source: "scrape" | "impit_scrape" | "scrapling_scrape" | "manual" | "soldout";
   scraped_at: string;
 }
 

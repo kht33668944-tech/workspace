@@ -145,6 +145,11 @@ async function applyTrackingToOrders(
       failCount++;
       errors.push(`${item.orderNo}: DB에서 주문번호를 찾을 수 없음`);
     } else {
+      await supabase
+        .from("orders")
+        .update({ delivered_at: new Date().toISOString() })
+        .eq("purchase_order_no", item.orderNo)
+        .is("delivered_at", null);
       successCount++;
     }
   }

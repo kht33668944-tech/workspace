@@ -1,4 +1,4 @@
-import { launchBrowser, createStealthContext } from "./browser";
+import { launchBrowser, createStealthContext, keepContextInBackground } from "./browser";
 import { normalizeCourier } from "./constants";
 import type {
   GmarketOrderResponse,
@@ -28,12 +28,15 @@ export async function collectGmarketTracking(
 
   const browser = await launchBrowser();
   const context = await createStealthContext(browser);
+  keepContextInBackground(context);
   const page = await context.newPage();
+  keepContextInBackground(context);
 
   try {
     // 1. 로그인
     console.log("[gmarket] 로그인 중...");
     await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: TIMEOUT_NAV });
+    keepContextInBackground(context);
 
     const loginInput = page.getByPlaceholder("아이디");
     await loginInput.waitFor({ state: "visible", timeout: TIMEOUT_LOGIN });
@@ -71,7 +74,9 @@ export async function collectGmarketTracking(
       (res) => res.url().includes("/api/pays/paging") && res.status() === 200,
       { timeout: TIMEOUT_API }
     );
+    keepContextInBackground(context);
     await page.goto("https://my.gmarket.co.kr/ko/pc/main", { waitUntil: "networkidle", timeout: TIMEOUT_NAV });
+    keepContextInBackground(context);
 
     const firstApiRes = await firstApiPromise;
     const firstData = await firstApiRes.json() as GmarketOrderResponse;
@@ -213,10 +218,14 @@ async function getTrackingFromPage(
   page: import("playwright").Page,
   orderNo: string
 ): Promise<{ courier: string; trackingNo: string } | null> {
+  keepContextInBackground(page.context());
   const trackingPage = await page.context().newPage();
+  keepContextInBackground(page.context());
   try {
     const url = `${TRACKING_URL}/${orderNo}?trackingType=DELIVERY&charset=ko`;
+    keepContextInBackground(page.context());
     await trackingPage.goto(url, { waitUntil: "domcontentloaded", timeout: TIMEOUT_TRACKING });
+    keepContextInBackground(page.context());
 
     const data = await trackingPage.evaluate(() => {
       const el = document.getElementById("__NEXT_DATA__");

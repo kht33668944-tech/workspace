@@ -45,6 +45,28 @@ function makeDuplicateKey(
   return null;
 }
 
+function hasText(value: unknown): boolean {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function applyLifecycleTimestamps(order: Order, updates: OrderUpdate): OrderUpdate {
+  const next: OrderUpdate = { ...updates };
+  const now = new Date().toISOString();
+
+  if (hasText(next.purchase_order_no) && !hasText(order.purchase_order_no) && !order.purchased_at) {
+    next.purchased_at = now;
+  }
+
+  if (hasText(next.tracking_no) && !hasText(order.tracking_no) && !order.delivered_at) {
+    next.delivered_at = now;
+  }
+
+  if (next.delivery_status === "반품완료" && order.delivery_status !== "반품완료" && !order.returned_at) {
+    next.returned_at = now;
+  }
+
+  return next;
+}
 export function useOrders(options: UseOrdersOptions = {}) {
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -237,26 +259,43 @@ export function useOrders(options: UseOrdersOptions = {}) {
 
   // Optimistic update: 즉시 UI 반영 후 백그라운드에서 DB 저장
   const updateOrder = (id: string, updates: OrderUpdate, skipUndo = false) => {
-    // 배송상태 자동 변경 로직
-    const autoStatusUpdates = { ...updates };
+    let autoStatusUpdates: OrderUpdate = { ...updates };
+    const currentOrder = orders.find((o) => o.id === id);
+
+    if (currentOrder && !skipUndo) {
+      const merged = { ...currentOrder, ...autoStatusUpdates };
+
+      // 운송장번호 입력 → 배송완료 (취소/반품/교환 상태가 아닐 때만)
+      if (hasText(autoStatusUpdates.tracking_no) && autoStatusUpdates.tracking_no !== currentOrder.tracking_no) {
+        const noAutoChange = ["취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료"];
+        if (!noAutoChange.includes(merged.delivery_status)) {
+          autoStatusUpdates.delivery_status = "배송완료";
+        }
+      }
+      // 주문번호 입력 → 배송준비 (결제전 상태일 때만)
+      else if (hasText(autoStatusUpdates.purchase_order_no) && autoStatusUpdates.purchase_order_no !== currentOrder.purchase_order_no) {
+        if (merged.delivery_status === "결제전") {
+          autoStatusUpdates.delivery_status = "배송준비";
+        }
+      }
+
+      autoStatusUpdates = applyLifecycleTimestamps(currentOrder, autoStatusUpdates);
+    }
 
     // undo 스택에 이전 값 저장
-    if (!skipUndo) {
-      const order = orders.find((o) => o.id === id);
-      if (order) {
-        const prev: OrderUpdate = {};
-        for (const key of Object.keys(autoStatusUpdates) as (keyof OrderUpdate)[]) {
-          (prev as Record<string, unknown>)[key] = order[key as keyof Order];
-        }
-        const entry: UndoEntry = { type: "update", id, prev, next: autoStatusUpdates };
-        if (batchUndoRef.current) {
-          // 배치 모드: 그룹에 추가
-          batchUndoRef.current.push(entry);
-        } else {
-          // 단일 업데이트: 개별 그룹으로 push
-          undoStackRef.current.push({ entries: [entry] });
-          if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
-        }
+    if (!skipUndo && currentOrder) {
+      const prev: OrderUpdate = {};
+      for (const key of Object.keys(autoStatusUpdates) as (keyof OrderUpdate)[]) {
+        (prev as Record<string, unknown>)[key] = currentOrder[key as keyof Order];
+      }
+      const entry: UndoEntry = { type: "update", id, prev, next: autoStatusUpdates };
+      if (batchUndoRef.current) {
+        // 배치 모드: 그룹에 추가
+        batchUndoRef.current.push(entry);
+      } else {
+        // 단일 업데이트: 개별 그룹으로 push
+        undoStackRef.current.push({ entries: [entry] });
+        if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
       }
     }
 
@@ -264,24 +303,6 @@ export function useOrders(options: UseOrdersOptions = {}) {
       prev.map((o) => {
         if (o.id !== id) return o;
         const merged = { ...o, ...autoStatusUpdates };
-
-        // 운송장번호 입력 → 배송완료 (취소/반품/교환 상태가 아닐 때만)
-        if (autoStatusUpdates.tracking_no && autoStatusUpdates.tracking_no !== o.tracking_no) {
-          const noAutoChange = ["취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료"];
-          if (!noAutoChange.includes(merged.delivery_status)) {
-            autoStatusUpdates.delivery_status = "배송완료";
-            merged.delivery_status = "배송완료";
-          }
-        }
-        // 주문번호 입력 → 배송준비 (결제전 상태일 때만)
-        else if (autoStatusUpdates.purchase_order_no && autoStatusUpdates.purchase_order_no !== o.purchase_order_no) {
-          if (merged.delivery_status === "결제전") {
-            autoStatusUpdates.delivery_status = "배송준비";
-            merged.delivery_status = "배송준비";
-          }
-        }
-
-        // margin 재계산
         merged.margin = (merged.settlement || 0) - (merged.cost || 0);
         return merged;
       })

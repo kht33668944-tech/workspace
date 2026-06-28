@@ -5,7 +5,7 @@ import KpiCards from "@/components/workspace/dashboard/kpi-cards";
 import TodoFlow from "@/components/workspace/dashboard/todo-flow";
 import ActivityLog from "@/components/workspace/dashboard/activity-log";
 import QuickActions from "@/components/workspace/dashboard/quick-actions";
-import RecentOrders from "@/components/workspace/dashboard/recent-orders";
+import DailyProfitSummary from "@/components/workspace/dashboard/daily-profit-summary";
 
 export default function WorkspacePage() {
   const { data, loading } = useDashboard();
@@ -48,8 +48,12 @@ export default function WorkspacePage() {
         loading={loading}
       />
 
-      {/* 최근 주문 */}
-      <RecentOrders orders={data.recentOrders} loading={loading} />
+      {/* 날짜별 손익 */}
+      <DailyProfitSummary
+        rows={data.dailyProfitRows}
+        summary={data.monthlyProfitSummary}
+        loading={loading}
+      />
     </div>
   );
 }

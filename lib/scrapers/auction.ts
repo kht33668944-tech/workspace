@@ -1,4 +1,4 @@
-import { launchBrowser, createStealthContext } from "./browser";
+import { launchBrowser, createStealthContext, keepContextInBackground } from "./browser";
 import { normalizeCourier } from "./constants";
 import type { ScrapeResult } from "./types";
 
@@ -78,12 +78,15 @@ export async function collectAuctionTracking(
 
   const browser = await launchBrowser();
   const context = await createStealthContext(browser);
+  keepContextInBackground(context);
   const page = await context.newPage();
+  keepContextInBackground(context);
 
   try {
     // 1. 로그인
     console.log("[auction] 로그인 중...");
     await page.goto(LOGIN_URL, { waitUntil: "networkidle", timeout: TIMEOUT_NAV });
+    keepContextInBackground(context);
 
     const loginInput = page.locator("#typeMemberInputId");
     await loginInput.waitFor({ state: "visible", timeout: TIMEOUT_LOGIN });
@@ -110,7 +113,9 @@ export async function collectAuctionTracking(
 
     // 2. 단일 페이지로 순차 조회 (딜레이 적용)
     console.log(`[auction] ${orderNos.length}건 배송추적 시작...`);
+    keepContextInBackground(context);
     const trackingPage = await context.newPage();
+    keepContextInBackground(context);
     const retryQueue: string[] = [];
 
     try {
@@ -125,7 +130,9 @@ export async function collectAuctionTracking(
         if (i > 0) await delay(2000);
 
         const url = `${TRACKING_URL}/?orderNo=${orderNo}`;
+        keepContextInBackground(context);
         await trackingPage.goto(url, { waitUntil: "domcontentloaded", timeout: TIMEOUT_TRACKING });
+        keepContextInBackground(context);
         await trackingPage.waitForTimeout(1000); // 페이지 로딩 안정화
 
         const data = await extractTrackingFromPage(trackingPage);
@@ -176,7 +183,9 @@ export async function collectAuctionTracking(
           if (i > 0) await delay(3000);
 
           const url = `${TRACKING_URL}/?orderNo=${orderNo}`;
+          keepContextInBackground(context);
           await trackingPage.goto(url, { waitUntil: "networkidle", timeout: TIMEOUT_RETRY });
+          keepContextInBackground(context);
           await trackingPage.waitForTimeout(1500);
 
           const data = await extractTrackingFromPage(trackingPage);

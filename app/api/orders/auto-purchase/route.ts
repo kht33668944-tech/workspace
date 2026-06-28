@@ -164,6 +164,11 @@ export async function POST(request: NextRequest) {
           if (cost !== undefined) updateData.cost = cost;
           if (paymentMethod) updateData.payment_method = paymentMethod;
 
+          let existingQuery = supabase.from("orders").select("purchased_at").eq("id", orderId);
+          if (userId) existingQuery = existingQuery.eq("user_id", userId);
+          const { data: existingOrder } = await existingQuery.maybeSingle();
+          if (!existingOrder?.purchased_at) updateData.purchased_at = new Date().toISOString();
+
           // service_role(RLS 우회)이므로 소유권 스코핑을 명시.
           // userId가 있으면 user_id로 한 번 더 제한(IDOR 방어), 만료 JWT로 userId가 없으면
           // 기존 동작(id-only) 유지 — "JWT 만료와 무관 동작" 의도 보존.
@@ -234,6 +239,11 @@ export async function POST(request: NextRequest) {
               };
               if (f.cost !== undefined) partialUpdate.cost = f.cost;
               if (f.paymentMethod) partialUpdate.payment_method = f.paymentMethod;
+
+              let existingPartialQuery = supabase.from("orders").select("purchased_at").eq("id", f.orderId);
+              if (userId) existingPartialQuery = existingPartialQuery.eq("user_id", userId);
+              const { data: existingPartialOrder } = await existingPartialQuery.maybeSingle();
+              if (!existingPartialOrder?.purchased_at) partialUpdate.purchased_at = new Date().toISOString();
 
               let partialQuery = supabase.from("orders").update(partialUpdate).eq("id", f.orderId);
               if (userId) partialQuery = partialQuery.eq("user_id", userId);

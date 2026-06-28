@@ -2,6 +2,9 @@ import { chromium, type Browser, type BrowserContext } from "playwright";
 import { chromium as patchedChromium } from "patchright";
 import { execFile, execFileSync } from "child_process";
 
+const browserLaunchSnapshots = new WeakMap<Browser, Set<number>>();
+const contextLaunchSnapshots = new WeakMap<BrowserContext, Set<number>>();
+
 /**
  * G마켓 전용 BrowserContext 생성.
  * gmarket-purchase.ts와 동일한 방식 — extraHTTPHeaders 없이 브라우저 자체 헤더 사용.
@@ -13,6 +16,7 @@ export async function createGmarketContext(browser: Browser): Promise<BrowserCon
     timezoneId: "Asia/Seoul",
     viewport: { width: 1920, height: 1080 },
   });
+  rememberContextLaunch(context, browser);
 
   await context.addInitScript(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => false });
@@ -33,11 +37,20 @@ const CHROME_USER_AGENT =
 function getHeadedWindowArgs(headless: boolean): string[] {
   if (headless) return [];
   if (process.env.BROWSER_START_MINIMIZED === "false") return [];
-  return ["--start-minimized", "--window-position=-32000,-32000"];
+  return ["--start-minimized", "--window-position=32000,32000", "--window-size=1,1"];
 }
 
 function shouldStartMinimized(headless: boolean): boolean {
   return !headless && process.platform === "win32" && process.env.BROWSER_START_MINIMIZED !== "false";
+}
+
+function rememberBrowserLaunch(browser: Browser, previousPids: Set<number>): void {
+  browserLaunchSnapshots.set(browser, previousPids);
+}
+
+function rememberContextLaunch(context: BrowserContext, browser: Browser): void {
+  const previousPids = browserLaunchSnapshots.get(browser);
+  if (previousPids) contextLaunchSnapshots.set(context, previousPids);
 }
 
 function getBrowserProcessSnapshot(): Set<number> {
@@ -66,19 +79,15 @@ function getBrowserProcessSnapshot(): Set<number> {
   }
 }
 
-function minimizeNewBrowserWindows(previousPids: Set<number>): void {
+function startBrowserWindowGuard(previousPids: Set<number>, durationMs = 2500): void {
   if (process.platform !== "win32") return;
 
   const before = [...previousPids].join(",");
   const beforeArray = before ? `@(${before})` : "@()";
   const script = `
 $before = ${beforeArray}
-$targets = @(Get-CimInstance Win32_Process | Where-Object {
-  $_.Name -in @("chrome.exe", "msedge.exe", "chromium.exe") -and
-  $before -notcontains $_.ProcessId -and
-  $_.CommandLine -match "playwright_|remote-debugging-pipe|ms-playwright"
-} | Select-Object -ExpandProperty ProcessId)
-if ($targets.Count -eq 0) { exit 0 }
+$deadline = [DateTime]::UtcNow.AddMilliseconds(${durationMs})
+$handled = @{}
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -102,41 +111,61 @@ public static class WindowTools {
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 }
 "@
-[WindowTools]::EnumWindows({
-  param([IntPtr]$hWnd, [IntPtr]$lParam)
-  if ([WindowTools]::IsWindowVisible($hWnd)) {
-    [uint32]$windowPid = 0
-    [void][WindowTools]::GetWindowThreadProcessId($hWnd, [ref]$windowPid)
-    if ($targets -contains [int]$windowPid) {
-      $placement = New-Object WindowTools+WINDOWPLACEMENT
-      $placement.length = [Runtime.InteropServices.Marshal]::SizeOf([type][WindowTools+WINDOWPLACEMENT])
-      [void][WindowTools]::GetWindowPlacement($hWnd, [ref]$placement)
-      $placement.showCmd = 2
-      $placement.rcNormalPosition.left = 80
-      $placement.rcNormalPosition.top = 60
-      $placement.rcNormalPosition.right = 1600
-      $placement.rcNormalPosition.bottom = 980
-      [void][WindowTools]::SetWindowPlacement($hWnd, [ref]$placement)
-      [void][WindowTools]::ShowWindowAsync($hWnd, 6)
-    }
+while ([DateTime]::UtcNow -lt $deadline) {
+  $targets = @(Get-CimInstance Win32_Process | Where-Object {
+    $_.Name -in @("chrome.exe", "msedge.exe", "chromium.exe") -and
+    $before -notcontains $_.ProcessId -and
+    $_.CommandLine -match "playwright_|remote-debugging-pipe|ms-playwright"
+  } | Select-Object -ExpandProperty ProcessId)
+  if ($targets.Count -gt 0) {
+    [WindowTools]::EnumWindows({
+      param([IntPtr]$hWnd, [IntPtr]$lParam)
+      if ([WindowTools]::IsWindowVisible($hWnd)) {
+        [uint32]$windowPid = 0
+        [void][WindowTools]::GetWindowThreadProcessId($hWnd, [ref]$windowPid)
+        if (($targets -contains [int]$windowPid) -and -not $handled.ContainsKey([int]$windowPid)) {
+          $placement = New-Object WindowTools+WINDOWPLACEMENT
+          $placement.length = [Runtime.InteropServices.Marshal]::SizeOf([type][WindowTools+WINDOWPLACEMENT])
+          [void][WindowTools]::GetWindowPlacement($hWnd, [ref]$placement)
+          if (($placement.showCmd -ne 2) -and ($placement.showCmd -ne 7)) {
+            $placement.showCmd = 2
+            $placement.rcNormalPosition.left = 80
+            $placement.rcNormalPosition.top = 60
+            $placement.rcNormalPosition.right = 1600
+            $placement.rcNormalPosition.bottom = 980
+            [void][WindowTools]::SetWindowPlacement($hWnd, [ref]$placement)
+            [void][WindowTools]::ShowWindowAsync($hWnd, 6)
+            $handled[[int]$windowPid] = $true
+          }
+        }
+      }
+      return $true
+    }, [IntPtr]::Zero) | Out-Null
   }
-  return $true
-}, [IntPtr]::Zero) | Out-Null
+  if ($handled.Count -gt 0) { break }
+  Start-Sleep -Milliseconds 50
+}
 `;
 
-  execFile(
+  const child = execFile(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
     { windowsHide: true },
     () => {}
   );
+  child.unref();
 }
 
-function scheduleMinimizeNewBrowserWindows(previousPids: Set<number>, headless: boolean): void {
+function prepareHiddenBrowserLaunch(previousPids: Set<number>, headless: boolean): void {
   if (!shouldStartMinimized(headless)) return;
-  for (const delay of [150, 500, 1200, 2500, 5000]) {
-    setTimeout(() => minimizeNewBrowserWindows(previousPids), delay).unref();
-  }
+  startBrowserWindowGuard(previousPids);
+}
+
+export function keepContextInBackground(context: BrowserContext, durationMs = 1500): void {
+  const previousPids = contextLaunchSnapshots.get(context);
+  if (!previousPids || process.platform !== "win32") return;
+  if (process.env.BROWSER_START_MINIMIZED === "false") return;
+  startBrowserWindowGuard(previousPids, durationMs);
 }
 
 export async function launchBrowser(): Promise<Browser> {
@@ -144,6 +173,7 @@ export async function launchBrowser(): Promise<Browser> {
   const channel = process.env.BROWSER_CHANNEL || undefined;
   const previousPids = shouldStartMinimized(headless) ? getBrowserProcessSnapshot() : new Set<number>();
 
+  prepareHiddenBrowserLaunch(previousPids, headless);
   const browser = await chromium.launch({
     headless,
     ...(channel && { channel }),
@@ -158,7 +188,7 @@ export async function launchBrowser(): Promise<Browser> {
       ...getHeadedWindowArgs(headless),
     ],
   });
-  scheduleMinimizeNewBrowserWindows(previousPids, headless);
+  if (shouldStartMinimized(headless)) rememberBrowserLaunch(browser, previousPids);
   return browser;
 }
 
@@ -179,6 +209,7 @@ export async function createStealthContext(browser: Browser): Promise<BrowserCon
       "sec-ch-ua-platform": '"Windows"',
     },
   });
+  rememberContextLaunch(context, browser);
 
   await context.addInitScript(() => {
     // navigator.webdriver 제거
@@ -241,6 +272,7 @@ export async function launchPatchedBrowser(): Promise<Browser> {
   const channel = process.env.BROWSER_CHANNEL || undefined;
   const previousPids = shouldStartMinimized(headless) ? getBrowserProcessSnapshot() : new Set<number>();
 
+  prepareHiddenBrowserLaunch(previousPids, headless);
   const browser = await patchedChromium.launch({
     headless,
     ...(channel && { channel }),
@@ -251,7 +283,7 @@ export async function launchPatchedBrowser(): Promise<Browser> {
       ...getHeadedWindowArgs(headless),
     ],
   }) as unknown as Browser;
-  scheduleMinimizeNewBrowserWindows(previousPids, headless);
+  if (shouldStartMinimized(headless)) rememberBrowserLaunch(browser, previousPids);
   return browser;
 }
 
@@ -266,6 +298,7 @@ export async function createPatchedGmarketContext(browser: Browser): Promise<Bro
     timezoneId: "Asia/Seoul",
     viewport: { width: 1920, height: 1080 },
   });
+  rememberContextLaunch(context, browser);
 
   return context;
 }

@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     for (let i = 0; i < body.updates.length; i += UPDATE_BATCH) {
       const batch = body.updates.slice(i, i + UPDATE_BATCH);
       const results = await Promise.allSettled(
-        batch.map((update) => {
+        batch.map(async (update) => {
           const updateData: Record<string, unknown> = {
             courier: update.courier,
             tracking_no: update.tracking_no,
@@ -35,11 +35,22 @@ export async function POST(request: NextRequest) {
           if (update.tracking_no) {
             updateData.delivery_status = "배송완료";
           }
-          return supabase
+
+          const result = await supabase
             .from("orders")
             .update(updateData)
             .eq("purchase_order_no", update.purchase_order_no)
             .select("id");
+
+          if (update.tracking_no && !result.error && result.data && result.data.length > 0) {
+            await supabase
+              .from("orders")
+              .update({ delivered_at: new Date().toISOString() })
+              .eq("purchase_order_no", update.purchase_order_no)
+              .is("delivered_at", null);
+          }
+
+          return result;
         })
       );
 

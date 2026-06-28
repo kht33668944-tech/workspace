@@ -1,7 +1,7 @@
 import { type BrowserContext } from "playwright";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ScrapeResult } from "./types";
-import { launchBrowser, createStealthContext } from "./browser";
+import { launchBrowser, createStealthContext, keepContextInBackground } from "./browser";
 import { normalizeCourier } from "./constants";
 import { loadSession, saveSession, loadFileSession, saveFileSession } from "./session-manager";
 
@@ -29,12 +29,15 @@ interface OhouseOrderListResponse {
 }
 
 async function isSessionValid(context: BrowserContext): Promise<boolean> {
+  keepContextInBackground(context);
   const page = await context.newPage();
+  keepContextInBackground(context);
   try {
     await page.goto("https://ohou.se/user_shopping_pages/order_list", {
       waitUntil: "domcontentloaded",
       timeout: 15000,
     });
+    keepContextInBackground(context);
     const url = page.url();
     if (url.includes("sign_in") || url.includes("login")) return false;
     const apiResult = await page.evaluate(async () => {
@@ -97,11 +100,14 @@ export async function collectOhouseTracking(
   // 2. 세션 복원 실패 시 로그인
   if (needsLogin) {
     context = await createStealthContext(browser);
+    keepContextInBackground(context);
     const page = await context.newPage();
+    keepContextInBackground(context);
 
     try {
       console.log("[ohouse] 로그인 중...");
       await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+      keepContextInBackground(context);
 
       const emailInput = page.locator('input[placeholder*="이메일"], input[name="email"], input[type="email"]').first();
       await emailInput.waitFor({ state: "visible", timeout: 30000 });
@@ -147,11 +153,14 @@ export async function collectOhouseTracking(
     // 3. 주문 목록 API로 대상 주문 정보 수집
     console.log(`[ohouse] 주문 목록에서 ${orderNos.length}건 검색 중...`);
 
+    keepContextInBackground(activeContext);
     const listPage = await activeContext.newPage();
+    keepContextInBackground(activeContext);
     await listPage.goto("https://ohou.se/user_shopping_pages/order_list", {
       waitUntil: "domcontentloaded",
       timeout: 30000,
     });
+    keepContextInBackground(activeContext);
 
     const matchedOrders: Map<string, { orderId: number; emailToken: string; orderOptionId: number; productName: string }> = new Map();
     let cursor = "";
@@ -211,7 +220,9 @@ export async function collectOhouseTracking(
 
     // 4. 배송조회 페이지에서 운송장 정보 추출
     if (matchedOrders.size > 0) {
+      keepContextInBackground(activeContext);
       const trackingPage = await activeContext.newPage();
+      keepContextInBackground(activeContext);
       const entries = Array.from(matchedOrders.entries());
 
       for (let i = 0; i < entries.length; i++) {
@@ -230,7 +241,9 @@ export async function collectOhouseTracking(
           const deliveryUrl = `${DELIVERY_BASE_URL}/${info.orderId}?type=ORDER&targetOptionId=${info.orderOptionId}&token=${info.emailToken}`;
           console.log(`[ohouse] ${orderNo}: 배송조회 중...`);
 
+          keepContextInBackground(activeContext);
           await trackingPage.goto(deliveryUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+          keepContextInBackground(activeContext);
           await trackingPage.waitForTimeout(1500);
 
           const trackingData = await trackingPage.evaluate(() => {
