@@ -136,6 +136,12 @@ export async function POST(request: NextRequest) {
         const batchId = body.batchId || crypto.randomUUID();
         const allSuccess: SSEEvent["success"] = [];
         const allFailed: SSEEvent["failed"] = [];
+        let targetOrders = body.orders;
+        const purchaseLockStatus = "구매진행중";
+        const purchaseReviewStatus = "구매확인필요";
+        const lockedOrderIds = new Set<string>();
+        const lockReleaseStatusByOrderId = new Map<string, string>();
+        const loggedFailureOrderIds = new Set<string>();
 
         // 주문별 즉시 DB 업데이트 + SSE 전송 콜백
         const onProgress = (
@@ -203,14 +209,183 @@ export async function POST(request: NextRequest) {
           });
         };
 
+        const releasePurchaseLock = async (orderId: string) => {
+          if (!lockedOrderIds.has(orderId)) return;
+          const restoreStatus = lockReleaseStatusByOrderId.get(orderId) || "결제전";
+
+          let releaseQuery = supabase
+            .from("orders")
+            .update({ delivery_status: restoreStatus })
+            .eq("id", orderId)
+            .eq("delivery_status", purchaseLockStatus)
+            .or("purchase_order_no.is.null,purchase_order_no.eq.");
+          if (userId) releaseQuery = releaseQuery.eq("user_id", userId);
+
+          const { error: releaseErr } = await releaseQuery;
+          if (releaseErr) {
+            console.error(`[auto-purchase] 구매 잠금 해제 실패 (${orderId}):`, releaseErr.message);
+          } else {
+            lockedOrderIds.delete(orderId);
+            lockReleaseStatusByOrderId.delete(orderId);
+          }
+        };
+
         try {
+          // 최종 안전장치: UI가 오래된 주문 스냅샷을 보내도, 서버에서 DB를 다시 확인해
+          // 이미 구매번호가 있는 주문은 외부 결제 단계로 넘기지 않는다.
+          const seenRequestOrderIds = new Set<string>();
+          const duplicatedInRequest: PurchaseOrderInfo[] = [];
+          targetOrders = body.orders.filter((order) => {
+            if (seenRequestOrderIds.has(order.orderId)) {
+              duplicatedInRequest.push(order);
+              return false;
+            }
+            seenRequestOrderIds.add(order.orderId);
+            return true;
+          });
+
+          for (const order of duplicatedInRequest) {
+            const reason = "같은 자동구매 요청 안에 동일 주문이 중복 포함되어 자동구매를 차단했습니다.";
+            allFailed.push({ orderId: order.orderId, reason });
+            sendEvent({ type: "progress", orderId: order.orderId, status: "failed", message: reason });
+            await supabase.from("purchase_logs").insert({
+              user_id: userId,
+              batch_id: batchId,
+              order_id: order.orderId,
+              platform,
+              login_id: loginId,
+              status: "failed",
+              purchase_order_no: null,
+              cost: null,
+              payment_method: null,
+              error_message: reason,
+              product_name: order.productName ?? null,
+              recipient_name: order.recipientName ?? null,
+            }).then(({ error: logErr }) => {
+              if (logErr) console.error(`[auto-purchase] 중복요청 차단 로그 기록 실패 (${order.orderId}):`, logErr.message);
+            });
+            loggedFailureOrderIds.add(order.orderId);
+          }
+
+          if (targetOrders.length > 0) {
+            let orderStateQuery = supabase
+              .from("orders")
+              .select("id, purchase_order_no, delivery_status")
+              .in("id", targetOrders.map((order) => order.orderId));
+            if (userId) orderStateQuery = orderStateQuery.eq("user_id", userId);
+            const { data: currentOrders, error: currentOrdersErr } = await orderStateQuery;
+
+            if (currentOrdersErr) {
+              throw new Error(`구매 전 주문 상태 확인 실패: ${currentOrdersErr.message}`);
+            }
+
+            const currentOrderById = new Map((currentOrders || []).map((order) => [order.id as string, order]));
+            const lockableOrders = targetOrders.filter((order) => {
+              const currentOrder = currentOrderById.get(order.orderId);
+              const existingPurchaseNo = typeof currentOrder?.purchase_order_no === "string"
+                ? currentOrder.purchase_order_no.trim()
+                : "";
+              let reason: string | null = null;
+
+              if (!currentOrder) {
+                reason = "주문을 찾을 수 없어 자동구매를 차단했습니다.";
+              } else if (existingPurchaseNo) {
+                reason = `이미 구매번호(${existingPurchaseNo})가 있는 주문이라 자동구매를 차단했습니다.`;
+              } else if (currentOrder.delivery_status !== "결제전") {
+                reason = currentOrder.delivery_status === purchaseLockStatus
+                  ? "이미 다른 자동구매 작업이 진행 중인 주문이라 차단했습니다."
+                  : `현재 상태가 '${currentOrder.delivery_status}'인 주문이라 자동구매를 차단했습니다. 결제전 상태만 구매할 수 있습니다.`;
+              }
+
+              if (!reason) return true;
+
+              allFailed.push({ orderId: order.orderId, reason });
+              sendEvent({ type: "progress", orderId: order.orderId, status: "failed", message: reason });
+              void supabase.from("purchase_logs").insert({
+                user_id: userId,
+                batch_id: batchId,
+                order_id: order.orderId,
+                platform,
+                login_id: loginId,
+                status: "failed",
+                purchase_order_no: null,
+                cost: null,
+                payment_method: null,
+                error_message: reason,
+                product_name: order.productName ?? null,
+                recipient_name: order.recipientName ?? null,
+              }).then(({ error: logErr }) => {
+                if (logErr) console.error(`[auto-purchase] 사전차단 로그 기록 실패 (${order.orderId}):`, logErr.message);
+              });
+              loggedFailureOrderIds.add(order.orderId);
+              return false;
+            });
+
+            const lockedOrders: PurchaseOrderInfo[] = [];
+            for (const order of lockableOrders) {
+              let lockQuery = supabase
+                .from("orders")
+                .update({ delivery_status: purchaseLockStatus })
+                .eq("id", order.orderId)
+                .eq("delivery_status", "결제전")
+                .or("purchase_order_no.is.null,purchase_order_no.eq.")
+                .select("id");
+              if (userId) lockQuery = lockQuery.eq("user_id", userId);
+
+              const { data: lockedRows, error: lockErr } = await lockQuery;
+              if (lockErr) {
+                throw new Error(`구매 잠금 실패 (${order.recipientName}): ${lockErr.message}`);
+              }
+
+              if (lockedRows && lockedRows.length === 1) {
+                lockedOrderIds.add(order.orderId);
+                lockReleaseStatusByOrderId.set(order.orderId, purchaseReviewStatus);
+                lockedOrders.push(order);
+              } else {
+                const reason = "다른 작업이 먼저 주문 상태를 변경해 자동구매를 차단했습니다.";
+                allFailed.push({ orderId: order.orderId, reason });
+                sendEvent({ type: "progress", orderId: order.orderId, status: "failed", message: reason });
+                await supabase.from("purchase_logs").insert({
+                  user_id: userId,
+                  batch_id: batchId,
+                  order_id: order.orderId,
+                  platform,
+                  login_id: loginId,
+                  status: "failed",
+                  purchase_order_no: null,
+                  cost: null,
+                  payment_method: null,
+                  error_message: reason,
+                  product_name: order.productName ?? null,
+                  recipient_name: order.recipientName ?? null,
+                }).then(({ error: logErr }) => {
+                  if (logErr) console.error(`[auto-purchase] 잠금경합 차단 로그 기록 실패 (${order.orderId}):`, logErr.message);
+                });
+                loggedFailureOrderIds.add(order.orderId);
+              }
+            }
+            targetOrders = lockedOrders;
+          }
+
+          if (targetOrders.length === 0) {
+            sendEvent({
+              type: "done",
+              success: allSuccess,
+              failed: allFailed,
+              successCount: allSuccess.length,
+              failCount: allFailed.length,
+              message: "구매 가능한 주문이 없습니다. 이미 구매된 주문은 자동구매에서 제외했습니다.",
+            });
+            return;
+          }
+
           await browserPool.acquire();
           let result;
           try {
             if (platform === "gmarket") {
-              result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, body.orders, onProgress, signal, onOrderComplete);
+              result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, targetOrders, onProgress, signal, onOrderComplete);
             } else {
-              result = await purchaseOhouse(loginId, loginPw, body.orders, onProgress, supabase, signal, body.paymentPin, naverLoginId, naverLoginPw);
+              result = await purchaseOhouse(loginId, loginPw, targetOrders, onProgress, supabase, signal, body.paymentPin, naverLoginId, naverLoginPw);
             }
           } finally {
             browserPool.release();
@@ -262,22 +437,29 @@ export async function POST(request: NextRequest) {
               }
             }
 
-            await supabase.from("purchase_logs").insert({
-              user_id: userId,
-              batch_id: batchId,
-              order_id: f.orderId,
-              platform,
-              login_id: loginId,
-              status: signal.aborted ? "cancelled" : "failed",
-              purchase_order_no: f.purchaseOrderNo ?? null,
-              cost: f.cost ?? null,
-              payment_method: f.paymentMethod ?? null,
-              error_message: f.reason,
-              product_name: orderInfo?.productName ?? null,
-              recipient_name: orderInfo?.recipientName ?? null,
-            }).then(({ error: logErr }) => {
-              if (logErr) console.error(`[auto-purchase] 실패 로그 기록 실패 (${f.orderId}):`, logErr.message);
-            });
+            if (!loggedFailureOrderIds.has(f.orderId)) {
+              await supabase.from("purchase_logs").insert({
+                user_id: userId,
+                batch_id: batchId,
+                order_id: f.orderId,
+                platform,
+                login_id: loginId,
+                status: signal.aborted ? "cancelled" : "failed",
+                purchase_order_no: f.purchaseOrderNo ?? null,
+                cost: f.cost ?? null,
+                payment_method: f.paymentMethod ?? null,
+                error_message: f.reason,
+                product_name: orderInfo?.productName ?? null,
+                recipient_name: orderInfo?.recipientName ?? null,
+              }).then(({ error: logErr }) => {
+                if (logErr) console.error(`[auto-purchase] 실패 로그 기록 실패 (${f.orderId}):`, logErr.message);
+              });
+              loggedFailureOrderIds.add(f.orderId);
+            }
+
+            if (!f.purchaseOrderNo) {
+              await releasePurchaseLock(f.orderId);
+            }
           }
 
           const isCancelled = signal.aborted;
@@ -305,6 +487,15 @@ export async function POST(request: NextRequest) {
             sendEvent({ type: "error", message: `서버 오류: ${msg}` });
           }
         } finally {
+          const purchasedOrderIds = new Set([
+            ...allSuccess.map((success) => success.orderId),
+            ...allFailed.filter((failed) => failed.purchaseOrderNo).map((failed) => failed.orderId),
+          ]);
+          for (const orderId of [...lockedOrderIds]) {
+            if (!purchasedOrderIds.has(orderId)) {
+              await releasePurchaseLock(orderId);
+            }
+          }
           request.signal.removeEventListener("abort", onAbort);
           controller.close();
         }

@@ -121,10 +121,14 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
     onProgress({ done, total, label: "자동구매", finished: step === "result" });
   }, [step, orderStatuses, onProgress]);
 
-  // 구매 가능 주문건 필터: purchase_url 있고, purchase_order_no 비어있는 것
+  // 구매 가능 주문건 필터: 결제전 + purchase_url 있고, purchase_order_no 비어있는 것
   const purchasableOrders = useMemo(() => {
     return orders.filter(
-      (o) => o.purchase_url && o.purchase_url.trim() !== "" && (!o.purchase_order_no || o.purchase_order_no.trim() === "")
+      (o) =>
+        o.delivery_status === "결제전" &&
+        o.purchase_url &&
+        o.purchase_url.trim() !== "" &&
+        (!o.purchase_order_no || o.purchase_order_no.trim() === "")
     );
   }, [orders]);
 
@@ -135,7 +139,25 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
 
   // purchase_url 없는 주문건
   const noUrlOrders = useMemo(() => {
-    return orders.filter((o) => !o.purchase_url || o.purchase_url.trim() === "");
+    return orders.filter((o) => o.delivery_status === "결제전" && (!o.purchase_url || o.purchase_url.trim() === ""));
+  }, [orders]);
+
+  const inProgressOrders = useMemo(() => {
+    return orders.filter((o) => o.delivery_status === "구매진행중");
+  }, [orders]);
+
+  const reviewRequiredOrders = useMemo(() => {
+    return orders.filter((o) => o.delivery_status === "구매확인필요");
+  }, [orders]);
+
+  const notReadyStatusOrders = useMemo(() => {
+    return orders.filter(
+      (o) =>
+        o.delivery_status !== "결제전" &&
+        o.delivery_status !== "구매진행중" &&
+        o.delivery_status !== "구매확인필요" &&
+        (!o.purchase_order_no || o.purchase_order_no.trim() === "")
+    );
   }, [orders]);
 
   // 계정별 그룹핑 + 자격증명 자동 매칭
@@ -573,6 +595,21 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
                 {alreadyPurchased.length > 0 && (
                   <p className="text-xs text-[var(--text-muted)]">
                     {alreadyPurchased.length}건은 이미 주문번호가 입력되어 제외됩니다.
+                  </p>
+                )}
+                {inProgressOrders.length > 0 && (
+                  <p className="text-xs text-yellow-400">
+                    {inProgressOrders.length}건은 이미 구매 자동화가 진행 중이라 제외됩니다.
+                  </p>
+                )}
+                {reviewRequiredOrders.length > 0 && (
+                  <p className="text-xs text-yellow-400">
+                    {reviewRequiredOrders.length}건은 구매 결과 확인이 필요해 제외됩니다.
+                  </p>
+                )}
+                {notReadyStatusOrders.length > 0 && (
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {notReadyStatusOrders.length}건은 결제전 상태가 아니라 제외됩니다.
                   </p>
                 )}
                 {noUrlOrders.length > 0 && (
