@@ -22,6 +22,35 @@ interface OrderCompleteCallback {
   (orderId: string, purchaseOrderNo: string, cost?: number, paymentMethod?: string): Promise<void> | void;
 }
 
+interface OrderPreflightCallback {
+  (order: PurchaseOrderInfo): Promise<void> | void;
+}
+const BOT_CHALLENGE_WAIT_MS = 20000;
+const BOT_CHALLENGE_RETRY_DELAY_MS = 8000;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+class GmarketBotChallengeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GmarketBotChallengeError";
+  }
+}
+
+function isBotChallengeText(value: string): boolean {
+  return /잠시만 기다리|Just a moment|봇\(Bot\)|봇 확인|간단한 확인 안내|검토번호|자동으로 작동하는 프로그램|사람인지 확인|captcha|Cloudflare|Turnstile/i.test(value);
+}
+
+function isBotChallengeError(error: unknown): boolean {
+  if (error instanceof GmarketBotChallengeError) return true;
+  const raw = error instanceof Error ? error.message : String(error);
+  return isBotChallengeText(raw);
+}
+
+function isChallengeFrame(frame: Frame): boolean {
+  return /captcha|challenge|turnstile|cloudflare|cf-chl/i.test(`${frame.name()} ${frame.url()}`);
+}
+
 /**
  * 지마켓 자동구매 스크래퍼
  * 1. 로그인 → 2. 각 주문건 순차 처리 (상품 URL → 쿠폰 → 구매 → 배송지 → 결제 → 주문번호 추출)
@@ -33,7 +62,8 @@ export async function purchaseGmarket(
   orders: PurchaseOrderInfo[],
   onProgress?: ProgressCallback,
   abortSignal?: AbortSignal,
-  onOrderComplete?: OrderCompleteCallback
+  onOrderComplete?: OrderCompleteCallback,
+  onBeforeOrder?: OrderPreflightCallback
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
@@ -52,22 +82,54 @@ export async function purchaseGmarket(
 
     // 2. 각 주문건 순차 처리 (수량 > 1이면 1개씩 여러 번 구매)
     let activePage = page;
-    for (const order of orders) {
-      // 중단 요청 확인
-      if (abortSignal?.aborted) {
-        console.log("[gmarket-purchase] 사용자 중단 요청 → 남은 주문 건너뜀");
-        for (const remaining of orders) {
-          if (!result.success.some(s => s.orderId === remaining.orderId) &&
-              !result.failed.some(f => f.orderId === remaining.orderId)) {
-            result.failed.push({ orderId: remaining.orderId, reason: "사용자가 작업을 중단했습니다." });
-            onProgress?.(remaining.orderId, "failed", "사용자가 작업을 중단했습니다.");
+    const botRetryQueue: PurchaseOrderInfo[] = [];
+
+    const markUnprocessedAsCancelled = () => {
+      console.log("[gmarket-purchase] 사용자 중단 요청 → 남은 주문 건너뜀");
+      for (const remaining of [...orders, ...botRetryQueue]) {
+        if (!result.success.some(s => s.orderId === remaining.orderId) &&
+            !result.failed.some(f => f.orderId === remaining.orderId)) {
+          result.failed.push({ orderId: remaining.orderId, reason: "사용자가 작업을 중단했습니다." });
+          onProgress?.(remaining.orderId, "failed", "사용자가 작업을 중단했습니다.");
+        }
+      }
+    };
+
+    const recoverAfterOrderError = async (): Promise<boolean> => {
+      try {
+        if (activePage.isClosed()) {
+          activePage = await recoverPage(context, "about:blank");
+        } else {
+          // 불필요한 탭 닫기 (메인 페이지만 유지)
+          const pages = context.pages();
+          for (const p of pages) {
+            if (p !== activePage && !p.isClosed()) {
+              await p.close().catch(() => {});
+            }
           }
         }
-        break;
+        return true;
+      } catch {
+        console.log("[gmarket-purchase] 실패 후 페이지 복구 불가, 새 페이지 생성 시도");
+        try {
+          activePage = await context.newPage();
+          return true;
+        } catch {
+          console.error("[gmarket-purchase] 브라우저 컨텍스트 사용 불가, 남은 주문 중단");
+          return false;
+        }
       }
+    };
 
+    const runOrder = async (order: PurchaseOrderInfo, isBotRetry = false): Promise<boolean> => {
       const totalQty = Math.max(order.quantity, 1);
-      onProgress?.(order.orderId, "processing", totalQty > 1 ? `구매 진행 중... (0/${totalQty})` : "구매 진행 중...");
+      onProgress?.(
+        order.orderId,
+        "processing",
+        isBotRetry
+          ? (totalQty > 1 ? `봇 확인 후 재시도 중... (0/${totalQty})` : "봇 확인 후 재시도 중...")
+          : (totalQty > 1 ? `구매 진행 중... (0/${totalQty})` : "구매 진행 중...")
+      );
 
       let lastOrderNo = "";
       let totalCost = 0;
@@ -77,11 +139,17 @@ export async function purchaseGmarket(
 
       try {
         for (let q = 1; q <= totalQty; q++) {
+          if (abortSignal?.aborted) {
+            markUnprocessedAsCancelled();
+            return false;
+          }
+
           if (totalQty > 1) {
-            console.log(`[gmarket-purchase] 주문 ${order.orderId} - ${q}/${totalQty}번째 구매`);
+            console.log(`[gmarket-purchase] 주문 ${order.orderId} - ${q}/${totalQty}번째 구매${isBotRetry ? " (봇 확인 후 재시도)" : ""}`);
             onProgress?.(order.orderId, "processing", `구매 진행 중... (${q - 1}/${totalQty})`);
           }
 
+          await onBeforeOrder?.(order);
           // 페이지 상태 확인 및 복구
           if (activePage.isClosed()) {
             console.log("[gmarket-purchase] 주문 시작 전 페이지 닫힘 감지, 복구...");
@@ -139,38 +207,57 @@ export async function purchaseGmarket(
           ? ` (${successCount}/${totalQty}개 구매 후 실패${lastOrderNo ? `, 구매된 주문번호: ${lastOrderNo}` : ""})`
           : "";
         const failMsg = `${reason}${partialInfo}`;
-        result.failed.push({
-          orderId: order.orderId,
-          reason: failMsg,
-          purchaseOrderNo: lastOrderNo || undefined,
-          cost: totalCost > 0 ? totalCost : undefined,
-          paymentMethod: lastPaymentMethod,
-        });
-        onProgress?.(order.orderId, "failed", failMsg);
-        console.error(`[gmarket-purchase] 주문 실패: ${order.orderId}`, failMsg, err instanceof Error ? err.message : String(err));
+        const canRetryAtEnd = !isBotRetry && successCount === 0 && !lastOrderNo && isBotChallengeError(err);
+
+        if (canRetryAtEnd) {
+          botRetryQueue.push(order);
+          onProgress?.(order.orderId, "processing", "봇 확인 화면 감지 → 다른 주문 처리 후 마지막에 다시 시도합니다.");
+          console.warn(`[gmarket-purchase] 봇 확인 감지, 마지막 재시도 대기: ${order.orderId}`);
+        } else {
+          result.failed.push({
+            orderId: order.orderId,
+            reason: failMsg,
+            purchaseOrderNo: lastOrderNo || undefined,
+            cost: totalCost > 0 ? totalCost : undefined,
+            paymentMethod: lastPaymentMethod,
+          });
+          onProgress?.(order.orderId, "failed", failMsg);
+          console.error(`[gmarket-purchase] 주문 실패: ${order.orderId}`, failMsg, err instanceof Error ? err.message : String(err));
+        }
 
         // 실패 후 페이지 상태 복구 시도
-        try {
-          if (activePage.isClosed()) {
-            activePage = await recoverPage(context, "about:blank");
-          } else {
-            // 불필요한 탭 닫기 (메인 페이지만 유지)
-            const pages = context.pages();
-            for (const p of pages) {
-              if (p !== activePage && !p.isClosed()) {
-                await p.close().catch(() => {});
-              }
-            }
-          }
-        } catch {
-          console.log("[gmarket-purchase] 실패 후 페이지 복구 불가, 새 페이지 생성 시도");
-          try {
-            activePage = await context.newPage();
-          } catch {
-            console.error("[gmarket-purchase] 브라우저 컨텍스트 사용 불가, 남은 주문 중단");
-            break;
-          }
+        const recovered = await recoverAfterOrderError();
+        if (!recovered) return false;
+      }
+
+      return true;
+    };
+
+    for (const order of orders) {
+      // 중단 요청 확인
+      if (abortSignal?.aborted) {
+        markUnprocessedAsCancelled();
+        break;
+      }
+
+      const keepGoing = await runOrder(order);
+      if (!keepGoing) break;
+    }
+
+    if (!abortSignal?.aborted && botRetryQueue.length > 0) {
+      console.log(`[gmarket-purchase] 봇 확인 주문 ${botRetryQueue.length}건 마지막 재시도 대기`);
+      await sleep(BOT_CHALLENGE_RETRY_DELAY_MS);
+
+      const retryOrders = botRetryQueue.splice(0);
+      for (const order of retryOrders) {
+        if (abortSignal?.aborted) {
+          markUnprocessedAsCancelled();
+          break;
         }
+
+        const keepGoing = await runOrder(order, true);
+        if (!keepGoing) break;
+        await sleep(1500);
       }
     }
   } catch (err) {
@@ -244,6 +331,87 @@ interface SingleOrderResult {
   cost?: number;
   paymentMethod?: string;
 }
+async function hasBotChallenge(page: Page): Promise<boolean> {
+  const pageState = await page
+    .evaluate(() => ({
+      text: `${document.title}\n${document.body?.innerText || ""}`,
+      hasProductDom: !!document.querySelector('#coreInsOrderBtn, .box__price, .itemtit, meta[property="og:title"]'),
+    }))
+    .catch(() => ({ text: "", hasProductDom: false }));
+
+  if (isBotChallengeText(pageState.text)) return true;
+  return !pageState.hasProductDom && page.frames().some(isChallengeFrame);
+}
+
+async function clickBotChallengeCheckbox(page: Page): Promise<boolean> {
+  const selectors = [
+    'input[type="checkbox"]',
+    '[role="checkbox"]',
+    'label:has-text("사람")',
+    'label:has-text("확인")',
+    ".ctp-checkbox-label",
+    ".recaptcha-checkbox-border",
+    'button:has-text("확인")',
+  ];
+
+  const mainFrame = page.mainFrame();
+  const frames = [mainFrame, ...page.frames().filter((frame) => frame !== mainFrame)];
+
+  for (const frame of frames) {
+    for (const selector of selectors) {
+      try {
+        const target = frame.locator(selector).first();
+        if (await target.isVisible({ timeout: 800 }).catch(() => false)) {
+          await target.click({ timeout: 2500, force: true });
+          console.log(`[gmarket-purchase] 봇 확인 체크박스 클릭: ${selector}`);
+          return true;
+        }
+      } catch {
+        // 다음 후보로 계속
+      }
+    }
+  }
+
+  return false;
+}
+
+async function waitForProductContentAfterChallenge(page: Page): Promise<void> {
+  await page
+    .waitForFunction(
+      () => {
+        const text = `${document.title}\n${document.body?.innerText || ""}`;
+        const stillBot = /잠시만 기다리|Just a moment|봇\(Bot\)|봇 확인|간단한 확인 안내|검토번호|자동으로 작동하는 프로그램|사람인지 확인|captcha|Cloudflare|Turnstile/i.test(text);
+        const hasProductDom = !!document.querySelector('#coreInsOrderBtn, .box__price, .itemtit, meta[property="og:title"]');
+        return !stillBot && hasProductDom;
+      },
+      { timeout: BOT_CHALLENGE_WAIT_MS }
+    )
+    .catch(() => {});
+}
+
+async function handleBotChallenge(page: Page): Promise<void> {
+  if (!(await hasBotChallenge(page))) return;
+
+  console.warn("[gmarket-purchase] 상품 진입 중 봇 확인 화면 감지 → 체크박스 처리 시도");
+  const clicked = await clickBotChallengeCheckbox(page);
+  if (!clicked) {
+    console.log("[gmarket-purchase] 클릭 가능한 봇 확인 체크박스 없음 → 자동 통과 대기");
+  }
+
+  await sleep(1500);
+  await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+  await waitForProductContentAfterChallenge(page);
+
+  if (await hasBotChallenge(page)) {
+    throw new GmarketBotChallengeError(
+      clicked
+        ? "지마켓 봇 확인 체크박스를 클릭했지만 아직 통과되지 않았습니다."
+        : "지마켓 봇 확인 화면이 떠서 자동구매를 잠시 보류해야 합니다."
+    );
+  }
+
+  console.log("[gmarket-purchase] 봇 확인 화면 통과");
+}
 
 async function processSingleOrder(
   page: Page,
@@ -259,6 +427,7 @@ async function processSingleOrder(
   console.log(`[gmarket-purchase] 상품 페이지 이동: ${order.productUrl}${isRepeatPurchase ? " (반복구매)" : ""}`);
   await activePage.goto(order.productUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
   await activePage.waitForTimeout(2000);
+  await handleBotChallenge(activePage);
   await assertGmarketPurchasePage(activePage);
 
   // 2. 쿠폰 수집
@@ -805,7 +974,7 @@ async function assertGmarketPurchasePage(page: Page) {
   }).catch(() => ({ isBotCheck: false, isSoldOut: false }));
 
   if (status.isBotCheck) {
-    throw new Error("지마켓에서 봇 확인 화면이 떠서 구매를 계속할 수 없습니다. 이미 일부 구매가 됐다면 구매내역에서 실제 주문 수량을 확인한 뒤 다시 진행해야 합니다.");
+    throw new GmarketBotChallengeError("지마켓에서 봇 확인 화면이 떠서 자동구매를 잠시 보류해야 합니다.");
   }
   if (status.isSoldOut) {
     throw new Error("상품이 품절 또는 판매종료 상태라 구매할 수 없습니다.");

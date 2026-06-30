@@ -124,7 +124,56 @@ export function useOrders(options: UseOrdersOptions = {}) {
       from += PAGE_SIZE;
     }
 
-    setOrders(allData);
+    const purchaseNosByOrderId = new Map<string, string[]>();
+    for (let i = 0; i < allData.length; i += 200) {
+      const batch = allData.slice(i, i + 200).map((o) => o.id);
+      if (batch.length === 0) continue;
+
+      const { data: purchaseLogs, error: purchaseLogError } = await supabase
+        .from("purchase_logs")
+        .select("order_id, purchase_order_no")
+        .eq("user_id", userId)
+        .in("order_id", batch)
+        .not("purchase_order_no", "is", null);
+
+      if (purchaseLogError) {
+        console.error("[use-orders] 구매 중복 로그 조회 실패:", purchaseLogError.message);
+        continue;
+      }
+
+      for (const log of purchaseLogs || []) {
+        const orderId = log.order_id as string | null;
+        const purchaseNo = typeof log.purchase_order_no === "string" ? log.purchase_order_no.trim() : "";
+        if (!orderId || !purchaseNo) continue;
+        const current = purchaseNosByOrderId.get(orderId) ?? [];
+        if (!current.includes(purchaseNo)) current.push(purchaseNo);
+        purchaseNosByOrderId.set(orderId, current);
+      }
+    }
+
+    const enrichedData = allData.map((order) => {
+      const purchaseNos = purchaseNosByOrderId.get(order.id) ?? [];
+      const expectedQty = Math.max(Number(order.quantity) || 1, 1);
+      const hasSavedPurchaseNo = Boolean(order.purchase_order_no?.trim());
+      const duplicateLevel: Order["purchase_duplicate_level"] = purchaseNos.length > expectedQty || (!hasSavedPurchaseNo && purchaseNos.length > 0)
+        ? "danger"
+        : purchaseNos.length > 1
+          ? "warning"
+          : null;
+
+      return {
+        ...order,
+        purchase_log_order_nos: purchaseNos,
+        purchase_duplicate_level: duplicateLevel,
+        purchase_duplicate_message: duplicateLevel === "danger"
+          ? `중복구매 의심: 구매로그 ${purchaseNos.length}건 / 발주수량 ${expectedQty}개`
+          : duplicateLevel === "warning"
+            ? `복수구매 확인: 구매로그 ${purchaseNos.length}건 / 발주수량 ${expectedQty}개`
+            : null,
+      };
+    });
+
+    setOrders(enrichedData);
     fetchGenRef.current++;
     setLoading(false);
   }, [userId, options.month, options.marketplace, options.search]);

@@ -112,12 +112,27 @@ const MemoRow = memo(function Row({
     if (isMobile && onRowClick) onRowClick(order);
   }, [isMobile, onRowClick, order]);
 
+  const duplicateLevel = order.purchase_duplicate_level;
+  const rowRiskClass = duplicateLevel === "danger"
+    ? "bg-red-500/15 hover:bg-red-500/20 ring-1 ring-red-500/30 ring-inset"
+    : duplicateLevel === "warning"
+      ? "bg-orange-500/10 hover:bg-orange-500/15"
+      : order.is_duplicate
+        ? "bg-yellow-500/10"
+        : "";
+  const stickyRiskClass = duplicateLevel === "danger"
+    ? "bg-red-950/50"
+    : duplicateLevel === "warning"
+      ? "bg-orange-950/40"
+      : "";
+
   return (
     <tr
-      className={`border-t border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)] ${isMobile ? "cursor-pointer active:bg-[var(--bg-hover)]" : ""} ${order.is_duplicate ? "bg-yellow-500/10" : ""}`}
+      className={`border-t border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)] ${isMobile ? "cursor-pointer active:bg-[var(--bg-hover)]" : ""} ${rowRiskClass}`}
       onClick={isMobile ? handleRowClick : undefined}
+      title={order.purchase_duplicate_message ?? undefined}
     >
-      <td className={`px-2 ${isMobile ? "py-2" : "py-1.5"} sticky left-0 bg-[var(--cell-sticky-bg)] z-10 border-r border-[var(--border-subtle)]`}>
+      <td className={`px-2 ${isMobile ? "py-2" : "py-1.5"} sticky left-0 ${stickyRiskClass || "bg-[var(--cell-sticky-bg)]"} z-10 border-r border-[var(--border-subtle)]`}>
         <input
           type="checkbox"
           checked={isChecked}
@@ -164,6 +179,16 @@ const MemoRow = memo(function Row({
                   isSelected && !isEditing ? "ring-2 ring-blue-500/70 rounded bg-blue-500/5" : ""
                 }`}>
                   {formatCell(col.key, val, col.key === "tracking_no" ? order : undefined)}
+                  {col.key === "product_name" && duplicateLevel && (
+                    <span
+                      className={`ml-1 rounded px-1 py-0.5 text-[10px] font-medium ${
+                        duplicateLevel === "danger" ? "bg-red-500/25 text-red-200" : "bg-orange-500/20 text-orange-200"
+                      }`}
+                      title={order.purchase_duplicate_message ?? undefined}
+                    >
+                      {duplicateLevel === "danger" ? "중복구매 의심" : "복수구매 확인"}
+                    </span>
+                  )}
                 </div>
                 {/* 셀 선택 시 투명 input 렌더, 편집 시 시각적 input으로 전환 (같은 엘리먼트) */}
                 {showInput && (

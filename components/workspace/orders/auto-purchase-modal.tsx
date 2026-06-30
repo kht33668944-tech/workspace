@@ -128,7 +128,8 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
         o.delivery_status === "결제전" &&
         o.purchase_url &&
         o.purchase_url.trim() !== "" &&
-        (!o.purchase_order_no || o.purchase_order_no.trim() === "")
+        (!o.purchase_order_no || o.purchase_order_no.trim() === "") &&
+        !o.purchase_duplicate_level
     );
   }, [orders]);
 
@@ -140,6 +141,10 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
   // purchase_url 없는 주문건
   const noUrlOrders = useMemo(() => {
     return orders.filter((o) => o.delivery_status === "결제전" && (!o.purchase_url || o.purchase_url.trim() === ""));
+  }, [orders]);
+
+  const duplicateRiskOrders = useMemo(() => {
+    return orders.filter((o) => Boolean(o.purchase_duplicate_level));
   }, [orders]);
 
   const inProgressOrders = useMemo(() => {
@@ -596,6 +601,21 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
                   <p className="text-xs text-[var(--text-muted)]">
                     {alreadyPurchased.length}건은 이미 주문번호가 입력되어 제외됩니다.
                   </p>
+                )}
+                {duplicateRiskOrders.length > 0 && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-xs text-red-300">
+                    <p className="font-medium">{duplicateRiskOrders.length}건은 중복구매 위험 기록이 있어 제외됩니다.</p>
+                    <div className="mt-1 space-y-0.5">
+                      {duplicateRiskOrders.slice(0, 3).map((o) => (
+                        <p key={o.id} className="text-red-300/70">
+                          · {o.recipient_name} — {o.purchase_duplicate_message || "구매 로그 확인 필요"}
+                        </p>
+                      ))}
+                      {duplicateRiskOrders.length > 3 && (
+                        <p className="text-red-300/50">외 {duplicateRiskOrders.length - 3}건</p>
+                      )}
+                    </div>
+                  </div>
                 )}
                 {inProgressOrders.length > 0 && (
                   <p className="text-xs text-yellow-400">

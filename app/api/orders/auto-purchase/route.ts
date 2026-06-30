@@ -142,6 +142,7 @@ export async function POST(request: NextRequest) {
         const lockedOrderIds = new Set<string>();
         const lockReleaseStatusByOrderId = new Map<string, string>();
         const loggedFailureOrderIds = new Set<string>();
+        const completedCallbackOrderIds = new Set<string>();
 
         // 주문별 즉시 DB 업데이트 + SSE 전송 콜백
         const onProgress = (
@@ -153,6 +154,61 @@ export async function POST(request: NextRequest) {
           sendEvent({ type: "progress", orderId, status, message, purchaseOrderNo });
         };
 
+        const loadLoggedPurchaseNos = async (orderIds: string[]) => {
+          const map = new Map<string, string[]>();
+          if (orderIds.length === 0) return map;
+
+          const { data, error } = await supabase
+            .from("purchase_logs")
+            .select("order_id, purchase_order_no")
+            .in("order_id", orderIds)
+            .not("purchase_order_no", "is", null);
+
+          if (error) {
+            console.error("[auto-purchase] 구매 로그 중복 확인 실패:", error.message);
+            return map;
+          }
+
+          for (const row of data || []) {
+            const orderId = row.order_id as string | null;
+            const purchaseNo = typeof row.purchase_order_no === "string" ? row.purchase_order_no.trim() : "";
+            if (!orderId || !purchaseNo) continue;
+            const current = map.get(orderId) ?? [];
+            if (!current.includes(purchaseNo)) current.push(purchaseNo);
+            map.set(orderId, current);
+          }
+
+          return map;
+        };
+
+        const assertOrderStillLockedForPurchase = async (orderId: string) => {
+          let query = supabase
+            .from("orders")
+            .select("id, purchase_order_no, delivery_status, quantity")
+            .eq("id", orderId);
+          if (userId) query = query.eq("user_id", userId);
+
+          const { data: order, error } = await query.maybeSingle();
+          if (error) throw new Error(`구매 직전 주문 상태 확인 실패: ${error.message}`);
+          if (!order) throw new Error("주문을 찾을 수 없어 자동구매를 중단했습니다.");
+
+          const existingPurchaseNo = typeof order.purchase_order_no === "string"
+            ? order.purchase_order_no.trim()
+            : "";
+          if (existingPurchaseNo) {
+            throw new Error(`이미 구매번호(${existingPurchaseNo})가 저장된 주문이라 재구매를 중단했습니다.`);
+          }
+          if (order.delivery_status !== purchaseLockStatus) {
+            throw new Error(`주문 상태가 '${order.delivery_status}'로 변경되어 재구매를 중단했습니다.`);
+          }
+
+          const loggedNos = (await loadLoggedPurchaseNos([orderId])).get(orderId) ?? [];
+          const expectedQty = Math.max(Number(order.quantity) || 1, 1);
+          if (loggedNos.length >= expectedQty) {
+            throw new Error(`구매 로그에 이미 구매번호(${loggedNos.join(", ")})가 있어 재구매를 중단했습니다.`);
+          }
+        };
+
         // 성공 시 즉시 DB 업데이트하는 콜백
         const onOrderComplete = async (
           orderId: string,
@@ -160,7 +216,7 @@ export async function POST(request: NextRequest) {
           cost?: number,
           paymentMethod?: string
         ) => {
-          allSuccess.push({ orderId, purchaseOrderNo, cost, paymentMethod });
+          completedCallbackOrderIds.add(orderId);
 
           // 즉시 DB 업데이트
           const updateData: Record<string, unknown> = {
@@ -170,28 +226,91 @@ export async function POST(request: NextRequest) {
           if (cost !== undefined) updateData.cost = cost;
           if (paymentMethod) updateData.payment_method = paymentMethod;
 
-          let existingQuery = supabase.from("orders").select("purchased_at").eq("id", orderId);
+          let existingQuery = supabase
+            .from("orders")
+            .select("purchased_at, purchase_order_no, delivery_status")
+            .eq("id", orderId);
           if (userId) existingQuery = existingQuery.eq("user_id", userId);
           const { data: existingOrder } = await existingQuery.maybeSingle();
           if (!existingOrder?.purchased_at) updateData.purchased_at = new Date().toISOString();
 
+          const existingPurchaseNo = typeof existingOrder?.purchase_order_no === "string"
+            ? existingOrder.purchase_order_no.trim()
+            : "";
+          const orderInfo = body.orders.find(o => o.orderId === orderId);
+
+          const recordBlockedPurchase = async (reason: string) => {
+            allFailed.push({ orderId, reason, purchaseOrderNo, cost, paymentMethod });
+            loggedFailureOrderIds.add(orderId);
+            sendEvent({ type: "progress", orderId, status: "failed", message: reason, purchaseOrderNo });
+            sendEvent({ type: "db_updated", orderId, status: "error", message: reason, purchaseOrderNo, cost, paymentMethod });
+
+            let reviewQuery = supabase
+              .from("orders")
+              .update({ delivery_status: purchaseReviewStatus })
+              .eq("id", orderId)
+              .eq("delivery_status", purchaseLockStatus)
+              .or("purchase_order_no.is.null,purchase_order_no.eq.");
+            if (userId) reviewQuery = reviewQuery.eq("user_id", userId);
+            await reviewQuery.then(({ error: reviewErr }) => {
+              if (reviewErr) console.error(`[auto-purchase] 구매확인필요 전환 실패 (${orderId}):`, reviewErr.message);
+            });
+
+            await supabase.from("purchase_logs").insert({
+              user_id: userId,
+              batch_id: batchId,
+              order_id: orderId,
+              platform,
+              login_id: loginId,
+              status: "failed",
+              purchase_order_no: purchaseOrderNo,
+              cost: cost ?? null,
+              payment_method: paymentMethod ?? null,
+              error_message: reason,
+              product_name: orderInfo?.productName ?? null,
+              recipient_name: orderInfo?.recipientName ?? null,
+            }).then(({ error: logErr }) => {
+              if (logErr) console.error(`[auto-purchase] 중복위험 로그 기록 실패 (${orderId}):`, logErr.message);
+            });
+          };
+
+          if (existingPurchaseNo) {
+            await recordBlockedPurchase(`구매는 완료됐지만 DB에 이미 다른 구매번호(${existingPurchaseNo})가 있어 새 구매번호(${purchaseOrderNo})를 자동 반영하지 않았습니다. 실제 구매내역 확인이 필요합니다.`);
+            return;
+          }
+          if (existingOrder?.delivery_status !== purchaseLockStatus) {
+            await recordBlockedPurchase(`구매는 완료됐지만 주문 상태가 '${existingOrder?.delivery_status ?? "없음"}'로 변경되어 새 구매번호(${purchaseOrderNo})를 자동 반영하지 않았습니다. 실제 구매내역 확인이 필요합니다.`);
+            return;
+          }
+
           // service_role(RLS 우회)이므로 소유권 스코핑을 명시.
           // userId가 있으면 user_id로 한 번 더 제한(IDOR 방어), 만료 JWT로 userId가 없으면
           // 기존 동작(id-only) 유지 — "JWT 만료와 무관 동작" 의도 보존.
-          let updateQuery = supabase.from("orders").update(updateData).eq("id", orderId);
+          let updateQuery = supabase
+            .from("orders")
+            .update(updateData)
+            .eq("id", orderId)
+            .eq("delivery_status", purchaseLockStatus)
+            .or("purchase_order_no.is.null,purchase_order_no.eq.")
+            .select("id");
           if (userId) updateQuery = updateQuery.eq("user_id", userId);
-          const { error } = await updateQuery;
+          const { data: updatedRows, error } = await updateQuery;
 
           if (error) {
             console.error(`[auto-purchase] DB 업데이트 실패 (${orderId}):`, error.message);
-            sendEvent({ type: "db_updated", orderId, status: "error", message: error.message });
-          } else {
-            console.log(`[auto-purchase] DB 즉시 업데이트 성공 (${orderId}): ${JSON.stringify(updateData)}`);
-            sendEvent({ type: "db_updated", orderId, status: "ok", purchaseOrderNo, cost, paymentMethod });
+            await recordBlockedPurchase(`구매는 완료됐지만 DB 업데이트에 실패했습니다: ${error.message}. 실제 구매내역 확인이 필요합니다.`);
+            return;
+          }
+          if (!updatedRows || updatedRows.length !== 1) {
+            await recordBlockedPurchase(`구매는 완료됐지만 다른 작업이 먼저 주문을 변경해 새 구매번호(${purchaseOrderNo})를 자동 반영하지 않았습니다. 실제 구매내역 확인이 필요합니다.`);
+            return;
           }
 
+          allSuccess.push({ orderId, purchaseOrderNo, cost, paymentMethod });
+          console.log(`[auto-purchase] DB 즉시 업데이트 성공 (${orderId}): ${JSON.stringify(updateData)}`);
+          sendEvent({ type: "db_updated", orderId, status: "ok", purchaseOrderNo, cost, paymentMethod });
+
           // 구매 로그 기록
-          const orderInfo = body.orders.find(o => o.orderId === orderId);
           await supabase.from("purchase_logs").insert({
             user_id: userId,
             batch_id: batchId,
@@ -270,7 +389,7 @@ export async function POST(request: NextRequest) {
           if (targetOrders.length > 0) {
             let orderStateQuery = supabase
               .from("orders")
-              .select("id, purchase_order_no, delivery_status")
+              .select("id, purchase_order_no, delivery_status, quantity")
               .in("id", targetOrders.map((order) => order.orderId));
             if (userId) orderStateQuery = orderStateQuery.eq("user_id", userId);
             const { data: currentOrders, error: currentOrdersErr } = await orderStateQuery;
@@ -280,17 +399,22 @@ export async function POST(request: NextRequest) {
             }
 
             const currentOrderById = new Map((currentOrders || []).map((order) => [order.id as string, order]));
+            const loggedPurchaseNosByOrderId = await loadLoggedPurchaseNos(targetOrders.map((order) => order.orderId));
             const lockableOrders = targetOrders.filter((order) => {
               const currentOrder = currentOrderById.get(order.orderId);
               const existingPurchaseNo = typeof currentOrder?.purchase_order_no === "string"
                 ? currentOrder.purchase_order_no.trim()
                 : "";
+              const loggedPurchaseNos = loggedPurchaseNosByOrderId.get(order.orderId) ?? [];
+              const expectedQty = Math.max(Number(currentOrder?.quantity) || 1, 1);
               let reason: string | null = null;
 
               if (!currentOrder) {
                 reason = "주문을 찾을 수 없어 자동구매를 차단했습니다.";
               } else if (existingPurchaseNo) {
                 reason = `이미 구매번호(${existingPurchaseNo})가 있는 주문이라 자동구매를 차단했습니다.`;
+              } else if (loggedPurchaseNos.length >= expectedQty) {
+                reason = `구매 로그에 이미 구매번호(${loggedPurchaseNos.join(", ")})가 있어 자동구매를 차단했습니다.`;
               } else if (currentOrder.delivery_status !== "결제전") {
                 reason = currentOrder.delivery_status === purchaseLockStatus
                   ? "이미 다른 자동구매 작업이 진행 중인 주문이라 차단했습니다."
@@ -383,7 +507,7 @@ export async function POST(request: NextRequest) {
           let result;
           try {
             if (platform === "gmarket") {
-              result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, targetOrders, onProgress, signal, onOrderComplete);
+              result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, targetOrders, onProgress, signal, onOrderComplete, (order) => assertOrderStillLockedForPurchase(order.orderId));
             } else {
               result = await purchaseOhouse(loginId, loginPw, targetOrders, onProgress, supabase, signal, body.paymentPin, naverLoginId, naverLoginPw);
             }
@@ -393,7 +517,7 @@ export async function POST(request: NextRequest) {
 
           // 성공한 주문 즉시 DB 업데이트 (스크래퍼에서 콜백 안 탄 경우 대비)
           for (const s of result.success) {
-            if (!allSuccess.some(a => a.orderId === s.orderId)) {
+            if (!completedCallbackOrderIds.has(s.orderId)) {
               await onOrderComplete(s.orderId, s.purchaseOrderNo, s.cost, s.paymentMethod);
             }
           }
@@ -407,7 +531,7 @@ export async function POST(request: NextRequest) {
           // 실패/취소 건 구매 로그 기록
           for (const f of allFailed) {
             const orderInfo = body.orders.find(o => o.orderId === f.orderId);
-            if (f.purchaseOrderNo && !signal.aborted) {
+            if (f.purchaseOrderNo && !signal.aborted && !loggedFailureOrderIds.has(f.orderId)) {
               const partialUpdate: Record<string, unknown> = {
                 purchase_order_no: f.purchaseOrderNo,
                 delivery_status: "부분구매",
@@ -415,28 +539,65 @@ export async function POST(request: NextRequest) {
               if (f.cost !== undefined) partialUpdate.cost = f.cost;
               if (f.paymentMethod) partialUpdate.payment_method = f.paymentMethod;
 
-              let existingPartialQuery = supabase.from("orders").select("purchased_at").eq("id", f.orderId);
+              let existingPartialQuery = supabase
+                .from("orders")
+                .select("purchased_at, purchase_order_no, delivery_status")
+                .eq("id", f.orderId);
               if (userId) existingPartialQuery = existingPartialQuery.eq("user_id", userId);
               const { data: existingPartialOrder } = await existingPartialQuery.maybeSingle();
               if (!existingPartialOrder?.purchased_at) partialUpdate.purchased_at = new Date().toISOString();
 
-              let partialQuery = supabase.from("orders").update(partialUpdate).eq("id", f.orderId);
-              if (userId) partialQuery = partialQuery.eq("user_id", userId);
-              const { error: partialErr } = await partialQuery;
-              if (partialErr) {
-                console.error(`[auto-purchase] 부분구매 DB 업데이트 실패 (${f.orderId}):`, partialErr.message);
-              } else {
+              const existingPartialPurchaseNo = typeof existingPartialOrder?.purchase_order_no === "string"
+                ? existingPartialOrder.purchase_order_no.trim()
+                : "";
+
+              if (existingPartialPurchaseNo || existingPartialOrder?.delivery_status !== purchaseLockStatus) {
                 sendEvent({
                   type: "db_updated",
                   orderId: f.orderId,
-                  status: "partial",
+                  status: "error",
+                  message: existingPartialPurchaseNo
+                    ? `이미 구매번호(${existingPartialPurchaseNo})가 있어 부분구매 번호(${f.purchaseOrderNo})를 자동 반영하지 않았습니다.`
+                    : `주문 상태가 '${existingPartialOrder?.delivery_status ?? "없음"}'로 변경되어 부분구매 번호(${f.purchaseOrderNo})를 자동 반영하지 않았습니다.`,
                   purchaseOrderNo: f.purchaseOrderNo,
                   cost: f.cost,
                   paymentMethod: f.paymentMethod,
                 });
-              }
+              } else {
+                let partialQuery = supabase
+                  .from("orders")
+                  .update(partialUpdate)
+                  .eq("id", f.orderId)
+                  .eq("delivery_status", purchaseLockStatus)
+                  .or("purchase_order_no.is.null,purchase_order_no.eq.")
+                  .select("id");
+                if (userId) partialQuery = partialQuery.eq("user_id", userId);
+                const { data: partialRows, error: partialErr } = await partialQuery;
+                if (partialErr) {
+                  console.error(`[auto-purchase] 부분구매 DB 업데이트 실패 (${f.orderId}):`, partialErr.message);
+                } else if (!partialRows || partialRows.length !== 1) {
+                  sendEvent({
+                    type: "db_updated",
+                    orderId: f.orderId,
+                    status: "error",
+                    message: `다른 작업이 먼저 주문을 변경해 부분구매 번호(${f.purchaseOrderNo})를 자동 반영하지 않았습니다.`,
+                    purchaseOrderNo: f.purchaseOrderNo,
+                    cost: f.cost,
+                    paymentMethod: f.paymentMethod,
+                  });
+                } else {
+                  sendEvent({
+                    type: "db_updated",
+                    orderId: f.orderId,
+                    status: "partial",
+                    purchaseOrderNo: f.purchaseOrderNo,
+                    cost: f.cost,
+                    paymentMethod: f.paymentMethod,
+                  });
+                }
             }
 
+            }
             if (!loggedFailureOrderIds.has(f.orderId)) {
               await supabase.from("purchase_logs").insert({
                 user_id: userId,

@@ -34,6 +34,9 @@ export interface Order {
   memo: string | null;
   created_at: string;
   updated_at: string;
+  purchase_log_order_nos?: string[];
+  purchase_duplicate_level?: "danger" | "warning" | null;
+  purchase_duplicate_message?: string | null;
 }
 
 export interface ConsultationLog {
