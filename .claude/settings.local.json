@@ -56,7 +56,8 @@
       "Bash(npm i *)",
       "Bash(echo \"EXIT=$?\")",
       "Bash(supabase --version)",
-      "Bash(npm ls *)"
+      "Bash(npm ls *)",
+      "PowerShell(npx tsc --noEmit; if \\($?\\) { \"TSC CLEAN\" })"
     ]
   },
   "enableAllProjectMcpServers": true,

@@ -27,7 +27,7 @@ interface OrderPreflightCallback {
 }
 const BOT_CHALLENGE_WAIT_MS = 20000;
 const BOT_CHALLENGE_RETRY_DELAY_MS = 8000;
-const POST_PAYMENT_PROCESSING_WAIT_MS = 7000;
+const ORDER_COMPLETE_MAX_WAIT_MS = 90000;
 const ORDER_INFO_MAX_WAIT_MS = 60000;
 const ORDER_INFO_RETRY_DELAY_MS = 5000;
 
@@ -1470,8 +1470,68 @@ async function processPayment(page: Page, paymentPin: string) {
   }
 
   console.log("[gmarket-purchase] 비밀번호 입력 완료");
-  console.log("[gmarket-purchase] 결제 처리 대기 7초");
-  await page.waitForTimeout(POST_PAYMENT_PROCESSING_WAIT_MS);
+  await waitForOrderCompletePage(page);
+}
+
+async function waitForOrderCompletePage(page: Page): Promise<void> {
+  console.log("[gmarket-purchase] 주문완료 화면 대기 중...");
+
+  const startedAt = Date.now();
+  let attempt = 0;
+
+  while (Date.now() - startedAt <= ORDER_COMPLETE_MAX_WAIT_MS) {
+    attempt++;
+    if (page.isClosed()) {
+      throw new Error("결제 완료 대기 중 페이지가 닫혔습니다.");
+    }
+
+    const mainText = await page
+      .evaluate(() => document.body?.innerText || "")
+      .catch(() => "");
+
+    if (isOrderCompleteText(mainText)) {
+      console.log(`[gmarket-purchase] 주문완료 화면 확인: ${page.url()}`);
+      return;
+    }
+
+    const frameTexts = await Promise.all(
+      page.frames().map((frame) =>
+        frame.evaluate(() => document.body?.innerText || "").catch(() => "")
+      )
+    );
+
+    if (frameTexts.some(isOrderCompleteText)) {
+      console.log(`[gmarket-purchase] 주문완료 프레임 확인: ${page.url()}`);
+      return;
+    }
+
+    const paymentErrorText = [mainText, ...frameTexts].find(isPaymentFailureText);
+    if (paymentErrorText) {
+      throw new Error(`결제 완료 전 오류 화면 감지: ${summarizePaymentText(paymentErrorText)}`);
+    }
+
+    if (attempt % 5 === 0) {
+      console.log(`[gmarket-purchase] 주문완료 화면 대기 중 (${attempt}) - ${page.url()}`);
+    }
+    await page.waitForTimeout(1000);
+  }
+
+  throw new Error("결제 비밀번호 입력 후 주문완료 화면을 확인하지 못했습니다. 실제 결제 완료 여부를 확인해야 합니다.");
+}
+
+function isOrderCompleteText(text: string): boolean {
+  return (
+    /주문\s*완료\s*되었|주문완료\s*되었|주문이\s*완료/.test(text) ||
+    (/주문내역\s*보기/.test(text) && /쇼핑\s*계속하기/.test(text))
+  );
+}
+
+function isPaymentFailureText(text: string): boolean {
+  return /결제\s*(실패|오류)|결제가\s*취소|결제\s*취소\s*되|승인\s*(실패|거절)|카드\s*(거절|오류)|한도\s*(초과|부족)|비밀번호\s*(오류|불일치|틀)/.test(text);
+}
+
+function summarizePaymentText(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
 // ═══════════════════════════════════
