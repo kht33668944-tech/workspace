@@ -27,6 +27,7 @@ interface OrderPreflightCallback {
 }
 const BOT_CHALLENGE_WAIT_MS = 20000;
 const BOT_CHALLENGE_RETRY_DELAY_MS = 8000;
+const POST_PAYMENT_PROCESSING_WAIT_MS = 7000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -585,7 +586,7 @@ async function applyCheckoutDiscount(page: Page) {
 
 /**
  * 주문서 페이지의 "결제할인" 드롭다운 처리.
- * - "첫결제/첫 결제" 문구가 있는 옵션은 1회성 할인으로 보고 제외한다.
+ * - "첫결제/첫 결제" 또는 "스마일카드" 문구가 있는 옵션은 제외한다.
  * - 남은 결제할인 select(native) 옵션을 적용해보고 실제 "결제할인 N원" 금액이 가장 큰 옵션을 최종 선택
  * 결제할인 select는 옵션 텍스트에 "결제할인"이 포함되어 배송요청 select(#delivery-request-label)와 구분된다.
  */
@@ -602,7 +603,7 @@ async function applyPaymentDiscount(page: Page) {
       return;
     }
 
-    // 옵션 목록 수집 (placeholder와 1회성 첫결제 할인 제외)
+    // 옵션 목록 수집 (placeholder와 제외 대상 할인 제외)
     const options: { value: string; text: string }[] = await discountSelect.evaluate((el) => {
       const sel = el as HTMLSelectElement;
       return Array.from(sel.options).map((o) => ({ value: o.value, text: o.text.trim() }));
@@ -610,13 +611,13 @@ async function applyPaymentDiscount(page: Page) {
     const selectableOptions = options.filter(
       (o) => o.value && o.value !== "0" && !o.text.includes("선택해")
     );
-    const candidates = selectableOptions.filter((o) => !/첫\s*결제/.test(o.text));
-    const excludedFirstPaymentCount = selectableOptions.length - candidates.length;
+    const candidates = selectableOptions.filter((o) => !/첫\s*결제|스마일\s*카드/.test(o.text));
+    const excludedDiscountCount = selectableOptions.length - candidates.length;
 
     if (candidates.length === 0) {
       console.log(
-        excludedFirstPaymentCount > 0
-          ? "[gmarket-purchase] 결제할인 옵션은 첫결제 할인만 있어 스킵"
+        excludedDiscountCount > 0
+          ? "[gmarket-purchase] 결제할인 옵션은 제외 대상(첫결제/스마일카드)만 있어 스킵"
           : "[gmarket-purchase] 결제할인 옵션 없음 (placeholder만) → 스킵"
       );
       return;
@@ -1467,8 +1468,8 @@ async function processPayment(page: Page, paymentPin: string) {
   }
 
   console.log("[gmarket-purchase] 비밀번호 입력 완료");
-  // 결제 완료 대기
-  await page.waitForTimeout(5000);
+  console.log("[gmarket-purchase] 결제 처리 대기 7초");
+  await page.waitForTimeout(POST_PAYMENT_PROCESSING_WAIT_MS);
 }
 
 // ═══════════════════════════════════

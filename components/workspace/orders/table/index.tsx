@@ -15,7 +15,7 @@ const PAGE_SIZE = 100;
 
 function OrderTable({
   orders: rawOrders, allOrders, loading, selectedIds, onSelectToggle, onSelectAll, onUpdate,
-  onUndo, onStartBatchUndo, onEndBatchUndo, onRowClick, columnFilters, onColumnFilterChange,
+  onUndo, onStartBatchUndo, onEndBatchUndo, onRowClick, onClearPurchaseDuplicate, columnFilters, onColumnFilterChange,
 }: OrderTableProps) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const o: Record<string, number> = {};
@@ -485,6 +485,7 @@ function OrderTable({
                   onSelectToggle={onSelectToggle} onFillStart={handleFillStart}
                   onStartEdit={handleStartEdit}
                   onRowClick={onRowClick}
+                  onClearPurchaseDuplicate={onClearPurchaseDuplicate}
                   isMobile={isMobile}
                   visibleColumns={visibleColumns}
                 />

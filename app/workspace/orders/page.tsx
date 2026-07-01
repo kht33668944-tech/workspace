@@ -46,10 +46,26 @@ type CostRefreshResult = {
   productName: string;
   previous: number;
   price: number;
+  status: "priced" | "sold_out";
   orderCount: number;
 };
 
 type CostRetryItem = { id: string; name: string };
+type CostRefreshStats = {
+  changed: number;
+  unchanged: number;
+  failed: number;
+  botBlocked: number;
+  soldOut: number;
+};
+
+const EMPTY_COST_REFRESH_STATS: CostRefreshStats = {
+  changed: 0,
+  unchanged: 0,
+  failed: 0,
+  botBlocked: 0,
+  soldOut: 0,
+};
 
 type CostScrapeEvent =
   | {
@@ -193,6 +209,7 @@ function OrdersPageInner() {
   const [costRefreshLog, setCostRefreshLog] = useState<string[]>([]);
   const [costRefreshTotal, setCostRefreshTotal] = useState(0);
   const [costRefreshProcessed, setCostRefreshProcessed] = useState(0);
+  const [costRefreshStats, setCostRefreshStats] = useState<CostRefreshStats>(EMPTY_COST_REFRESH_STATS);
   const [costRefreshCollapsed, setCostRefreshCollapsed] = useState(false);
   const costRefreshAbortRef = useRef<AbortController | null>(null);
   const costRefreshGroupsRef = useRef<Map<string, { product: ProductCostRow; orders: Order[] }>>(new Map());
@@ -416,26 +433,53 @@ function OrdersPageInner() {
               };
               const priceText = event.bot_blocked
                 ? "봇 감지"
-                : event.price > 0
-                  ? event.price !== event.previous_price
-                    ? `${event.previous_price.toLocaleString()}→${event.price.toLocaleString()}원`
-                    : `${event.price.toLocaleString()}원 (변동없음)`
-                  : (failReasonText[event.fail_reason ?? ""] || "실패");
+                : event.fail_reason === "sold_out"
+                  ? "품절/판매종료 → 원가 0원·재고부족 예정"
+                  : event.price > 0
+                    ? event.price !== event.previous_price
+                      ? `${event.previous_price.toLocaleString()}→${event.price.toLocaleString()}원`
+                      : `${event.price.toLocaleString()}원 (변동없음)`
+                    : (failReasonText[event.fail_reason ?? ""] || "실패");
+
+              setCostRefreshStats((prev) => {
+                if (event.bot_blocked) return { ...prev, botBlocked: prev.botBlocked + 1 };
+                if (event.fail_reason === "sold_out") return { ...prev, soldOut: prev.soldOut + 1 };
+                if (event.price > 0 && event.price !== event.previous_price) return { ...prev, changed: prev.changed + 1 };
+                if (event.price > 0) return { ...prev, unchanged: prev.unchanged + 1 };
+                return { ...prev, failed: prev.failed + 1 };
+              });
 
               pushCostRefreshLog(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
 
               if (event.bot_blocked) {
                 botBlocked.push({ id: event.id, name: event.name });
+              } else if (event.fail_reason === "sold_out") {
+                successes.push({
+                  productId: event.id,
+                  productName: productNames.get(event.id) ?? event.name,
+                  previous: event.previous_price,
+                  price: 0,
+                  status: "sold_out",
+                  orderCount: 0,
+                });
               } else if (event.price > 0) {
                 successes.push({
                   productId: event.id,
                   productName: productNames.get(event.id) ?? event.name,
                   previous: event.previous_price,
                   price: event.price,
+                  status: "priced",
                   orderCount: 0,
                 });
               }
             } else if (event.type === "done") {
+              setCostRefreshStats({
+                changed: event.updated,
+                unchanged: event.unchanged ?? 0,
+                failed: event.failed,
+                botBlocked: event.bot_blocked,
+                soldOut: event.sold_out,
+              });
               const blockedText = event.bot_blocked > 0 ? `, ${event.bot_blocked}개 봇감지` : "";
               const soldOutText = event.sold_out > 0 ? `, ${event.sold_out}개 품절` : "";
               pushCostRefreshLog(`수집 완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패${soldOutText}${blockedText}`);
@@ -463,7 +507,7 @@ function OrdersPageInner() {
   ) => {
     if (results.length === 0) return { productCount: 0, orderCount: 0 };
 
-    const changed = results.filter((r) => r.price !== r.previous);
+    const changed = results.filter((r) => r.status === "priced" && r.price !== r.previous);
     for (let i = 0; i < changed.length; i += 500) {
       const batch = changed.slice(i, i + 500);
       const res = await fetch("/api/products/apply-price-updates", {
@@ -490,10 +534,15 @@ function OrdersPageInner() {
         if (!group) continue;
 
         for (const order of group.orders) {
-          const nextCost = result.price * (order.quantity || 1);
-          if (order.cost === nextCost) continue;
+          const nextCost = result.status === "sold_out" ? 0 : result.price * (order.quantity || 1);
+          const updates: Record<string, unknown> = {};
+          if (order.cost !== nextCost) updates.cost = nextCost;
+          if (result.status === "sold_out" && order.delivery_status !== "재고부족") {
+            updates.delivery_status = "재고부족";
+          }
+          if (Object.keys(updates).length === 0) continue;
           updatedOrders++;
-          saves.push(updateOrder(order.id, { cost: nextCost }));
+          saves.push(updateOrder(order.id, updates));
         }
       }
       endBatchUndo();
@@ -583,6 +632,7 @@ function OrdersPageInner() {
     ]);
     setCostRefreshTotal(groups.size);
     setCostRefreshProcessed(0);
+    setCostRefreshStats(EMPTY_COST_REFRESH_STATS);
     setCostRefreshCollapsed(false);
     costRefreshGroupsRef.current = groups;
     setCostRefreshResults([]);
@@ -620,6 +670,13 @@ function OrdersPageInner() {
       const collectedResults = [...successMap.values()];
       setCostRefreshResults(collectedResults);
 
+      setCostRefreshStats((prev) => ({
+        ...prev,
+        changed: collectedResults.filter((result) => result.status === "priced" && result.price !== result.previous).length,
+        unchanged: collectedResults.filter((result) => result.status === "priced" && result.price === result.previous).length,
+        soldOut: collectedResults.filter((result) => result.status === "sold_out").length,
+        botBlocked: retryItems.length > 0 && !stopped ? retryItems.length : 0,
+      }));
       const remainingText = retryItems.length > 0 && !stopped ? `, 봇감지 미완료 ${retryItems.length}개` : "";
       const stoppedText = stopped ? ", 중단됨" : "";
       pushCostRefreshLog(`수집 완료: 상품 ${collectedResults.length}개 확인됨${remainingText}${stoppedText}. 결과 확인 후 적용하세요.`);
@@ -670,13 +727,15 @@ function OrdersPageInner() {
     const group = costRefreshGroupsRef.current.get(result.productId);
     const orderChanges = (group?.orders ?? []).map((order) => {
       const previousCost = order.cost || 0;
-      const nextCost = result.price * (order.quantity || 1);
+      const nextCost = result.status === "sold_out" ? 0 : result.price * (order.quantity || 1);
+      const statusChanged = result.status === "sold_out" && order.delivery_status !== "재고부족";
       return {
         id: order.id,
         recipient: order.recipient_name || "-",
         quantity: order.quantity || 1,
         previousCost,
         nextCost,
+        statusChanged,
         changed: previousCost !== nextCost,
       };
     });
@@ -684,12 +743,12 @@ function OrdersPageInner() {
     return {
       ...result,
       orderChanges,
-      changedOrderCount: orderChanges.filter((order) => order.changed).length,
+      changedOrderCount: orderChanges.filter((order) => order.changed || order.statusChanged).length,
     };
   }), [costRefreshResults]);
 
   const costRefreshChangedProductCount = useMemo(
-    () => costRefreshResults.filter((result) => result.price !== result.previous).length,
+    () => costRefreshResults.filter((result) => result.status === "priced" && result.price !== result.previous).length,
     [costRefreshResults],
   );
   const costRefreshChangedOrderCount = useMemo(
@@ -704,6 +763,7 @@ function OrdersPageInner() {
         productName: row.productName,
         productPrice: row.price,
         productPreviousPrice: row.previous,
+        status: row.status,
       })),
     ),
     [costRefreshPreview],
@@ -785,6 +845,43 @@ function OrdersPageInner() {
     }
     setSelectedIds(new Set());
   };
+  const handleClearPurchaseDuplicate = useCallback(async (order: Order) => {
+    const confirmed = window.confirm(
+      [
+        "이 주문의 중복구매 의심을 해제할까요?",
+        "",
+        "실제 중복구매가 아닌 것이 확인된 경우에만 진행하세요.",
+        "진행하면 구매 로그와 주문의 구매번호/원가/결제방식이 지워지고 상태가 결제전으로 돌아갑니다.",
+      ].join("\n")
+    );
+    if (!confirmed) return;
+
+    if (!session?.access_token) {
+      showToast("로그인이 필요합니다.", "error");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/orders/clear-purchase-duplicate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(typeof data.error === "string" ? data.error : "중복구매 의심 해제 실패");
+      }
+
+      showToast(`중복구매 의심을 해제했습니다. 구매 로그 ${data.deletedLogCount ?? 0}건 삭제`, "success");
+      await refetch();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "중복구매 의심 해제 실패", "error");
+    }
+  }, [session?.access_token, showToast, refetch]);
 
   const handleClearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
@@ -1191,6 +1288,7 @@ function OrdersPageInner() {
         onStartBatchUndo={startBatchUndo}
         onEndBatchUndo={endBatchUndo}
         onRowClick={(order) => setSidePanelOrder(order)}
+        onClearPurchaseDuplicate={handleClearPurchaseDuplicate}
         columnFilters={columnFilters}
         onColumnFilterChange={handleColumnFilterChange}
       />
@@ -1246,21 +1344,21 @@ function OrdersPageInner() {
           <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-2xl p-6 mx-3">
             <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">원가 갱신 결과 확인</h3>
             <p className="text-xs text-[var(--text-muted)] mb-4">
-              상품 {costRefreshResults.length}개 확인 · 상품소싱 가격 변동 {costRefreshChangedProductCount}개 · 발주서 원가 수정 예정 {costRefreshChangedOrderCount}건
+              상품 {costRefreshResults.length}개 확인 · 가격 변동 {costRefreshChangedProductCount}개 · 품절 {costRefreshStats.soldOut}개 · 발주서 수정 예정 {costRefreshChangedOrderCount}건
             </p>
 
             <div className="max-h-[55vh] overflow-y-auto space-y-1.5 mb-4 pr-1">
               {costRefreshOrderPreview.map((order) => {
-                const productChanged = order.productPrice !== order.productPreviousPrice;
+                const productChanged = order.status === "sold_out" || order.productPrice !== order.productPreviousPrice;
                 return (
                   <div
                     key={`${order.productId}-${order.id}`}
-                    className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-xs ${order.changed ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)] opacity-75"}`}
+                    className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-xs ${order.changed || order.statusChanged ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)] opacity-75"}`}
                   >
                     <div className="min-w-0 truncate">
                       <span className="font-medium text-[var(--text-primary)]">{order.productName}</span>
                       <span className="text-[var(--text-muted)]"> · {order.recipient} · 수량 {order.quantity}</span>
-                      {!productChanged && <span className="text-[var(--text-muted)]"> · 상품소싱 변동없음</span>}
+                      {order.status === "sold_out" ? <span className="text-amber-400"> · 품절 → 재고부족</span> : !productChanged && <span className="text-[var(--text-muted)]"> · 상품소싱 변동없음</span>}
                     </div>
                     <div className="shrink-0 tabular-nums text-right">
                       <span className="text-[var(--text-muted)]">{order.previousCost.toLocaleString()}</span>
@@ -1312,6 +1410,10 @@ function OrdersPageInner() {
                   {costRefreshProcessed}/{costRefreshTotal}
                 </span>
               )}
+              <span className="text-xs text-blue-400 shrink-0">수정 {costRefreshStats.changed}</span>
+              <span className="text-xs text-amber-400 shrink-0">품절 {costRefreshStats.soldOut}</span>
+              <span className="text-xs text-red-400 shrink-0">봇감지 {costRefreshStats.botBlocked}</span>
+              <span className="text-xs text-[var(--text-muted)] shrink-0">실패 {costRefreshStats.failed}</span>
               {costRefreshCollapsed && costRefreshLog.length > 0 && (
                 <span className="text-xs text-[var(--text-muted)] truncate">{costRefreshLog[costRefreshLog.length - 1]}</span>
               )}

@@ -184,6 +184,7 @@ export interface OrderTableProps {
   onStartBatchUndo?: () => void;
   onEndBatchUndo?: () => void;
   onRowClick?: (order: Order) => void;
+  onClearPurchaseDuplicate?: (order: Order) => void;
   columnFilters: Record<string, string[]>;
   onColumnFilterChange: (key: string, values: string[]) => void;
 }

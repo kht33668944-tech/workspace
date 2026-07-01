@@ -21,6 +21,7 @@ interface RowProps {
   onFillStart: (r: number, c: number, v: unknown) => void;
   onStartEdit: (r: number, c: number) => void;
   onRowClick?: (order: Order) => void;
+  onClearPurchaseDuplicate?: (order: Order) => void;
   isMobile?: boolean;
   visibleColumns?: Col[];
 }
@@ -29,7 +30,7 @@ const MemoRow = memo(function Row({
   order, rowIdx, colWidths, isChecked, activeCol, editingCol, initialChar,
   selMinC, selMaxC, showFillHandle, fillHandleCol, fillHighlightCol,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onCommit, onBlurSave, onEditValueChange, onSelectToggle, onFillStart,
-  onStartEdit, onRowClick, isMobile, visibleColumns,
+  onStartEdit, onRowClick, onClearPurchaseDuplicate, isMobile, visibleColumns,
 }: RowProps) {
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -180,13 +181,29 @@ const MemoRow = memo(function Row({
                 }`}>
                   {formatCell(col.key, val, col.key === "tracking_no" ? order : undefined)}
                   {col.key === "product_name" && duplicateLevel && (
-                    <span
-                      className={`ml-1 rounded px-1 py-0.5 text-[10px] font-medium ${
-                        duplicateLevel === "danger" ? "bg-red-500/25 text-red-200" : "bg-orange-500/20 text-orange-200"
-                      }`}
-                      title={order.purchase_duplicate_message ?? undefined}
-                    >
-                      {duplicateLevel === "danger" ? "중복구매 의심" : "복수구매 확인"}
+                    <span className="ml-1 inline-flex items-center gap-1 align-middle">
+                      <span
+                        className={`rounded px-1 py-0.5 text-[10px] font-medium ${
+                          duplicateLevel === "danger" ? "bg-red-500/25 text-red-200" : "bg-orange-500/20 text-orange-200"
+                        }`}
+                        title={order.purchase_duplicate_message ?? undefined}
+                      >
+                        {duplicateLevel === "danger" ? "중복구매 의심" : "복수구매 확인"}
+                      </span>
+                      {onClearPurchaseDuplicate && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClearPurchaseDuplicate(order);
+                          }}
+                          className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                          title="확인 후 중복구매 의심 해제"
+                        >
+                          해제
+                        </button>
+                      )}
                     </span>
                   )}
                 </div>
@@ -232,7 +249,8 @@ const MemoRow = memo(function Row({
   prev.fillHandleCol === next.fillHandleCol &&
   prev.fillHighlightCol === next.fillHighlightCol &&
   prev.isMobile === next.isMobile &&
-  prev.visibleColumns === next.visibleColumns
+  prev.visibleColumns === next.visibleColumns &&
+  prev.onClearPurchaseDuplicate === next.onClearPurchaseDuplicate
 );
 
 export default MemoRow;
