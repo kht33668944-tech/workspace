@@ -28,6 +28,8 @@ interface OrderPreflightCallback {
 const BOT_CHALLENGE_WAIT_MS = 20000;
 const BOT_CHALLENGE_RETRY_DELAY_MS = 8000;
 const POST_PAYMENT_PROCESSING_WAIT_MS = 7000;
+const ORDER_INFO_MAX_WAIT_MS = 60000;
+const ORDER_INFO_RETRY_DELAY_MS = 5000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -586,7 +588,7 @@ async function applyCheckoutDiscount(page: Page) {
 
 /**
  * 주문서 페이지의 "결제할인" 드롭다운 처리.
- * - "첫결제/첫 결제" 또는 "스마일카드" 문구가 있는 옵션은 제외한다.
+ * - "첫결제/첫 결제", "스마일카드", "비씨카드/BC카드" 문구가 있는 옵션은 제외한다.
  * - 남은 결제할인 select(native) 옵션을 적용해보고 실제 "결제할인 N원" 금액이 가장 큰 옵션을 최종 선택
  * 결제할인 select는 옵션 텍스트에 "결제할인"이 포함되어 배송요청 select(#delivery-request-label)와 구분된다.
  */
@@ -611,13 +613,13 @@ async function applyPaymentDiscount(page: Page) {
     const selectableOptions = options.filter(
       (o) => o.value && o.value !== "0" && !o.text.includes("선택해")
     );
-    const candidates = selectableOptions.filter((o) => !/첫\s*결제|스마일\s*카드/.test(o.text));
+    const candidates = selectableOptions.filter((o) => !/첫\s*결제|스마일\s*카드|비씨\s*카드|bc\s*카드/i.test(o.text));
     const excludedDiscountCount = selectableOptions.length - candidates.length;
 
     if (candidates.length === 0) {
       console.log(
         excludedDiscountCount > 0
-          ? "[gmarket-purchase] 결제할인 옵션은 제외 대상(첫결제/스마일카드)만 있어 스킵"
+          ? "[gmarket-purchase] 결제할인 옵션은 제외 대상(첫결제/스마일카드/비씨카드)만 있어 스킵"
           : "[gmarket-purchase] 결제할인 옵션 없음 (placeholder만) → 스킵"
       );
       return;
@@ -1820,12 +1822,29 @@ async function extractOrderInfo(page: Page, existingOrderNosBeforePurchase: Set<
 
   console.log("[gmarket-purchase] 주문내역 API에서 신규 주문번호 + payNo 추출 시도...");
 
-  const bundles = await fetchRecentPayBundles(page);
-  const newBundle = bundles.find((bundle) =>
-    bundle.orderNos.some((orderNo) => !existingOrderNosBeforePurchase.has(orderNo))
-  );
-  const orderNo = newBundle?.orderNos.find((no) => !existingOrderNosBeforePurchase.has(no)) ?? null;
-  const payNo = newBundle?.payNo ?? null;
+  let bundles: GmarketPayBundle[] = [];
+  let orderNo: string | null = null;
+  let payNo: string | null = null;
+  const startedAt = Date.now();
+  let attempt = 0;
+
+  while (Date.now() - startedAt <= ORDER_INFO_MAX_WAIT_MS) {
+    attempt++;
+    bundles = await fetchRecentPayBundles(page);
+    const newBundle = bundles.find((bundle) =>
+      bundle.orderNos.some((bundleOrderNo) => !existingOrderNosBeforePurchase.has(bundleOrderNo))
+    );
+    orderNo = newBundle?.orderNos.find((no) => !existingOrderNosBeforePurchase.has(no)) ?? null;
+    payNo = newBundle?.payNo ?? null;
+
+    if (orderNo) break;
+
+    const latestOrderNo = bundles[0]?.orderNos[0] ?? "없음";
+    console.log(
+      `[gmarket-purchase] 신규 주문번호 대기 중 (${attempt}) - 최신 주문번호: ${latestOrderNo}`
+    );
+    await page.waitForTimeout(ORDER_INFO_RETRY_DELAY_MS);
+  }
 
   if (!orderNo) {
     const latestOrderNo = bundles[0]?.orderNos[0];
