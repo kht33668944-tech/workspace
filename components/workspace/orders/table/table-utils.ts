@@ -1,5 +1,6 @@
 import React from "react";
 import { MARKETPLACES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
+import { formatKoreanDateTime } from "@/lib/date-utils";
 import type { Order } from "@/types/database";
 
 // 안전한 사칙연산 파서 (Function/eval 대체)
@@ -140,8 +141,7 @@ export function formatCell(key: string, val: unknown, order?: { courier?: string
     return React.createElement("span", { className: `text-xs font-medium ${n > 0 ? "text-green-400" : n < 0 ? "text-red-400" : "text-[var(--text-secondary)]"}` }, n.toLocaleString());
   }
   if (key === "order_date") {
-    const s = String(val);
-    return React.createElement("span", { className: "text-[var(--text-secondary)] text-xs" }, s.length >= 16 ? s.slice(0, 16).replace("T", " ") : s.slice(0, 10));
+    return React.createElement("span", { className: "text-[var(--text-secondary)] text-xs" }, formatKoreanDateTime(String(val)) || String(val));
   }
   if (key === "marketplace") {
     const mp = MARKETPLACES[String(val)];

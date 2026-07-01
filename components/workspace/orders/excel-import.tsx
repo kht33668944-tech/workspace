@@ -5,6 +5,7 @@ import { Upload, X, FileSpreadsheet, Check, AlertTriangle, Copy, Link } from "lu
 import { parseExcelFile, parseExcelSheet } from "@/lib/excel-parser";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
+import { getKoreanDateKey } from "@/lib/date-utils";
 import type { OrderInsert } from "@/types/database";
 
 interface ExcelImportProps {
@@ -279,7 +280,7 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
     let ordersToImport = parsedOrders.map((o, i) => {
       let order = o;
       if (!o.order_date && manualDate) {
-        order = { ...order, order_date: `${manualDate}T00:00:00Z` };
+        order = { ...order, order_date: `${manualDate}T00:00:00+09:00` };
       }
       // 중복 표시 (전체 가져오기 시)
       if (!excludeDuplicates && duplicateIndices.has(i)) {
@@ -492,7 +493,7 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
                         <td className="px-3 py-1.5">{order.bundle_no ?? "-"}</td>
                         <td className="px-3 py-1.5">
                           {order.order_date
-                            ? order.order_date.slice(0, 10)
+                            ? getKoreanDateKey(order.order_date)
                             : manualDate
                               ? <span className="text-yellow-400">{manualDate}</span>
                               : <span className="text-red-400">없음</span>

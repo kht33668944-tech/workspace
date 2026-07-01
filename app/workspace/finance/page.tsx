@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useFinance } from "@/hooks/use-finance";
 import FinanceKpiCards from "@/components/workspace/finance/finance-kpi-cards";
@@ -9,14 +9,32 @@ import FinanceDetailTab from "@/components/workspace/finance/finance-detail-tab"
 import FinanceTrendTab from "@/components/workspace/finance/finance-trend-tab";
 import FinanceSummaryTab from "@/components/workspace/finance/finance-summary-tab";
 import OrderProfitTab from "@/components/workspace/finance/order-profit-tab";
+import { readJsonStorage, rememberWorkspaceHref, replaceUrlParams, writeJsonStorage } from "@/lib/view-state";
 
 type Tab = "detail" | "trend" | "summary" | "order-profit";
+const FINANCE_TABS: Tab[] = ["detail", "trend", "summary", "order-profit"];
+const FINANCE_VIEW_STORAGE_KEY = "workspace:finance:view";
+
+function isFinanceTab(value: string | null): value is Tab {
+  return !!value && FINANCE_TABS.includes(value as Tab);
+}
+
 
 function FinancePageInner() {
   const finance = useFinance();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab") === "order-profit" ? "order-profit" : "detail";
+  const initialTab = useMemo(() => {
+    const urlTab = searchParams.get("tab");
+    const saved = readJsonStorage<{ tab?: Tab }>(FINANCE_VIEW_STORAGE_KEY);
+    return isFinanceTab(urlTab) ? urlTab : saved?.tab ?? "detail";
+  }, [searchParams]);
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
+
+  useEffect(() => {
+    writeJsonStorage(FINANCE_VIEW_STORAGE_KEY, { tab: activeTab });
+    replaceUrlParams({ tab: activeTab });
+    rememberWorkspaceHref("/workspace/finance");
+  }, [activeTab]);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "detail", label: "상세 입력" },

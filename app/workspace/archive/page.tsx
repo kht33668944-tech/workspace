@@ -4,16 +4,28 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Archive, Download, Trash2, Loader2, Clock, FileSpreadsheet, Truck, Package } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { downloadExcelFromBase64 } from "@/lib/excel-export";
+import { readJsonStorage, readUrlParam, rememberWorkspaceHref, replaceUrlParams, writeJsonStorage } from "@/lib/view-state";
 import type { ExcelArchive } from "@/types/database";
 
 type ArchiveMeta = Omit<ExcelArchive, "file_data">;
 type TabType = "playauto_tracking" | "order_export" | "playauto_product";
+const ARCHIVE_TABS: TabType[] = ["playauto_tracking", "order_export", "playauto_product"];
+const ARCHIVE_VIEW_STORAGE_KEY = "workspace:archive:view";
+
+function isArchiveTab(value: string | null): value is TabType {
+  return !!value && ARCHIVE_TABS.includes(value as TabType);
+}
+
 
 export default function ArchivePage() {
   const { session } = useAuth();
   const [archives, setArchives] = useState<ArchiveMeta[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabType>("playauto_tracking");
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    const urlTab = readUrlParam("tab");
+    const saved = readJsonStorage<{ tab?: TabType }>(ARCHIVE_VIEW_STORAGE_KEY);
+    return isArchiveTab(urlTab) ? urlTab : saved?.tab ?? "playauto_tracking";
+  });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
@@ -38,6 +50,11 @@ export default function ArchivePage() {
   useEffect(() => {
     fetchArchives();
   }, [fetchArchives]);
+  useEffect(() => {
+    writeJsonStorage(ARCHIVE_VIEW_STORAGE_KEY, { tab: activeTab });
+    replaceUrlParams({ tab: activeTab });
+    rememberWorkspaceHref("/workspace/archive");
+  }, [activeTab]);
 
   // 탭 전환 시 선택 초기화
   const handleTabChange = (tab: TabType) => {

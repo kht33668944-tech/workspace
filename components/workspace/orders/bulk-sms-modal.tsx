@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import type { Order, SmsTemplate } from "@/types/database";
 import { getByteLength, getMessageType, substituteTemplate } from "@/lib/sms-utils";
+import { formatKoreanDateTime } from "@/lib/date-utils";
 
 interface BulkSmsModalProps {
   orders: Order[];
@@ -67,7 +68,7 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
       marketplace: order.marketplace || "",
       courier: order.courier || "",
       tracking_no: order.tracking_no || "",
-      order_date: order.order_date ? order.order_date.slice(0, 16).replace("T", " ") : "",
+      order_date: order.order_date ? formatKoreanDateTime(order.order_date) : "",
       address: [order.address, order.address_detail].filter(Boolean).join(" "),
       delivery_memo: order.delivery_memo || "",
     };

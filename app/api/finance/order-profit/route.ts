@@ -1,5 +1,6 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { fetchAllRows, getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { getKoreanDateKey } from "@/lib/date-utils";
 
 export const revalidate = 0;
 
@@ -136,10 +137,7 @@ function getMonthDays(month: string): string[] {
 }
 
 function localDateKey(value: string | null): string | null {
-  if (!value) return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return getKoreanDateKey(value);
 }
 
 function inMonth(date: string | null, month: string): boolean {
@@ -149,7 +147,7 @@ function inMonth(date: string | null, month: string): boolean {
 function eventDate(order: OrderProfitOrder, field: "purchased_at" | "delivered_at" | "returned_at", month: string): string | null {
   const eventKey = localDateKey(order[field]);
   if (inMonth(eventKey, month)) return eventKey;
-  const orderKey = order.order_date?.slice(0, 10) ?? null;
+  const orderKey = getKoreanDateKey(order.order_date);
   if (inMonth(orderKey, month)) return orderKey;
   return null;
 }
@@ -304,7 +302,7 @@ export async function GET(request: NextRequest) {
       issue.count += 1;
       issue.amount += amount;
       if (issue.orders.length < 100) {
-        issue.orders.push(toDetail(order, "issue", order.order_date?.slice(0, 10) ?? month + "-01", type));
+        issue.orders.push(toDetail(order, "issue", getKoreanDateKey(order.order_date) ?? month + "-01", type));
       }
     };
 

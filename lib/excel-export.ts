@@ -10,6 +10,7 @@ import type { Order, Product, CommissionRate } from "@/types/database";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { calcPlatformPrice, calcSettlementPrice, buildRateMap } from "@/lib/product-calculations";
 import { getSchemaByCode, DEFAULT_SCHEMA } from "@/lib/playauto-schema";
+import { formatKoreanDateTime } from "@/lib/date-utils";
 
 /** 발주서 양식 엑셀 생성 (현재 발주서 테이블과 동일한 양식) */
 export async function generateOrderExcel(orders: Order[]): Promise<{ buffer: ArrayBuffer; filename: string }> {
@@ -17,7 +18,7 @@ export async function generateOrderExcel(orders: Order[]): Promise<{ buffer: Arr
   const today = new Date().toISOString().slice(0, 10);
   const data = orders.map((o) => ({
     묶음번호: o.bundle_no,
-    주문일시: o.order_date ? o.order_date.slice(0, 16).replace("T", " ") : null,
+    주문일시: o.order_date ? formatKoreanDateTime(o.order_date) : null,
     판매처: o.marketplace,
     수취인명: o.recipient_name,
     상품명: o.product_name,

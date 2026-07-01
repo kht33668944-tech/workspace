@@ -5,6 +5,10 @@
 
 # dependencies
 /node_modules
+/scraper-service/.venv/
+/scraper-service/.scrapling-gmarket-profile/
+/scraper-service/app/__pycache__/
+*.pyc
 /.pnp
 .pnp.*
 .yarn/*
@@ -56,6 +60,7 @@ yarn-error.log*
 .tmp/
 .omc/
 dev-server.log
+scraper-service.log
 
 # typescript
 *.tsbuildinfo

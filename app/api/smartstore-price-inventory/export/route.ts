@@ -10,6 +10,8 @@ import type { Product, CommissionRate, SmartstorePriceInventory } from "@/types/
 export const maxDuration = 60;
 
 const MAX_PRODUCTS = 5000;
+// 스마트스토어 일괄수정 엑셀도 파일당 최대 500행으로 분할
+const MAX_ROWS_PER_FILE = 500;
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
@@ -87,21 +89,7 @@ export async function POST(request: NextRequest) {
     const matchedProductIds = new Set(inventoryRows.map(r => r.product_id).filter((x): x is string => !!x));
     const skippedProductIds = productIds.filter(id => !matchedProductIds.has(id));
 
-    // 4. 템플릿 로드 (exceljs)
-    const templatePath = path.join(process.cwd(), "lib", "templates", "smartstore-price-inventory.xlsx");
-    const templateBuf = await fs.readFile(templatePath);
-    const wb = new ExcelJS.Workbook();
-    const ab = templateBuf.buffer.slice(templateBuf.byteOffset, templateBuf.byteOffset + templateBuf.byteLength);
-    await wb.xlsx.load(ab as ArrayBuffer);
-    const ws = wb.worksheets[0];
-
-    // 5. 시트행 1~2(그룹헤더+컬럼명)만 유지하고 그 아래(가이드 3~5행 + 기존 데이터 412행)는 모두 정리
-    //    양식 안내: "파일업로드 시 3~5행의 작성가이드는 삭제하시기 바랍니다."
-    while (ws.rowCount > 2) {
-      ws.spliceRows(ws.rowCount, 1);
-    }
-
-    // 6. smartstore_product_id 중복 제거
+    // 4. smartstore_product_id 중복 제거 + 가격이 산정된 행만 남기기
     const seenIds = new Set<string>();
     const rowsWithPrice = inventoryRows
       .filter(r => r.product_id && priceByProductId.has(r.product_id))
@@ -113,48 +101,82 @@ export async function POST(request: NextRequest) {
         return true;
       });
 
-    // 7. 시트행 3(OUTPUT_DATA_START_ROW_INDEX=2, 0-based)부터 raw_row 복원 + F열만 새 가격
-    rowsWithPrice.forEach((row, i) => {
-      const sheetRowNumber = OUTPUT_DATA_START_ROW_INDEX + 1 + i; // 1-based
-      const xRow = ws.getRow(sheetRowNumber);
-      const newPrice = priceByProductId.get(row.product_id!);
+    if (rowsWithPrice.length === 0) {
+      return NextResponse.json({
+        error: "내보낼 스마트스토어 행이 없습니다.",
+      }, { status: 404 });
+    }
 
-      for (let c = 0; c < TOTAL_COLS; c++) {
-        const cell = xRow.getCell(c + 1); // 1-based
-        if (c === COL.sale_price) {
-          // F열만 새 가격으로 교체
-          cell.value = newPrice ?? null;
-        } else if (c === COL.smartstore_product_id) {
-          // A열 상품번호는 반드시 text로 (지수표기 방지)
-          const v = row.raw_row[String(c)];
-          cell.value = v ? String(v) : null;
-        } else {
-          const v = row.raw_row[String(c)];
-          if (v == null || v === "") {
-            cell.value = null;
+    // 5. 템플릿 버퍼 미리 로드 (청크마다 새 워크북에 로드)
+    const templatePath = path.join(process.cwd(), "lib", "templates", "smartstore-price-inventory.xlsx");
+    const templateBuf = await fs.readFile(templatePath);
+
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const totalFiles = Math.ceil(rowsWithPrice.length / MAX_ROWS_PER_FILE);
+    const files: Array<{ excelBase64: string; filename: string; rowCount: number }> = [];
+
+    // 6. 500행씩 청크로 나누어 파일 생성
+    for (let fileIdx = 0; fileIdx < totalFiles; fileIdx++) {
+      const start = fileIdx * MAX_ROWS_PER_FILE;
+      const chunkRows = rowsWithPrice.slice(start, start + MAX_ROWS_PER_FILE);
+
+      const wb = new ExcelJS.Workbook();
+      const ab = templateBuf.buffer.slice(templateBuf.byteOffset, templateBuf.byteOffset + templateBuf.byteLength);
+      await wb.xlsx.load(ab as ArrayBuffer);
+      const ws = wb.worksheets[0];
+
+      // 시트행 1~2(그룹헤더+컬럼명)만 유지하고 그 아래(가이드 3~5행 + 기존 데이터 412행)는 모두 정리
+      // 양식 안내: "파일업로드 시 3~5행의 작성가이드는 삭제하시기 바랍니다."
+      while (ws.rowCount > 2) {
+        ws.spliceRows(ws.rowCount, 1);
+      }
+
+      // 시트행 3(OUTPUT_DATA_START_ROW_INDEX=2, 0-based)부터 raw_row 복원 + F열만 새 가격
+      chunkRows.forEach((row, i) => {
+        const sheetRowNumber = OUTPUT_DATA_START_ROW_INDEX + 1 + i; // 1-based
+        const xRow = ws.getRow(sheetRowNumber);
+        const newPrice = priceByProductId.get(row.product_id!);
+
+        for (let c = 0; c < TOTAL_COLS; c++) {
+          const cell = xRow.getCell(c + 1); // 1-based
+          if (c === COL.sale_price) {
+            // F열만 새 가격으로 교체
+            cell.value = newPrice ?? null;
+          } else if (c === COL.smartstore_product_id) {
+            // A열 상품번호는 반드시 text로 (지수표기 방지)
+            const v = row.raw_row[String(c)];
+            cell.value = v ? String(v) : null;
           } else {
-            // 숫자 형태로 보이는 값은 number로, 아니면 string. 단, A열·코드 등은 위에서 처리됨.
-            const trimmed = String(v).trim();
-            // 옵션값/판매자코드 등은 string으로 유지가 안전 → 모두 string으로
-            cell.value = trimmed;
+            const v = row.raw_row[String(c)];
+            if (v == null || v === "") {
+              cell.value = null;
+            } else {
+              // 숫자 형태로 보이는 값은 number로, 아니면 string. 단, A열·코드 등은 위에서 처리됨.
+              const trimmed = String(v).trim();
+              // 옵션값/판매자코드 등은 string으로 유지가 안전 → 모두 string으로
+              cell.value = trimmed;
+            }
           }
         }
-      }
-      xRow.commit();
-    });
+        xRow.commit();
+      });
 
-    // 8. base64 출력
-    const buf = await wb.xlsx.writeBuffer();
-    const out = Buffer.from(buf).toString("base64");
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const filename = `스마트스토어_가격수정_v2_${today}.xlsx`;
+      const buf = await wb.xlsx.writeBuffer();
+      const out = Buffer.from(buf).toString("base64");
+      const suffix = totalFiles > 1 ? `_${fileIdx + 1}of${totalFiles}` : "";
+      const filename = `스마트스토어_가격수정_v2_${today}${suffix}.xlsx`;
+      files.push({ excelBase64: out, filename, rowCount: chunkRows.length });
+    }
 
-    console.log(`[smartstore-price-inventory/export] 완료: ${rowsWithPrice.length}행, skipped ${skippedProductIds.length}개 상품`);
+    console.log(`[smartstore-price-inventory/export] 완료: ${rowsWithPrice.length}행, ${files.length}개 파일, skipped ${skippedProductIds.length}개 상품`);
 
     return NextResponse.json({
-      excelBase64: out,
-      filename,
+      files,
+      // 호환성: 단일 파일이면 기존 필드도 유지
+      excelBase64: files.length === 1 ? files[0].excelBase64 : undefined,
+      filename: files.length === 1 ? files[0].filename : undefined,
       rowCount: rowsWithPrice.length,
+      fileCount: files.length,
       skippedProductIds,
     });
   } catch (err) {

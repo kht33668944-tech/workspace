@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, type MouseEvent } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { LayoutDashboard, ShoppingCart, Package, Settings, ChevronsLeft, ChevronsRight, Archive, X, Wallet } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { getRememberedWorkspaceHref } from "@/lib/view-state";
 
 const menuItems = [
   { label: "대시보드", href: "/workspace", icon: LayoutDashboard },
@@ -22,6 +23,7 @@ interface SidebarProps {
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const isMobile = useIsMobile();
   const touchStartX = useRef<number | null>(null);
 
@@ -30,7 +32,12 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     return pathname.startsWith(href);
   };
 
-  const handleMenuClick = () => {
+  const handleMenuClick = (href: string, event: MouseEvent<HTMLAnchorElement>) => {
+    const remembered = getRememberedWorkspaceHref(href);
+    if (remembered && remembered !== href) {
+      event.preventDefault();
+      router.push(remembered);
+    }
     if (isMobile) onToggle();
   };
 
@@ -98,7 +105,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                onClick={handleMenuClick}
+                onClick={(event) => handleMenuClick(item.href, event)}
                 className={`
                   flex items-center gap-3 px-3 py-2.5 rounded-lg
                   transition-colors duration-200 min-h-[44px]

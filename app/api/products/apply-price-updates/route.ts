@@ -13,7 +13,11 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const updates = body?.updates;
-    const source = body?.source === "impit_scrape" ? "impit_scrape" : "scrape";
+    const source = body?.source === "impit_scrape"
+      ? "impit_scrape"
+      : body?.source === "scrapling_scrape"
+        ? "scrapling_scrape"
+        : "scrape";
 
     if (!Array.isArray(updates) || updates.length === 0) {
       return NextResponse.json({ error: "업데이트할 데이터가 없습니다." }, { status: 400 });

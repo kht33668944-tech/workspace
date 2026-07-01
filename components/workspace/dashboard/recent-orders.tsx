@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { DashboardRecentOrder } from "@/hooks/use-dashboard";
+import { getKoreanDateKey } from "@/lib/date-utils";
 
 const STATUS_COLORS: Record<string, string> = {
   결제전: "text-orange-400 bg-orange-400/10",
@@ -96,7 +97,7 @@ export default function RecentOrders({ orders, loading }: RecentOrdersProps) {
                     className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-hover)] transition-colors"
                   >
                     <td className="py-2.5 px-3 text-xs text-[var(--text-secondary)] whitespace-nowrap">
-                      {order.order_date ? order.order_date.slice(0, 10) : "-"}
+                      {order.order_date ? getKoreanDateKey(order.order_date) : "-"}
                     </td>
                     <td className="py-2.5 px-3 text-xs text-[var(--text-secondary)]">
                       {order.marketplace ?? "-"}

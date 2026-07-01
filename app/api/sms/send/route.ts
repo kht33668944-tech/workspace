@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import { sendMessages, substituteTemplate } from "@/lib/solapi";
 import { sendGatewayMessage } from "@/lib/sms-gateway";
+import { formatKoreanDateTime } from "@/lib/date-utils";
 import type { Order } from "@/types/database";
 
 export const maxDuration = 300;
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest) {
           marketplace: order.marketplace || "",
           courier: order.courier || "",
           tracking_no: order.tracking_no || "",
-          order_date: order.order_date ? order.order_date.slice(0, 16).replace("T", " ") : "",
+          order_date: order.order_date ? formatKoreanDateTime(order.order_date) : "",
           address: [order.address, order.address_detail].filter(Boolean).join(" "),
           delivery_memo: order.delivery_memo || "",
         };

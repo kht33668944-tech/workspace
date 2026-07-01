@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
+import { getKoreanDateKey, getKoreanMonthKey } from "@/lib/date-utils";
 import type { Order, OrderInsert, OrderUpdate } from "@/types/database";
 
 interface UseOrdersOptions {
@@ -27,6 +28,23 @@ interface UndoGroup {
 }
 
 const MAX_UNDO = 20;
+const ADDRESS_UPDATE_KEYS = ["postal_code", "address", "address_detail"] as const;
+
+function hasAddressChange(order: Order, updates: OrderUpdate): boolean {
+  return ADDRESS_UPDATE_KEYS.some((key) =>
+    Object.prototype.hasOwnProperty.call(updates, key) &&
+    String(order[key] ?? "") !== String(updates[key] ?? "")
+  );
+}
+
+function describeAddress(order: Order | OrderUpdate): string {
+  return [
+    order.postal_code ? `(${order.postal_code})` : "",
+    order.address,
+    order.address_detail,
+  ].filter(Boolean).join(" ") || "(비어 있음)";
+}
+
 
 // 중복 판별 키 생성
 function makeDuplicateKey(
@@ -39,7 +57,8 @@ function makeDuplicateKey(
   }
   if (orderDate && marketplace) {
     // 날짜(일자) + 판매처 + 수취인명 + 상품명
-    const dateOnly = orderDate.slice(0, 10);
+    const dateOnly = getKoreanDateKey(orderDate);
+    if (!dateOnly) return null;
     return `D:${dateOnly}|${marketplace}|${recipientName || ""}|${productName || ""}`;
   }
   return null;
@@ -79,6 +98,9 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const prevFiltersKeyRef = useRef<string>("");
   const fetchGenRef = useRef(0);
   const prevFetchGenRef = useRef(0);
+  const addressBatchConfirmedRef = useRef<boolean | null>(null);
+  const pendingUpdatePromisesRef = useRef<Set<Promise<void>>>(new Set());
+
 
   const userId = user?.id;
 
@@ -229,7 +251,8 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const filteredOrders = (options.dateFrom || options.dateTo)
     ? pinnedOrders.filter((o) => {
         if (!o.order_date) return false;
-        const d = o.order_date.slice(0, 10);
+        const d = getKoreanDateKey(o.order_date);
+        if (!d) return false;
         if (options.dateFrom && d < options.dateFrom) return false;
         if (options.dateTo && d > options.dateTo) return false;
         return true;
@@ -243,7 +266,10 @@ export function useOrders(options: UseOrdersOptions = {}) {
     // 엑셀 데이터에서 관련 월 추출
     const monthSet = new Set<string>();
     for (const r of rows) {
-      if (r.order_date) monthSet.add(r.order_date.slice(0, 7));
+      if (r.order_date) {
+        const month = getKoreanMonthKey(r.order_date);
+        if (month) monthSet.add(month);
+      }
     }
     if (monthSet.size === 0) return new Set();
 
@@ -306,10 +332,37 @@ export function useOrders(options: UseOrdersOptions = {}) {
     return { error: null };
   };
 
-  // Optimistic update: 즉시 UI 반영 후 백그라운드에서 DB 저장
-  const updateOrder = (id: string, updates: OrderUpdate, skipUndo = false) => {
+  // Optimistic update: 즉시 UI 반영 후 DB 저장
+  const updateOrder = (id: string, updates: OrderUpdate, skipUndo = false): Promise<void> => {
     let autoStatusUpdates: OrderUpdate = { ...updates };
     const currentOrder = orders.find((o) => o.id === id);
+
+    if (currentOrder && !skipUndo && hasAddressChange(currentOrder, autoStatusUpdates)) {
+      let confirmed = true;
+      if (batchUndoRef.current) {
+        if (addressBatchConfirmedRef.current === null) {
+          addressBatchConfirmedRef.current = window.confirm(
+            "주소/우편번호를 여러 건 변경합니다.\n자동구매 배송지에 바로 반영되므로 변경하시겠습니까?"
+          );
+        }
+        confirmed = addressBatchConfirmedRef.current;
+      } else {
+        const nextAddress = { ...currentOrder, ...autoStatusUpdates };
+        confirmed = window.confirm(
+          [
+            "배송지 정보를 변경하시겠습니까?",
+            "",
+            `수취인: ${currentOrder.recipient_name || "-"}`,
+            `기존: ${describeAddress(currentOrder)}`,
+            `변경: ${describeAddress(nextAddress)}`,
+            "",
+            "확인하면 DB에 저장되고 자동구매에도 이 주소가 사용됩니다.",
+          ].join("\n")
+        );
+      }
+
+      if (!confirmed) return Promise.resolve();
+    }
 
     if (currentOrder && !skipUndo) {
       const merged = { ...currentOrder, ...autoStatusUpdates };
@@ -357,23 +410,62 @@ export function useOrders(options: UseOrdersOptions = {}) {
       })
     );
 
-    // 백그라운드 DB 저장
-    supabase
-      .from("orders")
-      .update(autoStatusUpdates)
-      .eq("id", id)
-      .then(({ error }) => {
-        if (error) {
-          console.error("[use-orders] 주문 업데이트 실패:", error instanceof Error ? error.message : String(error));
-          fetchOrders(); // 실패 시 원복
-        }
-      });
+    // DB 저장. 자동구매 시작 전에는 flushPendingUpdates로 저장 완료를 기다린다.
+    const savePromise: Promise<void> = (async () => {
+      const { error } = await supabase
+        .from("orders")
+        .update(autoStatusUpdates)
+        .eq("id", id);
+
+      if (error) {
+        console.error("[use-orders] 주문 업데이트 실패:", error instanceof Error ? error.message : String(error));
+        showToast("주문 변경 저장에 실패했습니다. 다시 확인해주세요.", "error");
+        fetchOrders(); // 실패 시 원복
+      }
+    })();
+
+    void savePromise.finally(() => {
+      pendingUpdatePromisesRef.current.delete(savePromise);
+    });
+
+    pendingUpdatePromisesRef.current.add(savePromise);
+    return savePromise;
   };
+
+  const flushPendingUpdates = useCallback(async () => {
+    while (pendingUpdatePromisesRef.current.size > 0) {
+      const pending = Array.from(pendingUpdatePromisesRef.current);
+      await Promise.allSettled(pending);
+    }
+  }, []);
+
+  const getOrdersByIds = useCallback(async (ids: string[]): Promise<Order[]> => {
+    if (!userId || ids.length === 0) return [];
+    await flushPendingUpdates();
+
+    const { data, error } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("user_id", userId)
+      .in("id", ids);
+
+    if (error) {
+      console.error("[use-orders] 주문 재조회 실패:", error.message);
+      showToast("최신 주문 정보를 불러오지 못했습니다.", "error");
+      return [];
+    }
+
+    const orderMap = new Map((data || []).map((order) => [order.id, order as Order]));
+    return ids.map((id) => orderMap.get(id)).filter((order): order is Order => Boolean(order));
+  }, [flushPendingUpdates, showToast, userId]);
+
 
   // 배치 undo 시작/종료: 여러 업데이트를 하나의 그룹으로 묶음
   const startBatchUndo = useCallback(() => {
     batchUndoRef.current = [];
+    addressBatchConfirmedRef.current = null;
   }, []);
+
 
   const endBatchUndo = useCallback(() => {
     if (batchUndoRef.current && batchUndoRef.current.length > 0) {
@@ -381,7 +473,9 @@ export function useOrders(options: UseOrdersOptions = {}) {
       if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
     }
     batchUndoRef.current = null;
+    addressBatchConfirmedRef.current = null;
   }, []);
+
 
   const undo = useCallback(() => {
     const group = undoStackRef.current.pop();
@@ -427,6 +521,8 @@ export function useOrders(options: UseOrdersOptions = {}) {
     checkDuplicates,
     insertOrders,
     updateOrder,
+    flushPendingUpdates,
+    getOrdersByIds,
     deleteOrders,
     undo,
     startBatchUndo,

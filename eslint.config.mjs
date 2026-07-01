@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     ".tmp-*",
     ".tmp/**",
     ".omc/**",
+    "scraper-service/.venv/**",
+    "scraper-service/**/__pycache__/**",
   ]),
   {
     rules: {

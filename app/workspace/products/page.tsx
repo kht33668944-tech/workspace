@@ -23,11 +23,39 @@ const BatchDetailModal = dynamic(() => import("@/components/workspace/products/b
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
 import { downloadExcelFromBase64, type PlayAutoExportPlatform, PLATFORM_CONFIGS } from "@/lib/excel-export";
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
+import { readJsonStorage, readUrlParam, rememberWorkspaceHref, replaceUrlParams, writeJsonStorage } from "@/lib/view-state";
 
 const PriceHistoryTab = dynamic(() => import("@/components/workspace/products/price-history-tab"), { ssr: false });
 const ExportConfigTab = dynamic(() => import("@/components/workspace/products/export-config-tab"), { ssr: false });
 
 type ActiveTab = "products" | "images" | "commission" | "smartstore-category" | "price-history" | "export-config";
+const PRODUCT_TABS: ActiveTab[] = ["products", "images", "commission", "smartstore-category", "price-history", "export-config"];
+const PRODUCTS_VIEW_STORAGE_KEY = "workspace:products:view";
+
+interface ProductsViewState {
+  tab: ActiveTab;
+  search: string;
+  columnFilters: Record<string, string[]>;
+  priceChangeFilter: PriceChangeFilter | null;
+}
+
+function isProductTab(value: string | null): value is ActiveTab {
+  return !!value && PRODUCT_TABS.includes(value as ActiveTab);
+}
+
+function loadProductsViewState(): ProductsViewState {
+  const saved = readJsonStorage<Partial<ProductsViewState>>(PRODUCTS_VIEW_STORAGE_KEY);
+  const urlTab = readUrlParam("tab");
+  const urlSearch = readUrlParam("search");
+
+  return {
+    tab: isProductTab(urlTab) ? urlTab : saved?.tab ?? "products",
+    search: urlSearch ?? saved?.search ?? "",
+    columnFilters: saved?.columnFilters ?? {},
+    priceChangeFilter: saved?.priceChangeFilter ?? null,
+  };
+}
+
 type RetryItem = { id: string; name: string };
 
 /** 쿠팡 내보내기 시 필수옵션 누락 경고 (route의 warnings 응답 형식) */
@@ -44,11 +72,12 @@ export default function ProductsPage() {
     registerOnUpdate, unregisterOnUpdate,
   } = useAiTask();
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>("products");
-  const [search, setSearch] = useState("");
-  const [activeSearch, setActiveSearch] = useState("");
+  const initialView = useMemo(() => loadProductsViewState(), []);
+  const [activeTab, setActiveTab] = useState<ActiveTab>(initialView.tab);
+  const [search, setSearch] = useState(initialView.search);
+  const [activeSearch, setActiveSearch] = useState(initialView.search);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(initialView.columnFilters);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportStep, setExportStep] = useState("");
@@ -66,7 +95,7 @@ export default function ProductsPage() {
   const [coupangImportModalOpen, setCoupangImportModalOpen] = useState(false);
   const [esmImportModalOpen, setEsmImportModalOpen] = useState(false);
   const [smartstoreImportModalOpen, setSmartstoreImportModalOpen] = useState(false);
-  const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(null);
+  const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(initialView.priceChangeFilter);
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
   const [scrapeResultModalOpen, setScrapeResultModalOpen] = useState(false);
   const [botBlockedItems, setBotBlockedItems] = useState<RetryItem[]>([]);
@@ -78,7 +107,7 @@ export default function ProductsPage() {
   const scrapeLogRef = useRef<HTMLDivElement>(null);
   const scrapeAbortRef = useRef<AbortController | null>(null);
   const [scrapeDropdownOpen, setScrapeDropdownOpen] = useState(false);
-  const [scrapeVersion, setScrapeVersion] = useState<"v1" | "v2">("v2");
+  const [scrapeVersion, setScrapeVersion] = useState<"v1" | "v2" | "v3">("v2");
   const platformCodeFileRef = useRef<HTMLInputElement>(null);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
@@ -121,6 +150,20 @@ export default function ProductsPage() {
 
   // products 탭에서 배치 완료 시 로컬 캐시 동기화
   useEffect(() => {
+    writeJsonStorage<ProductsViewState>(PRODUCTS_VIEW_STORAGE_KEY, {
+      tab: activeTab,
+      search: activeSearch,
+      columnFilters,
+      priceChangeFilter,
+    });
+    replaceUrlParams({
+      tab: activeTab,
+      search: activeSearch || null,
+    });
+    rememberWorkspaceHref("/workspace/products");
+  }, [activeTab, activeSearch, columnFilters, priceChangeFilter]);
+
+  useEffect(() => {
     if (activeTab !== "products") return;
     registerOnUpdate(updateProduct);
     return () => { unregisterOnUpdate(); };
@@ -155,6 +198,10 @@ export default function ProductsPage() {
     setSearch("");
     setActiveSearch("");
   };
+  const handleTabChange = useCallback((tab: ActiveTab) => {
+    setActiveTab(tab);
+    setSelectedIds(new Set());
+  }, []);
 
   const handleSelectToggle = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -396,9 +443,10 @@ export default function ProductsPage() {
     }
   };
 
-  const runScrapeV2Once = async (
+  const runScrapeRemoteOnce = async (
     ids: string[],
     abortController: AbortController,
+    version: "v2" | "v3",
   ): Promise<{
     changes: Array<{ id: string; name: string; previous: number; price: number }>;
     botBlocked: RetryItem[];
@@ -414,7 +462,7 @@ export default function ProductsPage() {
     let skipped = 0;
     let stopped = false;
     try {
-      const res = await fetch("/api/products/scrape-prices-v2", {
+      const res = await fetch(`/api/products/scrape-prices-${version}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -447,6 +495,8 @@ export default function ProductsPage() {
                 sold_out: "품절/판매종료",
                 parse_failed: "가격 파싱 실패 (페이지 구조 변경)",
                 network_error: "네트워크 오류",
+                service_error: "수집 서비스 오류",
+                unsupported: "지원하지 않는 상품",
               };
               const priceText = event.bot_blocked
                 ? "CF 차단"
@@ -500,7 +550,7 @@ export default function ProductsPage() {
     return { changes, botBlocked, failedItems, soldOut, skipped, stopped };
   };
 
-  const handleScrapePricesV2 = async (overrideIds?: string[]) => {
+  const handleScrapePricesRemote = async (version: "v2" | "v3", overrideIds?: string[]) => {
     const isRetry = !!(overrideIds && overrideIds.length > 0);
     const ids = isRetry
       ? overrideIds!
@@ -508,17 +558,18 @@ export default function ProductsPage() {
         ? [...selectedIds]
         : products.filter(p => p.purchase_url?.includes("gmarket.co.kr")).map(p => p.id));
     if (ids.length === 0) {
-      alert("지마켓 상품이 없습니다. (v2는 지마켓만 지원)");
+      alert(`지마켓 상품이 없습니다. (${version}는 지마켓부터 지원)`);
       return;
     }
-    if (!isRetry && !confirm(`${selectedIds.size > 0 ? `선택한 ${ids.length}개` : `전체 ${ids.length}개`} 상품의 최저가를 고속 HTTP로 갱신하시겠습니까?`)) return;
+    const versionLabel = version === "v3" ? "Scrapling v3" : "고속 HTTP v2";
+    if (!isRetry && !confirm(`${selectedIds.size > 0 ? `선택한 ${ids.length}개` : `전체 ${ids.length}개`} 상품의 최저가를 ${versionLabel}로 갱신하시겠습니까?`)) return;
 
     const abortController = new AbortController();
     scrapeAbortRef.current = abortController;
     setScrapingPrices(true);
-    setScrapeVersion("v2");
+    setScrapeVersion(version);
     if (!isRetry) {
-      setScrapeLog(["[v2] 고속 HTTP 최저가 수집 준비 중..."]);
+      setScrapeLog([`[${version}] ${versionLabel} 최저가 수집 준비 중...`]);
       setScrapeResults([]);
       setScrapeStatus(new Map());
       setScrapeTotal(ids.length);
@@ -542,7 +593,7 @@ export default function ProductsPage() {
           await new Promise(r => setTimeout(r, 3000));
           if (abortController.signal.aborted) { stopped = true; break; }
         }
-        const result = await runScrapeV2Once(currentIds, abortController);
+        const result = await runScrapeRemoteOnce(currentIds, abortController, version);
         allChanges.push(...result.changes);
         allSoldOut.push(...result.soldOut);
         const retryMap = new Map<string, RetryItem>();
@@ -577,6 +628,14 @@ export default function ProductsPage() {
     }
   };
 
+  const handleScrapePricesV2 = async (overrideIds?: string[]) => {
+    await handleScrapePricesRemote("v2", overrideIds);
+  };
+
+  const handleScrapePricesV3 = async (overrideIds?: string[]) => {
+    await handleScrapePricesRemote("v3", overrideIds);
+  };
+
   const handleStopScrape = () => {
     scrapeAbortRef.current?.abort();
   };
@@ -590,7 +649,10 @@ export default function ProductsPage() {
       const res = await fetch("/api/products/apply-price-updates", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ updates: changed.map(r => ({ id: r.id, price: r.price, previous_price: r.previous })), source: scrapeVersion === "v2" ? "impit_scrape" : "scrape" }),
+        body: JSON.stringify({
+          updates: changed.map(r => ({ id: r.id, price: r.price, previous_price: r.previous })),
+          source: scrapeVersion === "v3" ? "scrapling_scrape" : scrapeVersion === "v2" ? "impit_scrape" : "scrape",
+        }),
       });
       const json = await res.json() as { applied?: number; error?: string };
       if (!res.ok) {
@@ -931,27 +993,27 @@ export default function ProductsPage() {
       {/* 탭 */}
       <div className="overflow-x-auto scrollbar-hide border-b border-[var(--border)]">
       <div className="flex items-center gap-1 min-w-max">
-        <button onClick={() => setActiveTab("products")} className={TAB_CLASSES("products")}>
+        <button onClick={() => handleTabChange("products")} className={TAB_CLASSES("products")}>
           <Package className="w-4 h-4" />
           상품 목록
         </button>
-        <button onClick={() => setActiveTab("images")} className={TAB_CLASSES("images")}>
+        <button onClick={() => handleTabChange("images")} className={TAB_CLASSES("images")}>
           <Images className="w-4 h-4" />
           이미지 관리
         </button>
-        <button onClick={() => setActiveTab("commission")} className={TAB_CLASSES("commission")}>
+        <button onClick={() => handleTabChange("commission")} className={TAB_CLASSES("commission")}>
           <Settings2 className="w-4 h-4" />
           수수료 설정
         </button>
-        <button onClick={() => setActiveTab("smartstore-category")} className={TAB_CLASSES("smartstore-category")}>
+        <button onClick={() => handleTabChange("smartstore-category")} className={TAB_CLASSES("smartstore-category")}>
           <LayoutList className="w-4 h-4" />
           플토 카테고리
         </button>
-        <button onClick={() => setActiveTab("price-history")} className={TAB_CLASSES("price-history")}>
+        <button onClick={() => handleTabChange("price-history")} className={TAB_CLASSES("price-history")}>
           <TrendingUp className="w-4 h-4" />
           가격 추이
         </button>
-        <button onClick={() => setActiveTab("export-config")} className={TAB_CLASSES("export-config")}>
+        <button onClick={() => handleTabChange("export-config")} className={TAB_CLASSES("export-config")}>
           <FileSpreadsheet className="w-4 h-4" />
           플토 양식
         </button>
@@ -1032,7 +1094,7 @@ export default function ProductsPage() {
               )}
               <div className="relative flex">
                 <button
-                  onClick={() => scrapeVersion === "v2" ? handleScrapePricesV2() : handleScrapePrices()}
+                  onClick={() => scrapeVersion === "v3" ? handleScrapePricesV3() : scrapeVersion === "v2" ? handleScrapePricesV2() : handleScrapePrices()}
                   disabled={scrapingPrices}
                   className="flex items-center gap-1.5 px-3 py-2 text-sm bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 rounded-l-lg transition-colors disabled:opacity-50"
                 >
@@ -1068,6 +1130,14 @@ export default function ProductsPage() {
                         <span className="w-2 h-2 rounded-full bg-green-400" />
                         v2 (고속 HTTP)
                         {scrapeVersion === "v2" && <span className="ml-auto text-xs text-[var(--text-muted)]">현재</span>}
+                      </button>
+                      <button
+                        onClick={() => { setScrapeDropdownOpen(false); setScrapeVersion("v3"); handleScrapePricesV3(); }}
+                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-[var(--bg-hover)] transition-colors ${scrapeVersion === "v3" ? "text-orange-400" : "text-[var(--text-primary)]"}`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-orange-400" />
+                        v3 (Scrapling 실험)
+                        {scrapeVersion === "v3" && <span className="ml-auto text-xs text-[var(--text-muted)]">현재</span>}
                       </button>
                     </div>
                   </>
@@ -1477,7 +1547,7 @@ export default function ProductsPage() {
               {!scrapingPrices && botBlockedItems.length > 0 && (
                 <>
                   <button
-                    onClick={() => scrapeVersion === "v2" ? handleScrapePricesV2(botBlockedItems.map(b => b.id)) : handleScrapePrices(botBlockedItems.map(b => b.id))}
+                    onClick={() => scrapeVersion === "v3" ? handleScrapePricesV3(botBlockedItems.map(b => b.id)) : scrapeVersion === "v2" ? handleScrapePricesV2(botBlockedItems.map(b => b.id)) : handleScrapePrices(botBlockedItems.map(b => b.id))}
                     className="flex items-center gap-1 px-2.5 py-1 min-h-[32px] text-xs font-medium text-orange-400 bg-orange-500/10 hover:bg-orange-500/20 rounded-lg transition-colors"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />

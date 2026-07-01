@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { groupIntoBatches } from "@/lib/log-format";
+import { getKoreanDateKey } from "@/lib/date-utils";
 import type { BatchLogEntry } from "@/lib/log-format";
 
 export interface DashboardRecentOrder {
@@ -360,7 +361,8 @@ async function fetchMonthlyProfit(uid: string, month: string): Promise<{
 
       for (const order of data as LegacyProfitRow[]) {
         if (!order.order_date) continue;
-        const date = order.order_date.slice(0, 10);
+        const date = getKoreanDateKey(order.order_date);
+        if (!date) continue;
         const row = rowMap.get(date);
         const rowCards = rowCardMaps.get(date);
         if (!row || !rowCards) continue;

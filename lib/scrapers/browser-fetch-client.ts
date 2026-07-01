@@ -32,18 +32,33 @@ export class GmarketBrowserFetchClient {
     this.poolAcquired = true;
     try {
       this.browser = await launchPatchedBrowser();
-      this.context = await createPatchedGmarketContext(this.browser);
-      await ensureLogin(this.context, userId);
-      this.page = await this.context.newPage();
-      await this.page.goto(
-        "https://item.gmarket.co.kr/Item?goodscode=1752706460",
-        { waitUntil: "domcontentloaded", timeout: 30000 },
-      );
-      await this.page.waitForTimeout(2000);
+      await this.prepareContext(userId);
     } catch (e) {
       await this.destroy();
       throw e;
     }
+  }
+
+  async resetSession(userId: string): Promise<void> {
+    if (!this.browser) throw new Error("Client not initialized");
+    await this.closeContext();
+    await sleep(8000 + randomDelay(0, 7000));
+    await this.prepareContext(userId);
+  }
+
+  private async prepareContext(userId: string): Promise<void> {
+    if (!this.browser) throw new Error("Browser not initialized");
+    this.context = await createPatchedGmarketContext(this.browser);
+    await ensureLogin(this.context, userId);
+    this.page = await this.context.newPage();
+    await this.page.goto(
+      "https://item.gmarket.co.kr/Item?goodscode=1752706460",
+      { waitUntil: "domcontentloaded", timeout: 30000 },
+    );
+    await this.page
+      .waitForFunction(() => !/잠시만 기다리|Just a moment/i.test(document.title), { timeout: 12000 })
+      .catch(() => {});
+    await this.page.waitForTimeout(2000);
   }
 
   async fetchProductPage(url: string): Promise<BrowserFetchResult> {
@@ -93,18 +108,22 @@ export class GmarketBrowserFetchClient {
     }
   }
 
-  async destroy(): Promise<void> {
+  private async closeContext(): Promise<void> {
     try {
       await this.page?.close();
     } catch {}
     try {
       await this.context?.close();
     } catch {}
+    this.page = null;
+    this.context = null;
+  }
+
+  async destroy(): Promise<void> {
+    await this.closeContext();
     try {
       await this.browser?.close();
     } catch {}
-    this.page = null;
-    this.context = null;
     this.browser = null;
     if (this.poolAcquired) {
       browserPool.release();

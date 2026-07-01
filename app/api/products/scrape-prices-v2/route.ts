@@ -14,6 +14,8 @@ type SSEEvent =
   | { type: "done"; updated: number; failed: number; unchanged: number; bot_blocked: number; sold_out: number; skipped: number }
   | { type: "error"; message: string };
 
+const CF_RESET_THRESHOLD = 15;
+
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -82,6 +84,7 @@ export async function POST(request: NextRequest) {
       let unchanged = 0;
       let botBlocked = 0;
       let soldOut = 0;
+      let consecutiveCfBlocks = 0;
       const statusHistoryRows: Array<Record<string, unknown>> = [];
 
       const client = new GmarketBrowserFetchClient();
@@ -97,7 +100,22 @@ export async function POST(request: NextRequest) {
           const previousPrice = p.lowest_price;
           let result: GmarketPriceResult;
 
-          const fetchResult = await client.fetchProductPage(p.purchase_url);
+          let fetchResult = await client.fetchProductPage(p.purchase_url);
+          if (fetchResult.cfBlocked) {
+            consecutiveCfBlocks++;
+            if (consecutiveCfBlocks >= CF_RESET_THRESHOLD) {
+              send({
+                type: "init",
+                message: `CF 차단이 ${CF_RESET_THRESHOLD}개 연속 발생해 브라우저 세션을 새로 준비합니다...`,
+              });
+              console.warn(`[scrape-prices-v2] CF 연속 ${consecutiveCfBlocks}회 → 세션 재생성 후 현재 상품 재시도`);
+              await client.resetSession(authUser.id);
+              consecutiveCfBlocks = 0;
+              fetchResult = await client.fetchProductPage(p.purchase_url);
+            }
+          } else {
+            consecutiveCfBlocks = 0;
+          }
 
           if (fetchResult.cfBlocked) {
             result = { price: 0, botBlocked: true, failReason: "bot_blocked" };

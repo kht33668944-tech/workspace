@@ -52,7 +52,7 @@ export default function OrderModal({ onSave, onClose }: OrderModalProps) {
     const order: OrderInsert = {
       user_id: "",
       bundle_no: form.bundle_no || null,
-      order_date: form.order_date ? new Date(form.order_date).toISOString() : null,
+      order_date: form.order_date ? `${form.order_date}T00:00:00+09:00` : null,
       marketplace: form.marketplace || null,
       recipient_name: form.recipient_name || null,
       product_name: form.product_name || null,
