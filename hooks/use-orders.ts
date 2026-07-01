@@ -68,6 +68,16 @@ function hasText(value: unknown): boolean {
   return typeof value === "string" && value.trim() !== "";
 }
 
+function getMonthBounds(month: string): { from: string; to: string } {
+  const [year, monthNum] = month.split("-").map(Number);
+  const nextYear = monthNum === 12 ? year + 1 : year;
+  const nextMonth = monthNum === 12 ? 1 : monthNum + 1;
+  return {
+    from: `${year}-${String(monthNum).padStart(2, "0")}-01T00:00:00+09:00`,
+    to: `${nextYear}-${String(nextMonth).padStart(2, "0")}-01T00:00:00+09:00`,
+  };
+}
+
 function applyLifecycleTimestamps(order: Order, updates: OrderUpdate): OrderUpdate {
   const next: OrderUpdate = { ...updates };
   const now = new Date().toISOString();
@@ -76,7 +86,11 @@ function applyLifecycleTimestamps(order: Order, updates: OrderUpdate): OrderUpda
     next.purchased_at = now;
   }
 
-  if (hasText(next.tracking_no) && !hasText(order.tracking_no) && !order.delivered_at) {
+  if (
+    ((hasText(next.tracking_no) && !hasText(order.tracking_no)) ||
+      (next.delivery_status === "배송완료" && order.delivery_status !== "배송완료")) &&
+    !order.delivered_at
+  ) {
     next.delivered_at = now;
   }
 
@@ -123,7 +137,8 @@ export function useOrders(options: UseOrdersOptions = {}) {
         .range(from, from + PAGE_SIZE - 1);
 
       if (options.month) {
-        query = query.eq("order_month", options.month);
+        const monthBounds = getMonthBounds(options.month);
+        query = query.gte("order_date", monthBounds.from).lt("order_date", monthBounds.to);
       }
       if (options.marketplace) {
         query = query.eq("marketplace", options.marketplace);
@@ -202,17 +217,30 @@ export function useOrders(options: UseOrdersOptions = {}) {
 
   const fetchMonths = useCallback(async () => {
     if (!userId) return;
-    // order_month만 select하여 경량 쿼리, 클라이언트에서 unique 처리
-    const { data } = await supabase
-      .from("orders")
-      .select("order_month")
-      .eq("user_id", userId)
-      .not("order_month", "is", null);
+    const PAGE_SIZE = 1000;
+    const months = new Set<string>();
+    let from = 0;
 
-    if (data) {
-      const unique = [...new Set(data.map((d) => d.order_month as string))].sort().reverse();
-      setMonths(unique);
+    while (true) {
+      const { data } = await supabase
+        .from("orders")
+        .select("order_date")
+        .eq("user_id", userId)
+        .not("order_date", "is", null)
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (!data || data.length === 0) break;
+
+      for (const row of data as Array<{ order_date: string | null }>) {
+        const month = getKoreanMonthKey(row.order_date);
+        if (month) months.add(month);
+      }
+
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
+
+    setMonths([...months].sort().reverse());
   }, [userId]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
@@ -279,11 +307,13 @@ export function useOrders(options: UseOrdersOptions = {}) {
       let from = 0;
       let hasMore = true;
       while (hasMore) {
+        const monthBounds = getMonthBounds(month);
         const { data } = await supabase
           .from("orders")
           .select("bundle_no, recipient_name, product_name, order_date, marketplace")
           .eq("user_id", user.id)
-          .eq("order_month", month)
+          .gte("order_date", monthBounds.from)
+          .lt("order_date", monthBounds.to)
           .range(from, from + 999);
         if (!data || data.length === 0) break;
         existingOrders.push(...(data as Order[]));

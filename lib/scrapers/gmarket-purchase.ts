@@ -165,11 +165,13 @@ export async function purchaseGmarket(
             });
           } catch { /* 무시 */ }
 
+          const existingOrderNosBeforePurchase = await captureExistingGmarketOrderNos(activePage);
+          console.log(`[gmarket-purchase] 결제 전 기존 주문번호 ${existingOrderNosBeforePurchase.size}건 확인`);
           // 항상 수량 1로 구매 (order의 quantity를 무시)
           // 2번째 이후 구매는 배송지가 이미 저장되어 있으므로 빠른 검증만 수행
           const singleOrder = { ...order, quantity: 1 };
           const isRepeat = q > 1;
-          const { purchaseOrderNo, cost, paymentMethod } = await processSingleOrder(activePage, context, singleOrder, paymentPin, isRepeat);
+          const { purchaseOrderNo, cost, paymentMethod } = await processSingleOrder(activePage, context, singleOrder, paymentPin, existingOrderNosBeforePurchase, isRepeat);
 
           lastOrderNo = purchaseOrderNo;
           if (cost) { totalCost += cost; costExtractedCount++; }
@@ -418,6 +420,7 @@ async function processSingleOrder(
   context: BrowserContext,
   order: PurchaseOrderInfo,
   paymentPin: string,
+  existingOrderNosBeforePurchase: Set<string>,
   isRepeatPurchase = false
 ): Promise<SingleOrderResult> {
   // 현재 작업 페이지 (쿠폰 등에서 새 탭이 열릴 수 있음)
@@ -469,8 +472,8 @@ async function processSingleOrder(
   // 7. 결제하기 클릭 + 비밀번호 입력
   await processPayment(activePage, paymentPin);
 
-  // 8. 주문내역에서 주문번호 + 결제방식 + 원가 한번에 추출
-  const orderInfo = await extractOrderInfo(activePage);
+  // 8. 주문내역에서 결제 전에는 없던 새 주문번호 + 결제방식 + 원가를 추출
+  const orderInfo = await extractOrderInfo(activePage, existingOrderNosBeforePurchase);
 
   return orderInfo;
 }
@@ -582,8 +585,8 @@ async function applyCheckoutDiscount(page: Page) {
 
 /**
  * 주문서 페이지의 "결제할인" 드롭다운 처리.
- * - 결제할인 select(native)가 있으면 각 옵션을 적용해보고 실제 "결제할인 N원" 금액이 가장 큰 옵션을 최종 선택
- * - 없으면 아무것도 하지 않고 기존 흐름 유지 (silent skip)
+ * - "첫결제/첫 결제" 문구가 있는 옵션은 1회성 할인으로 보고 제외한다.
+ * - 남은 결제할인 select(native) 옵션을 적용해보고 실제 "결제할인 N원" 금액이 가장 큰 옵션을 최종 선택
  * 결제할인 select는 옵션 텍스트에 "결제할인"이 포함되어 배송요청 select(#delivery-request-label)와 구분된다.
  */
 async function applyPaymentDiscount(page: Page) {
@@ -599,17 +602,23 @@ async function applyPaymentDiscount(page: Page) {
       return;
     }
 
-    // 옵션 목록 수집 (placeholder 제외)
+    // 옵션 목록 수집 (placeholder와 1회성 첫결제 할인 제외)
     const options: { value: string; text: string }[] = await discountSelect.evaluate((el) => {
       const sel = el as HTMLSelectElement;
       return Array.from(sel.options).map((o) => ({ value: o.value, text: o.text.trim() }));
     });
-    const candidates = options.filter(
+    const selectableOptions = options.filter(
       (o) => o.value && o.value !== "0" && !o.text.includes("선택해")
     );
+    const candidates = selectableOptions.filter((o) => !/첫\s*결제/.test(o.text));
+    const excludedFirstPaymentCount = selectableOptions.length - candidates.length;
 
     if (candidates.length === 0) {
-      console.log("[gmarket-purchase] 결제할인 옵션 없음 (placeholder만) → 스킵");
+      console.log(
+        excludedFirstPaymentCount > 0
+          ? "[gmarket-purchase] 결제할인 옵션은 첫결제 할인만 있어 스킵"
+          : "[gmarket-purchase] 결제할인 옵션 없음 (placeholder만) → 스킵"
+      );
       return;
     }
 
@@ -1761,15 +1770,21 @@ function extractCardBrand(text: string): string | undefined {
   return undefined;
 }
 
-async function extractOrderInfo(page: Page): Promise<SingleOrderResult> {
-  // 결제 완료 후 주문내역 API에서 주문번호 + payNo를 추출하고,
-  // 주문 상세 페이지(/ko/pc/detail/basic/{payNo})에서 결제방식 + 원가를 추출
+interface GmarketPayBundle {
+  payNo: string | null;
+  orderNos: string[];
+}
 
-  await page.waitForTimeout(2000);
+interface GmarketPayApiResponse {
+  data?: {
+    payBundleList?: Array<{
+      payNo?: number | string | null;
+      orderList?: Array<{ orderNo?: number | string | null }>;
+    }>;
+  };
+}
 
-  // 주문내역 API에서 주문번호 + payNo 추출
-  console.log("[gmarket-purchase] 주문내역 API에서 주문번호 + payNo 추출 시도...");
-
+async function fetchRecentPayBundles(page: Page): Promise<GmarketPayBundle[]> {
   const apiPromise = page.waitForResponse(
     (res) => res.url().includes("/api/pays/paging") && res.status() === 200,
     { timeout: 30000 }
@@ -1778,29 +1793,49 @@ async function extractOrderInfo(page: Page): Promise<SingleOrderResult> {
   await page.goto("https://my.gmarket.co.kr/ko/pc/main", { waitUntil: "networkidle", timeout: 30000 });
 
   const apiRes = await apiPromise;
+  const data = await apiRes.json() as GmarketPayApiResponse;
 
-  interface PayApiResponse {
-    data?: {
-      payBundleList?: Array<{
-        payNo: number;
-        orderList: Array<{ orderNo: number | string }>;
-      }>;
-    };
-  }
+  return (data?.data?.payBundleList || [])
+    .map((bundle) => ({
+      payNo: bundle.payNo ? String(bundle.payNo) : null,
+      orderNos: (bundle.orderList || [])
+        .map((order) => order.orderNo ? String(order.orderNo) : "")
+        .filter(Boolean),
+    }))
+    .filter((bundle) => bundle.orderNos.length > 0);
+}
 
-  const data = await apiRes.json() as PayApiResponse;
-  const firstBundle = data?.data?.payBundleList?.[0];
+async function captureExistingGmarketOrderNos(page: Page): Promise<Set<string>> {
+  console.log("[gmarket-purchase] 결제 전 기존 주문번호 확인 중...");
+  const bundles = await fetchRecentPayBundles(page);
+  return new Set(bundles.flatMap((bundle) => bundle.orderNos));
+}
 
-  const orderNo = firstBundle?.orderList?.[0]?.orderNo
-    ? String(firstBundle.orderList[0].orderNo)
-    : null;
-  const payNo = firstBundle?.payNo ? String(firstBundle.payNo) : null;
+async function extractOrderInfo(page: Page, existingOrderNosBeforePurchase: Set<string>): Promise<SingleOrderResult> {
+  // 결제 완료 후 주문내역 API에서 결제 전에는 없던 새 주문번호 + payNo를 추출하고,
+  // 주문 상세 페이지(/ko/pc/detail/basic/{payNo})에서 결제방식 + 원가를 추출
+
+  await page.waitForTimeout(2000);
+
+  console.log("[gmarket-purchase] 주문내역 API에서 신규 주문번호 + payNo 추출 시도...");
+
+  const bundles = await fetchRecentPayBundles(page);
+  const newBundle = bundles.find((bundle) =>
+    bundle.orderNos.some((orderNo) => !existingOrderNosBeforePurchase.has(orderNo))
+  );
+  const orderNo = newBundle?.orderNos.find((no) => !existingOrderNosBeforePurchase.has(no)) ?? null;
+  const payNo = newBundle?.payNo ?? null;
 
   if (!orderNo) {
-    throw new Error("주문번호를 찾을 수 없습니다. 결제가 완료되었는지 확인하세요.");
+    const latestOrderNo = bundles[0]?.orderNos[0];
+    throw new Error(
+      latestOrderNo
+        ? `새 주문번호가 생성되지 않았습니다. 최신 주문번호(${latestOrderNo})가 결제 전과 같아 성공 처리하지 않습니다.`
+        : "새 주문번호를 찾을 수 없습니다. 결제가 완료되었는지 확인하세요."
+    );
   }
 
-  console.log(`[gmarket-purchase] 주문내역 API - 주문번호: ${orderNo}, payNo: ${payNo}`);
+  console.log(`[gmarket-purchase] 주문내역 API - 신규 주문번호: ${orderNo}, payNo: ${payNo}`);
 
   // 주문 상세 페이지에서 결제방식 + 원가 추출
   let cost: number | undefined;

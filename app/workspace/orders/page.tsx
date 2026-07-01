@@ -120,7 +120,9 @@ function saveFilterState(state: FilterState) {
 
 function loadFilterState(): FilterState | null {
   try {
-    const raw = localStorage.getItem(FILTER_STORAGE_KEY) ?? sessionStorage.getItem(FILTER_STORAGE_KEY);
+    // 대시보드 카드 클릭은 sessionStorage에 임시 필터를 넣는다.
+    // localStorage를 먼저 읽으면 이전 발주서 마지막 필터가 이 임시 필터를 덮어쓴다.
+    const raw = sessionStorage.getItem(FILTER_STORAGE_KEY) ?? localStorage.getItem(FILTER_STORAGE_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as FilterState;
   } catch {

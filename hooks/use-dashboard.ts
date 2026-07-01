@@ -151,24 +151,41 @@ async function fetchMonthStats(uid: string, month: string): Promise<MonthStats> 
   let deliveredMargin = 0;
   let from = 0;
 
+  const monthRange = getMonthRange(month);
   while (true) {
     const { data } = await supabase
       .from("orders")
-      .select("revenue,margin,delivery_status")
+      .select("id")
       .eq("user_id", uid)
-      .eq("order_month", month)
+      .gte("order_date", monthRange.from)
+      .lt("order_date", monthRange.to)
       .range(from, from + PAGE - 1);
 
     if (!data || data.length === 0) break;
 
-    const rows = data as Array<{ revenue: number | null; margin: number | null; delivery_status: string }>;
-    count += rows.length;
+    count += data.length;
 
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+
+  from = 0;
+
+  while (true) {
+    const { data } = await supabase
+      .from("orders")
+      .select("revenue,margin")
+      .eq("user_id", uid)
+      .gte("delivered_at", monthRange.from)
+      .lt("delivered_at", monthRange.to)
+      .range(from, from + PAGE - 1);
+
+    if (!data || data.length === 0) break;
+
+    const rows = data as Array<{ revenue: number | null; margin: number | null }>;
     for (const row of rows) {
-      if (row.delivery_status === "배송완료") {
-        revenue += row.revenue ?? 0;
-        deliveredMargin += row.margin ?? 0;
-      }
+      revenue += row.revenue ?? 0;
+      deliveredMargin += row.margin ?? 0;
     }
 
     if (rows.length < PAGE) break;
@@ -228,6 +245,9 @@ type LegacyProfitRow = FinancialOrderRow & {
   delivery_status: string;
   payment_method: string | null;
   purchase_order_no: string | null;
+  delivered_at: string | null;
+  purchased_at: string | null;
+  returned_at: string | null;
 };
 
 function localDateFromIso(value: string | null): string | null {
@@ -251,7 +271,6 @@ async function fetchMonthlyProfit(uid: string, month: string): Promise<{
       .from("orders")
       .select("delivered_at,revenue,settlement,cost,margin")
       .eq("user_id", uid)
-      .eq("order_month", month)
       .gte("delivered_at", from)
       .lt("delivered_at", to)
       .range(pageStart, pageStart + PAGE - 1);
@@ -285,7 +304,6 @@ async function fetchMonthlyProfit(uid: string, month: string): Promise<{
       .from("orders")
       .select("returned_at,revenue,settlement,cost,margin")
       .eq("user_id", uid)
-      .eq("order_month", month)
       .gte("returned_at", from)
       .lt("returned_at", to)
       .range(pageStart, pageStart + PAGE - 1);
@@ -319,7 +337,6 @@ async function fetchMonthlyProfit(uid: string, month: string): Promise<{
       .from("orders")
       .select("purchased_at,cost,payment_method")
       .eq("user_id", uid)
-      .eq("order_month", month)
       .gte("purchased_at", from)
       .lt("purchased_at", to)
       .range(pageStart, pageStart + PAGE - 1);
@@ -343,60 +360,56 @@ async function fetchMonthlyProfit(uid: string, month: string): Promise<{
     pageStart += PAGE;
   }
 
-  const hasLifecycleData = [...rowMap.values()].some(
-    (row) => row.deliveredCount > 0 || row.returnCount > 0 || row.cardCount > 0
-  );
+  pageStart = 0;
+  while (true) {
+    const { data } = await supabase
+      .from("orders")
+      .select("order_date,delivery_status,revenue,settlement,cost,margin,payment_method,purchase_order_no,delivered_at,purchased_at,returned_at")
+      .eq("user_id", uid)
+      .gte("order_date", from)
+      .lt("order_date", to)
+      .range(pageStart, pageStart + PAGE - 1);
 
-  if (!hasLifecycleData) {
-    pageStart = 0;
-    while (true) {
-      const { data } = await supabase
-        .from("orders")
-        .select("order_date,delivery_status,revenue,settlement,cost,margin,payment_method,purchase_order_no")
-        .eq("user_id", uid)
-        .eq("order_month", month)
-        .range(pageStart, pageStart + PAGE - 1);
+    if (!data || data.length === 0) break;
 
-      if (!data || data.length === 0) break;
+    for (const order of data as LegacyProfitRow[]) {
+      if (!order.order_date) continue;
+      const date = getKoreanDateKey(order.order_date);
+      if (!date) continue;
+      const row = rowMap.get(date);
+      const rowCards = rowCardMaps.get(date);
+      if (!row || !rowCards) continue;
 
-      for (const order of data as LegacyProfitRow[]) {
-        if (!order.order_date) continue;
-        const date = getKoreanDateKey(order.order_date);
-        if (!date) continue;
-        const row = rowMap.get(date);
-        const rowCards = rowCardMaps.get(date);
-        if (!row || !rowCards) continue;
+      const revenue = order.revenue ?? 0;
+      const settlement = order.settlement ?? 0;
+      const cost = order.cost ?? 0;
+      const margin = order.margin ?? settlement - cost;
 
-        const revenue = order.revenue ?? 0;
-        const settlement = order.settlement ?? 0;
-        const cost = order.cost ?? 0;
-        const margin = order.margin ?? settlement - cost;
-
-        if (order.delivery_status === "배송완료") {
-          row.deliveredCount += 1;
-          row.deliveredRevenue += revenue;
-          row.deliveredSettlement += settlement;
-          row.deliveredCost += cost;
-          row.deliveredMargin += margin;
-        } else if (order.delivery_status === "반품완료") {
-          row.returnCount += 1;
-          row.returnRevenue += revenue;
-          row.returnSettlement += settlement;
-          row.returnCost += cost;
-          row.returnMargin += margin;
-        }
-
-        if (order.purchase_order_no?.trim()) {
-          row.cardSpend += cost;
-          row.cardCount += 1;
-          addCardUsage(rowCards, order.payment_method, cost);
-          addCardUsage(monthlyCards, order.payment_method, cost);
-        }
+      // delivered_at/purchased_at/returned_at이 비어 있는 과거·수동 변경 데이터는 주문일 기준으로 보완 집계한다.
+      if (!order.delivered_at && order.delivery_status === "배송완료") {
+        row.deliveredCount += 1;
+        row.deliveredRevenue += revenue;
+        row.deliveredSettlement += settlement;
+        row.deliveredCost += cost;
+        row.deliveredMargin += margin;
+      } else if (!order.returned_at && order.delivery_status === "반품완료") {
+        row.returnCount += 1;
+        row.returnRevenue += revenue;
+        row.returnSettlement += settlement;
+        row.returnCost += cost;
+        row.returnMargin += margin;
       }
 
-      if (data.length < PAGE) break;
-      pageStart += PAGE;
+      if (!order.purchased_at && order.purchase_order_no?.trim()) {
+        row.cardSpend += cost;
+        row.cardCount += 1;
+        addCardUsage(rowCards, order.payment_method, cost);
+        addCardUsage(monthlyCards, order.payment_method, cost);
+      }
     }
+
+    if (data.length < PAGE) break;
+    pageStart += PAGE;
   }
 
   const rows = [...rowMap.values()]
@@ -452,6 +465,7 @@ export function useDashboard() {
     const now = new Date();
     const currentMonth = formatMonth(now);
     const lastMonth = formatMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+    const currentMonthRange = getMonthRange(currentMonth);
 
     try {
       const [counts, currentStats, lastStats, profitStats] = await Promise.all([
@@ -476,13 +490,14 @@ export function useDashboard() {
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
             .eq("delivery_status", "배송준비"),
-          // 3. 배송완료 — 이번달만
+          // 3. 배송완료 — 이번달 배송완료일 기준
           supabase
             .from("orders")
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
             .eq("delivery_status", "배송완료")
-            .eq("order_month", currentMonth),
+            .gte("delivered_at", currentMonthRange.from)
+            .lt("delivered_at", currentMonthRange.to),
           // 4. CS (교환준비 + 반품준비)
           supabase
             .from("orders")
@@ -521,7 +536,7 @@ export function useDashboard() {
         fetchMonthlyProfit(uid, currentMonth),
       ]);
 
-      const [c0, c1, c2, c3, c4, c5, c6, c7, c8] = counts;
+      const [c0, c1, c2, , c4, c5, c6, c7, c8] = counts;
 
       // 구매/운송장 배치 집계 후 시간순 병합 (최신 15개)
       type LogRow = { batch_id: string; platform: string; status: string; created_at: string };
@@ -541,7 +556,7 @@ export function useDashboard() {
         unpaidCount: c0.count ?? 0,
         unpurchasedCount: c1.count ?? 0,
         noTrackingCount: c2.count ?? 0,
-        deliveredCount: c3.count ?? 0,
+        deliveredCount: profitStats.summary.deliveredCount,
         csCount: c4.count ?? 0,
         cancelPendingCount: c5.count ?? 0,
         outOfStockCount: c6.count ?? 0,
