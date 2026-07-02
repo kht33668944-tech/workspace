@@ -171,6 +171,11 @@ export function formatCell(key: string, val: unknown, order?: { courier?: string
   return React.createElement("span", { title: String(val), className: "text-[var(--text-secondary)] text-xs truncate block max-w-full" }, String(val));
 }
 
+export interface PurchaseIdFillOption {
+  value: string;
+  label: string;
+}
+
 export interface OrderTableProps {
   orders: Order[];
   allOrders: Order[];
@@ -187,4 +192,6 @@ export interface OrderTableProps {
   onClearPurchaseDuplicate?: (order: Order) => void;
   columnFilters: Record<string, string[]>;
   onColumnFilterChange: (key: string, values: string[]) => void;
+  purchaseIdFillOptions?: PurchaseIdFillOption[];
+  onFillSelectedPurchaseId?: (purchaseId: string) => void;
 }

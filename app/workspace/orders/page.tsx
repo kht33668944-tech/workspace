@@ -28,7 +28,8 @@ const SettlementImportModal = dynamic(() => import("@/components/workspace/order
 const BulkSmsModal = dynamic(() => import("@/components/workspace/orders/bulk-sms-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
 import { useAutoPurchaseController, useTrackingCollectController } from "@/context/modal-controllers";
-import type { Order, OrderInsert } from "@/types/database";
+import { PLATFORM_LABELS } from "@/types/database";
+import type { Order, OrderInsert, OrderUpdate, PurchaseCredential, PurchasePlatform } from "@/types/database";
 
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
 
@@ -83,14 +84,47 @@ type CostScrapeEvent =
   | { type: "error"; message: string };
 
 const MAX_COST_REFRESH_ATTEMPTS = 5;
-
+const COST_REFRESH_PURCHASE_SOURCES = [
+  { label: "지마켓", patterns: ["gmarket.co.kr"] },
+  { label: "오늘의집", patterns: ["ohou.se", "ohouse"] },
+] as const;
 function normalizeProductNameForMatch(name: string): string {
   return name.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function detectCostRefreshPurchaseSource(url: string | null | undefined): string | null {
+  const raw = url?.trim().toLowerCase();
+  if (!raw) return null;
+
+  const match = COST_REFRESH_PURCHASE_SOURCES.find((source) =>
+    source.patterns.some((pattern) => raw.includes(pattern))
+  );
+  return match?.label ?? null;
+}
+
 function isSupportedCostRefreshUrl(url: string | null | undefined): boolean {
-  if (!url) return false;
-  return url.includes("gmarket.co.kr") || url.includes("ohou.se") || url.includes("ohouse");
+  return detectCostRefreshPurchaseSource(url) !== null;
+}
+
+function getAutoPurchaseSourceForCostRefresh(params: {
+  status: CostRefreshResult["status"];
+  purchaseUrl: string | null | undefined;
+  currentPurchaseSource: string | null;
+  settlement: number;
+  nextCost: number;
+}): string | null {
+  if (params.status !== "priced") return null;
+  if (params.currentPurchaseSource?.trim()) return null;
+  if (params.settlement - params.nextCost <= 0) return null;
+  return detectCostRefreshPurchaseSource(params.purchaseUrl);
+}
+
+function purchasePlatformFromSource(source: string | null | undefined): PurchasePlatform | null {
+  const normalized = source?.trim();
+  if (!normalized) return null;
+
+  const entry = Object.entries(PLATFORM_LABELS).find(([, label]) => label === normalized);
+  return entry ? (entry[0] as PurchasePlatform) : null;
 }
 
 async function fetchProductCostRows(userId: string): Promise<ProductCostRow[]> {
@@ -196,6 +230,7 @@ function OrdersPageInner() {
   const [showImportMenu, setShowImportMenu] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [purchaseCredentials, setPurchaseCredentials] = useState<PurchaseCredential[]>([]);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(saved?.columnFilters ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [sidePanelOrder, setSidePanelOrder] = useState<Order | null>(null);
@@ -352,6 +387,72 @@ function OrdersPageInner() {
     dateTo: selectedDateTo,
     columnFilters,
   });
+  useEffect(() => {
+    if (!session?.access_token) {
+      setPurchaseCredentials([]);
+      return;
+    }
+
+    let alive = true;
+    fetch("/api/credentials", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: PurchaseCredential[]) => {
+        if (alive) setPurchaseCredentials(data);
+      })
+      .catch(() => {
+        if (alive) setPurchaseCredentials([]);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [session?.access_token]);
+
+  const purchaseIdFillOptions = useMemo(() => {
+    const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
+    const selectedPlatforms = new Set(
+      selectedOrders
+        .map((order) => purchasePlatformFromSource(order.purchase_source))
+        .filter((platform): platform is PurchasePlatform => Boolean(platform))
+    );
+
+    const candidates = selectedPlatforms.size > 0
+      ? purchaseCredentials.filter((credential) => selectedPlatforms.has(credential.platform))
+      : purchaseCredentials;
+
+    const seen = new Set<string>();
+    return candidates
+      .filter((credential) => {
+        const key = `${credential.platform}:${credential.login_id}`;
+        if (!credential.login_id || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((credential) => {
+        const platformLabel = PLATFORM_LABELS[credential.platform] ?? credential.platform;
+        const label = credential.label?.trim()
+          ? `${platformLabel} · ${credential.label} (${credential.login_id})`
+          : `${platformLabel} · ${credential.login_id}`;
+        return { value: credential.login_id, label };
+      });
+  }, [orders, purchaseCredentials, selectedIds]);
+
+  const handleFillSelectedPurchaseId = useCallback((purchaseId: string) => {
+    const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
+    if (selectedOrders.length === 0) {
+      showToast("먼저 주문을 체크해주세요.", "info");
+      return;
+    }
+
+    startBatchUndo();
+    for (const order of selectedOrders) {
+      updateOrder(order.id, { purchase_id: purchaseId });
+    }
+    endBatchUndo();
+    showToast(`체크한 ${selectedOrders.length}건에 구매아이디를 입력했습니다.`, "success");
+  }, [endBatchUndo, orders, selectedIds, showToast, startBatchUndo, updateOrder]);
   const getLatestSelectedOrders = useCallback(async () => {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return [];
@@ -535,8 +636,16 @@ function OrdersPageInner() {
 
         for (const order of group.orders) {
           const nextCost = result.status === "sold_out" ? 0 : result.price * (order.quantity || 1);
+          const purchaseSource = getAutoPurchaseSourceForCostRefresh({
+            status: result.status,
+            purchaseUrl: group.product.purchase_url,
+            currentPurchaseSource: order.purchase_source,
+            settlement: order.settlement || 0,
+            nextCost,
+          });
           const updates: Record<string, unknown> = {};
           if (order.cost !== nextCost) updates.cost = nextCost;
+          if (purchaseSource) updates.purchase_source = purchaseSource;
           if (result.status === "sold_out" && order.delivery_status !== "재고부족") {
             updates.delivery_status = "재고부족";
           }
@@ -728,6 +837,13 @@ function OrdersPageInner() {
     const orderChanges = (group?.orders ?? []).map((order) => {
       const previousCost = order.cost || 0;
       const nextCost = result.status === "sold_out" ? 0 : result.price * (order.quantity || 1);
+      const purchaseSource = getAutoPurchaseSourceForCostRefresh({
+        status: result.status,
+        purchaseUrl: group?.product.purchase_url,
+        currentPurchaseSource: order.purchase_source,
+        settlement: order.settlement || 0,
+        nextCost,
+      });
       const statusChanged = result.status === "sold_out" && order.delivery_status !== "재고부족";
       return {
         id: order.id,
@@ -735,15 +851,17 @@ function OrdersPageInner() {
         quantity: order.quantity || 1,
         previousCost,
         nextCost,
+        purchaseSource,
         statusChanged,
         changed: previousCost !== nextCost,
+        sourceChanged: Boolean(purchaseSource),
       };
     });
 
     return {
       ...result,
       orderChanges,
-      changedOrderCount: orderChanges.filter((order) => order.changed || order.statusChanged).length,
+      changedOrderCount: orderChanges.filter((order) => order.changed || order.statusChanged || order.sourceChanged).length,
     };
   }), [costRefreshResults]);
 
@@ -887,10 +1005,33 @@ function OrdersPageInner() {
 
   const handleBulkStatusChange = useCallback((status: string) => {
     const ids = [...selectedIds];
+    const resetPurchaseInfo = status === "결제전";
+
+    if (resetPurchaseInfo) {
+      const ok = confirm(
+        `선택한 ${ids.length}건을 결제전으로 되돌릴까요?\n\n실제 구매처 주문내역에서 구매되지 않은 주문만 되돌려야 합니다. 구매번호, 결제카드, 구매일시는 함께 비워집니다.`
+      );
+      if (!ok) return;
+    }
+
+    const updates: OrderUpdate = resetPurchaseInfo
+      ? {
+          delivery_status: "결제전",
+          purchase_order_no: null,
+          payment_method: null,
+          purchased_at: null,
+        }
+      : { delivery_status: status };
+
     startBatchUndo();
-    for (const id of ids) updateOrder(id, { delivery_status: status }, false);
+    for (const id of ids) updateOrder(id, updates, false);
     endBatchUndo();
-    showToast(`${ids.length}개 주문 상태 변경: ${status}`, "success");
+    showToast(
+      resetPurchaseInfo
+        ? `${ids.length}개 주문을 결제전으로 되돌렸습니다.`
+        : `${ids.length}개 주문 상태 변경: ${status}`,
+      "success"
+    );
     handleClearSelection();
   }, [selectedIds, startBatchUndo, endBatchUndo, updateOrder, showToast, handleClearSelection]);
 
@@ -1291,6 +1432,8 @@ function OrdersPageInner() {
         onClearPurchaseDuplicate={handleClearPurchaseDuplicate}
         columnFilters={columnFilters}
         onColumnFilterChange={handleColumnFilterChange}
+        purchaseIdFillOptions={purchaseIdFillOptions}
+        onFillSelectedPurchaseId={handleFillSelectedPurchaseId}
       />
       </>)}
 
@@ -1353,12 +1496,13 @@ function OrdersPageInner() {
                 return (
                   <div
                     key={`${order.productId}-${order.id}`}
-                    className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-xs ${order.changed || order.statusChanged ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)] opacity-75"}`}
+                    className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-xs ${order.changed || order.statusChanged || order.sourceChanged ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)] opacity-75"}`}
                   >
                     <div className="min-w-0 truncate">
                       <span className="font-medium text-[var(--text-primary)]">{order.productName}</span>
                       <span className="text-[var(--text-muted)]"> · {order.recipient} · 수량 {order.quantity}</span>
                       {order.status === "sold_out" ? <span className="text-amber-400"> · 품절 → 재고부족</span> : !productChanged && <span className="text-[var(--text-muted)]"> · 상품소싱 변동없음</span>}
+                      {order.purchaseSource && <span className="text-emerald-400"> · 구매처 → {order.purchaseSource}</span>}
                     </div>
                     <div className="shrink-0 tabular-nums text-right">
                       <span className="text-[var(--text-muted)]">{order.previousCost.toLocaleString()}</span>
