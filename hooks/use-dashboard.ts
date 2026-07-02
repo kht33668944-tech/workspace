@@ -174,7 +174,7 @@ async function fetchMonthStats(uid: string, month: string): Promise<MonthStats> 
   while (true) {
     const { data } = await supabase
       .from("orders")
-      .select("revenue,margin")
+      .select("revenue,margin,delivery_status")
       .eq("user_id", uid)
       .gte("delivered_at", monthRange.from)
       .lt("delivered_at", monthRange.to)
@@ -182,8 +182,9 @@ async function fetchMonthStats(uid: string, month: string): Promise<MonthStats> 
 
     if (!data || data.length === 0) break;
 
-    const rows = data as Array<{ revenue: number | null; margin: number | null }>;
+    const rows = data as Array<{ revenue: number | null; margin: number | null; delivery_status: string | null }>;
     for (const row of rows) {
+      if (row.delivery_status === "반품완료") continue;
       revenue += row.revenue ?? 0;
       deliveredMargin += row.margin ?? 0;
     }
@@ -237,8 +238,8 @@ type FinancialOrderRow = {
   margin: number | null;
 };
 
-type DeliveredRow = FinancialOrderRow & { delivered_at: string | null };
-type ReturnedRow = FinancialOrderRow & { returned_at: string | null };
+type DeliveredRow = FinancialOrderRow & { delivered_at: string | null; delivery_status: string | null };
+type ReturnedRow = { returned_at: string | null };
 type PurchasedRow = { purchased_at: string | null; cost: number | null; payment_method: string | null };
 type LegacyProfitRow = FinancialOrderRow & {
   order_date: string | null;
@@ -269,7 +270,7 @@ async function fetchMonthlyProfit(uid: string, month: string): Promise<{
   while (true) {
     const { data } = await supabase
       .from("orders")
-      .select("delivered_at,revenue,settlement,cost,margin")
+      .select("delivered_at,revenue,settlement,cost,margin,delivery_status")
       .eq("user_id", uid)
       .gte("delivered_at", from)
       .lt("delivered_at", to)
@@ -281,6 +282,8 @@ async function fetchMonthlyProfit(uid: string, month: string): Promise<{
       const date = localDateFromIso(order.delivered_at);
       const row = date ? rowMap.get(date) : null;
       if (!row) continue;
+
+      if (order.delivery_status === "반품완료") continue;
 
       const revenue = order.revenue ?? 0;
       const settlement = order.settlement ?? 0;
@@ -302,7 +305,7 @@ async function fetchMonthlyProfit(uid: string, month: string): Promise<{
   while (true) {
     const { data } = await supabase
       .from("orders")
-      .select("returned_at,revenue,settlement,cost,margin")
+      .select("returned_at")
       .eq("user_id", uid)
       .gte("returned_at", from)
       .lt("returned_at", to)
@@ -315,16 +318,7 @@ async function fetchMonthlyProfit(uid: string, month: string): Promise<{
       const row = date ? rowMap.get(date) : null;
       if (!row) continue;
 
-      const revenue = order.revenue ?? 0;
-      const settlement = order.settlement ?? 0;
-      const cost = order.cost ?? 0;
-      const margin = order.margin ?? settlement - cost;
-
       row.returnCount += 1;
-      row.returnRevenue += revenue;
-      row.returnSettlement += settlement;
-      row.returnCost += cost;
-      row.returnMargin += margin;
     }
 
     if (data.length < PAGE) break;
@@ -394,10 +388,6 @@ async function fetchMonthlyProfit(uid: string, month: string): Promise<{
         row.deliveredMargin += margin;
       } else if (!order.returned_at && order.delivery_status === "반품완료") {
         row.returnCount += 1;
-        row.returnRevenue += revenue;
-        row.returnSettlement += settlement;
-        row.returnCost += cost;
-        row.returnMargin += margin;
       }
 
       if (!order.purchased_at && order.purchase_order_no?.trim()) {

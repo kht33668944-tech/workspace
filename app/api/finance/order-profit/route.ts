@@ -311,8 +311,9 @@ export async function GET(request: NextRequest) {
       const deliveredDate = eventDate(order, "delivered_at", month);
       const purchasedDate = eventDate(order, "purchased_at", month);
       const returnedDate = eventDate(order, "returned_at", month);
+      const isReturned = order.delivery_status === "반품완료";
 
-      if (order.tracking_no?.trim()) {
+      if (order.tracking_no?.trim() && !isReturned) {
         if (deliveredDate) {
           const daily = dailyMap.get(deliveredDate);
           if (daily) {
@@ -343,17 +344,9 @@ export async function GET(request: NextRequest) {
           const daily = dailyMap.get(returnedDate);
           if (daily) {
             daily.returnCount += 1;
-            daily.returnRevenue += values.revenue;
-            daily.returnSettlement += values.settlement;
-            daily.returnCost += values.cost;
-            daily.returnMargin += values.margin;
             daily.returnedOrders.push(toDetail(order, "returned", returnedDate));
           }
           summary.returnCount += 1;
-          summary.returnRevenue += values.revenue;
-          summary.returnSettlement += values.settlement;
-          summary.returnCost += values.cost;
-          summary.returnMargin += values.margin;
         }
         if (!order.returned_at) pushIssue("missing_returned_at", "반품완료일 누락", order, values.revenue);
       }
@@ -376,10 +369,10 @@ export async function GET(request: NextRequest) {
         if (!order.payment_method?.trim()) pushIssue("missing_payment", "카드사 미입력", order, values.cost);
       }
 
-      if (order.tracking_no?.trim() && values.cost === 0) {
+      if (order.tracking_no?.trim() && !isReturned && values.cost === 0) {
         pushIssue("missing_cost", "원가 0원", order, values.revenue);
       }
-      if (order.tracking_no?.trim() && values.settlement === 0) {
+      if (order.tracking_no?.trim() && !isReturned && values.settlement === 0) {
         pushIssue("missing_settlement", "정산예정 0원", order, values.revenue);
       }
     }
