@@ -4,6 +4,7 @@ import CredentialManager from "@/components/workspace/settings/credential-manage
 import CourierCodeManager from "@/components/workspace/settings/courier-code-manager";
 import GeminiUsageDashboard from "@/components/workspace/settings/gemini-usage-dashboard";
 import MarketplaceApiManager from "@/components/workspace/settings/marketplace-api-manager";
+import DiscordNotificationTester from "@/components/workspace/settings/discord-notification-tester";
 
 export default function SettingsPage() {
   return (
@@ -13,6 +14,7 @@ export default function SettingsPage() {
         <p className="text-sm text-[var(--text-muted)] mt-1">구매처 계정 관리 및 환경 설정</p>
       </div>
 
+      <DiscordNotificationTester />
       <MarketplaceApiManager />
       <CredentialManager />
       <CourierCodeManager />
