@@ -4,6 +4,7 @@ import { launchPatchedBrowser, createPatchedGmarketContext } from "@/lib/scraper
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getServiceSupabaseClient, getSupabaseClient } from "@/lib/api-helpers";
 import { ensureLogin } from "@/lib/scrapers/gmarket-session";
+import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
 
 export const maxDuration = 300;
 
@@ -117,6 +118,14 @@ type SSEEvent =
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const randomDelay = (min: number, max: number) => sleep(Math.floor(Math.random() * (max - min)) + min);
+
+function getPriceNotifyStatus(updated: number, failed: number, unchanged: number, botBlocked: number, soldOut: number): AutomationNotifyStatus {
+  const okCount = updated + unchanged + soldOut;
+  const failCount = failed + botBlocked;
+  if (okCount > 0 && failCount > 0) return "partial";
+  if (okCount > 0) return "success";
+  return failCount > 0 ? "failed" : "success";
+}
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
@@ -299,8 +308,32 @@ export async function POST(request: NextRequest) {
         }
 
         send({ type: "done", updated, failed, unchanged, bot_blocked: botBlocked, sold_out: soldOut });
+        await notifyAutomationResult({
+          title: "가격 수집",
+          status: getPriceNotifyStatus(updated, failed, unchanged, botBlocked, soldOut),
+          summary: "가격 수집 작업이 끝났습니다.",
+          fields: [
+            { name: "가격 변경", value: updated },
+            { name: "변동 없음", value: unchanged },
+            { name: "품절", value: soldOut },
+            { name: "실패", value: failed },
+            { name: "봇 차단", value: botBlocked },
+          ],
+        });
       } catch (e) {
         send({ type: "error", message: e instanceof Error ? e.message : String(e) });
+        await notifyAutomationResult({
+          title: "가격 수집",
+          status: "failed",
+          summary: e instanceof Error ? e.message : String(e),
+          fields: [
+            { name: "가격 변경", value: updated },
+            { name: "변동 없음", value: unchanged },
+            { name: "품절", value: soldOut },
+            { name: "실패", value: failed },
+            { name: "봇 차단", value: botBlocked },
+          ],
+        });
       } finally {
         // 변동없음·실패 이력 일괄 저장 (전일대비 컬럼에서 상태 표시·필터링용)
         if (statusHistoryRows.length > 0) {

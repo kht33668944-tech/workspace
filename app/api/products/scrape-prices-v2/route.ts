@@ -3,6 +3,7 @@ import { getAccessToken, getServiceSupabaseClient, getSupabaseClient } from "@/l
 import { GmarketBrowserFetchClient } from "@/lib/scrapers/browser-fetch-client";
 import { parseGmarketPrice, toGmarketPriceResult } from "@/lib/gmarket-price-parser";
 import type { GmarketPriceResult } from "@/lib/gmarket-price-parser";
+import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
 
 export const maxDuration = 300;
 
@@ -15,6 +16,14 @@ type SSEEvent =
   | { type: "error"; message: string };
 
 const CF_RESET_THRESHOLD = 15;
+
+function getPriceNotifyStatus(updated: number, failed: number, unchanged: number, botBlocked: number, soldOut: number): AutomationNotifyStatus {
+  const okCount = updated + unchanged + soldOut;
+  const failCount = failed + botBlocked;
+  if (okCount > 0 && failCount > 0) return "partial";
+  if (okCount > 0) return "success";
+  return failCount > 0 ? "failed" : "success";
+}
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
@@ -174,8 +183,34 @@ export async function POST(request: NextRequest) {
         }
 
         send({ type: "done", updated, failed, unchanged, bot_blocked: botBlocked, sold_out: soldOut, skipped: skippedCount });
+        await notifyAutomationResult({
+          title: "가격 수집 v2",
+          status: getPriceNotifyStatus(updated, failed, unchanged, botBlocked, soldOut),
+          summary: "가격 수집 작업이 끝났습니다.",
+          fields: [
+            { name: "가격 변경", value: updated },
+            { name: "변동 없음", value: unchanged },
+            { name: "품절", value: soldOut },
+            { name: "실패", value: failed },
+            { name: "봇 차단", value: botBlocked },
+            { name: "제외", value: skippedCount },
+          ],
+        });
       } catch (e) {
         send({ type: "error", message: e instanceof Error ? e.message : String(e) });
+        await notifyAutomationResult({
+          title: "가격 수집 v2",
+          status: "failed",
+          summary: e instanceof Error ? e.message : String(e),
+          fields: [
+            { name: "가격 변경", value: updated },
+            { name: "변동 없음", value: unchanged },
+            { name: "품절", value: soldOut },
+            { name: "실패", value: failed },
+            { name: "봇 차단", value: botBlocked },
+            { name: "제외", value: skippedCount },
+          ],
+        });
       } finally {
         if (statusHistoryRows.length > 0) {
           const { error: histErr } = await sb.from("price_history").insert(statusHistoryRows);

@@ -7,6 +7,7 @@ import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import type { ScrapeResult } from "@/lib/scrapers/types";
 import { randomUUID } from "crypto";
+import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
 
 export const maxDuration = 300;
 
@@ -21,6 +22,12 @@ interface CollectRequest {
   loginPw?: string;
   // 공통
   orderNos: string[];
+}
+
+function getTrackingNotifyStatus(successCount: number, failCount: number, notFoundCount: number): AutomationNotifyStatus {
+  if (successCount > 0 && (failCount > 0 || notFoundCount > 0)) return "partial";
+  if (successCount > 0) return "success";
+  return failCount > 0 || notFoundCount > 0 ? "failed" : "success";
 }
 
 export async function POST(request: NextRequest) {
@@ -105,11 +112,29 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      await notifyAutomationResult({
+        title: "운송장 수집",
+        status: getTrackingNotifyStatus(result.success.length, result.failed.length, result.notFound.length),
+        summary: "운송장 수집 작업이 끝났습니다.",
+        fields: [
+          { name: "성공", value: result.success.length },
+          { name: "실패", value: result.failed.length },
+          { name: "미발견", value: result.notFound.length },
+          { name: "DB 반영", value: appliedCount },
+          { name: "플랫폼", value: platform },
+        ],
+      });
+
       return NextResponse.json({ ...result, appliedCount });
     } finally {
       browserPool.release();
     }
   } catch (err) {
+    await notifyAutomationResult({
+      title: "운송장 수집",
+      status: "failed",
+      summary: `서버 오류: ${err instanceof Error ? err.message : String(err)}`,
+    });
     return NextResponse.json(
       { error: `서버 오류: ${err instanceof Error ? err.message : String(err)}` },
       { status: 500 }

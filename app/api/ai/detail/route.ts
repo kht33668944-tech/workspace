@@ -4,6 +4,7 @@ import { groundedSearch } from "@/lib/gemini";
 import { launchBrowser } from "@/lib/scrapers/browser";
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { isSafeRemoteImageUrl } from "@/lib/sanitize";
+import { notifyAutomationResult } from "@/lib/discord-notifier";
 
 export const maxDuration = 300;
 
@@ -314,6 +315,11 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
   }
 
   if (countFilledFields(specs) === 0) {
+    await notifyAutomationResult({
+      title: "AI 상세페이지 생성",
+      status: "failed",
+      summary: `상품 정보를 검색할 수 없습니다: ${productName}`,
+    });
     return NextResponse.json(
       { error: "상품 정보를 검색할 수 없습니다. 상품명을 확인해주세요." },
       { status: 422 }
@@ -369,9 +375,24 @@ ${purchaseUrl ? `판매 URL: ${purchaseUrl}` : ""}
     .eq("user_id", user.id);
 
   if (updateError) {
+    await notifyAutomationResult({
+      title: "AI 상세페이지 생성",
+      status: "failed",
+      summary: `DB 업데이트 실패: ${productName}`,
+    });
     return NextResponse.json({ error: "DB 업데이트 실패" }, { status: 500 });
   }
 
+  await notifyAutomationResult({
+    title: "AI 상세페이지 생성",
+    status: detailImageUrl ? "success" : "partial",
+    summary: detailImageUrl
+      ? `상세페이지와 이미지 생성이 끝났습니다: ${productName}`
+      : `상세페이지 HTML은 생성됐지만 이미지 저장은 실패했습니다: ${productName}`,
+    fields: [
+      { name: "찾은 정보", value: countFilledFields(specs) },
+    ],
+  });
   return NextResponse.json({
     detailHtml,
     detailImageUrl,
