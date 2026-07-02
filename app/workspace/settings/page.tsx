@@ -3,6 +3,7 @@
 import CredentialManager from "@/components/workspace/settings/credential-manager";
 import CourierCodeManager from "@/components/workspace/settings/courier-code-manager";
 import GeminiUsageDashboard from "@/components/workspace/settings/gemini-usage-dashboard";
+import MarketplaceApiManager from "@/components/workspace/settings/marketplace-api-manager";
 
 export default function SettingsPage() {
   return (
@@ -12,6 +13,7 @@ export default function SettingsPage() {
         <p className="text-sm text-[var(--text-muted)] mt-1">구매처 계정 관리 및 환경 설정</p>
       </div>
 
+      <MarketplaceApiManager />
       <CredentialManager />
       <CourierCodeManager />
       <GeminiUsageDashboard />

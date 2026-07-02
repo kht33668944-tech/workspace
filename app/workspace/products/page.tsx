@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags, ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags, ChevronDown, ChevronUp, ChevronRight, PlugZap } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts, type PriceChangeFilter } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
@@ -19,6 +19,7 @@ const SmartStoreCategoryTab = dynamic(() => import("@/components/workspace/produ
 const CoupangPriceImportModal = dynamic(() => import("@/components/workspace/products/coupang-price-import-modal"), { ssr: false });
 const EsmPriceImportModal = dynamic(() => import("@/components/workspace/products/esm-price-import-modal"), { ssr: false });
 const SmartstorePriceImportModal = dynamic(() => import("@/components/workspace/products/smartstore-price-import-modal"), { ssr: false });
+const CoupangApiModal = dynamic(() => import("@/components/workspace/products/coupang-api-modal"), { ssr: false });
 const BatchDetailModal = dynamic(() => import("@/components/workspace/products/batch-detail-modal"), { ssr: false });
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
 import { downloadExcelFromBase64, type PlayAutoExportPlatform, PLATFORM_CONFIGS } from "@/lib/excel-export";
@@ -95,6 +96,7 @@ export default function ProductsPage() {
   const [coupangImportModalOpen, setCoupangImportModalOpen] = useState(false);
   const [esmImportModalOpen, setEsmImportModalOpen] = useState(false);
   const [smartstoreImportModalOpen, setSmartstoreImportModalOpen] = useState(false);
+  const [coupangApiModalOpen, setCoupangApiModalOpen] = useState(false);
   const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(initialView.priceChangeFilter);
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
   const [scrapeResultModalOpen, setScrapeResultModalOpen] = useState(false);
@@ -1057,6 +1059,13 @@ export default function ProductsPage() {
                     <Play className="w-4 h-4" />
                     {batchActive ? "생성 중..." : `${selectedIds.size}개 상세페이지 생성`}
                   </button>
+                  <button
+                    onClick={() => setCoupangApiModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors"
+                  >
+                    <PlugZap className="w-4 h-4" />
+                    쿠팡 API 반영
+                  </button>
                   <div className="relative">
                     <button
                       onClick={() => setStatusDropdownOpen(!statusDropdownOpen)}
@@ -1488,6 +1497,10 @@ export default function ProductsPage() {
       {/* 스마트스토어 가격수정 v2 일괄수정 양식 임포트 모달 */}
       {smartstoreImportModalOpen && (
         <SmartstorePriceImportModal onClose={() => setSmartstoreImportModalOpen(false)} />
+      )}
+
+      {coupangApiModalOpen && (
+        <CoupangApiModal productIds={[...selectedIds]} onClose={() => setCoupangApiModalOpen(false)} />
       )}
 
       {/* 상세페이지 일괄 생성 모달 */}

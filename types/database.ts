@@ -249,6 +249,43 @@ export interface CoupangPriceInventory {
 
 export type CoupangPriceInventoryInsert = Omit<CoupangPriceInventory, "id" | "created_at" | "updated_at">;
 
+// ─── 공식 판매처 API 연동 ───
+export type MarketplaceApiPlatform = "coupang" | "smartstore" | "esm";
+export type MarketplaceApiTestStatus = "success" | "failed";
+export type MarketplaceApiLogStatus = "success" | "failed";
+export type MarketplaceApiAction = "test" | "price" | "stock" | "stop" | "resume";
+
+export interface MarketplaceApiCredential {
+  id: string;
+  user_id: string;
+  platform: MarketplaceApiPlatform;
+  label: string | null;
+  account_id: string;
+  meta: Record<string, unknown>;
+  last_tested_at: string | null;
+  last_test_status: MarketplaceApiTestStatus | null;
+  last_test_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplaceApiLog {
+  id: string;
+  user_id: string;
+  credential_id: string | null;
+  platform: MarketplaceApiPlatform | string;
+  action: MarketplaceApiAction | string;
+  status: MarketplaceApiLogStatus;
+  product_id: string | null;
+  product_name: string | null;
+  vendor_item_id: string | null;
+  previous_value: string | null;
+  new_value: string | null;
+  error_message: string | null;
+  response_payload: Record<string, unknown> | null;
+  created_at: string;
+}
+
 // ─── 옥션·지마켓(ESM) 가격 인벤토리 ───
 export interface EsmPriceInventory {
   id: string;
