@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, TrendingUp, Tags, ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, RotateCcw, TrendingUp, Tags, ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts, type PriceChangeFilter } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
@@ -82,6 +82,7 @@ export default function ProductsPage() {
   const [exporting, setExporting] = useState(false);
   const [exportStep, setExportStep] = useState("");
   const [scrapingPrices, setScrapingPrices] = useState(false);
+  const [resettingPriceChanges, setResettingPriceChanges] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [expandedExportSection, setExpandedExportSection] = useState<string | null>(null);
   const [expandedV2Section, setExpandedV2Section] = useState<"import" | "export" | null>(null);
@@ -640,6 +641,41 @@ export default function ProductsPage() {
     scrapeAbortRef.current?.abort();
   };
 
+  const handleResetPriceChanges = async () => {
+    if (selectedIds.size === 0 || resettingPriceChanges) return;
+
+    const ids = [...selectedIds];
+    if (!confirm(`선택한 ${ids.length}개 상품의 전일 대비 표시값만 초기화할까요?\n최저가는 그대로 유지됩니다.`)) return;
+
+    setScrapeDropdownOpen(false);
+    setResettingPriceChanges(true);
+    try {
+      const resetPoint = new Date();
+      resetPoint.setHours(0, 0, 0, 0);
+      const res = await fetch("/api/products/price-history", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({ productIds: ids, from: resetPoint.toISOString() }),
+      });
+      const json = await res.json() as { cleared?: number; error?: string };
+      if (!res.ok) {
+        alert(json.error ?? "전일 대비 초기화 실패");
+        return;
+      }
+      refetchPriceChanges();
+      setScrapeResultModalOpen(false);
+      setScrapeResults([]);
+      alert(`전일 대비 기록을 초기화했습니다. (${json.cleared ?? 0}건)`);
+    } catch {
+      alert("전일 대비 초기화 중 오류가 발생했습니다.");
+    } finally {
+      setResettingPriceChanges(false);
+    }
+  };
+
   const handleApplyScrapeResults = async () => {
     const changed = scrapeResults.filter(r => r.price !== r.previous);
     if (changed.length === 0) { setScrapeResultModalOpen(false); return; }
@@ -1138,6 +1174,15 @@ export default function ProductsPage() {
                         <span className="w-2 h-2 rounded-full bg-orange-400" />
                         v3 (Scrapling 실험)
                         {scrapeVersion === "v3" && <span className="ml-auto text-xs text-[var(--text-muted)]">현재</span>}
+                      </button>
+                      <button
+                        onClick={handleResetPriceChanges}
+                        disabled={selectedIds.size === 0 || resettingPriceChanges}
+                        title={selectedIds.size === 0 ? "상품을 체크한 뒤 사용할 수 있습니다" : "선택 상품의 전일 대비 표시값만 초기화합니다"}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-amber-400 hover:bg-amber-600/10 transition-colors disabled:opacity-45 disabled:cursor-not-allowed border-t border-[var(--border)]"
+                      >
+                        <RotateCcw className={`w-3.5 h-3.5 ${resettingPriceChanges ? "animate-spin" : ""}`} />
+                        {resettingPriceChanges ? "초기화 중..." : `전일 대비 초기화${selectedIds.size > 0 ? ` ${selectedIds.size}개` : ""}`}
                       </button>
                     </div>
                   </>

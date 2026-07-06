@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAccessToken, getSupabaseClient, fetchAllRows } from "@/lib/api-helpers";
+import { getAccessToken, getSupabaseClient, getServiceSupabaseClient, fetchAllRows } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   const token = getAccessToken(request);
@@ -41,6 +41,92 @@ export async function GET(request: NextRequest) {
   } catch (e) {
     return NextResponse.json(
       { error: `[PriceHistory] ${e instanceof Error ? e.message : String(e)}` },
+      { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const token = getAccessToken(request);
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  try {
+    const body = await request.json().catch(() => ({})) as { productIds?: string[]; from?: string };
+    const productIds = Array.isArray(body.productIds) ? body.productIds : [];
+    const from = typeof body.from === "string" && body.from ? body.from : null;
+
+    if (productIds.length === 0) {
+      return NextResponse.json({ error: "초기화할 상품이 없습니다." }, { status: 400 });
+    }
+    if (!from) {
+      return NextResponse.json({ error: "초기화 기준 시간이 없습니다." }, { status: 400 });
+    }
+
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const ids = [...new Set(productIds.filter((id) => typeof id === "string" && UUID_RE.test(id)))];
+    if (ids.length === 0) {
+      return NextResponse.json({ cleared: 0, productCount: 0 });
+    }
+
+    const userSb = getSupabaseClient(token);
+    const { data: { user } } = await userSb.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const sb = getServiceSupabaseClient();
+    const CHUNK = 100;
+    let productCount = 0;
+    let cleared = 0;
+
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const { data: owned, error: ownedErr } = await sb
+        .from("products")
+        .select("id")
+        .eq("user_id", user.id)
+        .in("id", chunk);
+      if (ownedErr) {
+        console.error("[price-history] 상품 확인 실패:", ownedErr.message);
+        return NextResponse.json({ error: `상품 확인 실패: ${ownedErr.message}` }, { status: 400 });
+      }
+
+      const ownedIds = (owned ?? []).map((p) => p.id as string);
+      productCount += ownedIds.length;
+      if (ownedIds.length === 0) continue;
+
+      const { data: historyRows, error: historyErr } = await sb
+        .from("price_history")
+        .select("id")
+        .in("product_id", ownedIds)
+        .gte("scraped_at", from);
+      if (historyErr) {
+        console.error("[price-history] 초기화 대상 조회 실패:", historyErr.message);
+        return NextResponse.json({ error: `초기화 대상 조회 실패: ${historyErr.message}` }, { status: 400 });
+      }
+
+      const historyIds = (historyRows ?? []).map((row) => row.id as string);
+      for (let j = 0; j < historyIds.length; j += CHUNK) {
+        const historyChunk = historyIds.slice(j, j + CHUNK);
+        if (historyChunk.length === 0) continue;
+
+        const { error, count } = await sb
+          .from("price_history")
+          .delete({ count: "exact" })
+          .in("id", historyChunk);
+
+        if (error) {
+          console.error("[price-history] 초기화 실패:", error.message);
+          return NextResponse.json({ error: `초기화 실패: ${error.message}` }, { status: 400 });
+        }
+        cleared += count ?? historyChunk.length;
+      }
+    }
+
+    console.log(`[price-history] 전일 대비 초기화 완료: 상품 ${productCount}개, 이력 ${cleared}건`);
+    return NextResponse.json({ cleared, productCount });
+  } catch (e) {
+    console.error("[price-history] 전일 대비 초기화 오류:", e instanceof Error ? e.message : String(e));
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "전일 대비 초기화 실패" },
       { status: 500 },
     );
   }
