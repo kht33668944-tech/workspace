@@ -188,18 +188,31 @@ export default function ProductsPage() {
 
   const stats = useMemo(() => {
     const filled = products.filter(p => p.product_name?.trim());
+    const allFilled = allProducts.filter(p => p.product_name?.trim());
     const count = filled.length;
     const avgMargin = count > 0
       ? filled.reduce((sum, p) => sum + p.margin_rate, 0) / count
       : 0;
     const withCategory = filled.filter(p => p.category).length;
-    return { count, avgMargin: avgMargin.toFixed(1), withCategory, total: products.length };
-  }, [products]);
+    return { count, avgMargin: avgMargin.toFixed(1), withCategory, total: allFilled.length };
+  }, [products, allProducts]);
+
+  const hasActiveListFilters = useMemo(() => {
+    const hasColumnFilters = Object.values(columnFilters).some((v) => v.length > 0);
+    return Boolean(activeSearch.trim() || hasColumnFilters || priceChangeFilter);
+  }, [activeSearch, columnFilters, priceChangeFilter]);
 
   const handleSearchSubmit = () => setActiveSearch(search);
   const handleSearchClear = () => {
     setSearch("");
     setActiveSearch("");
+  };
+  const handleResetListFilters = () => {
+    setSearch("");
+    setActiveSearch("");
+    setColumnFilters({});
+    setPriceChangeFilter(null);
+    setSelectedIds(new Set());
   };
   const handleTabChange = useCallback((tab: ActiveTab) => {
     setActiveTab(tab);
@@ -1372,6 +1385,20 @@ export default function ProductsPage() {
             <span>평균 마진율 <strong className="text-blue-400">{stats.avgMargin}%</strong></span>
             <span>카테고리 설정 <strong className="text-purple-400">{stats.withCategory}</strong>건</span>
           </div>
+
+          {products.length === 0 && allProducts.length > 0 && hasActiveListFilters && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
+              <span className="text-amber-200">
+                저장된 검색 또는 필터 때문에 표시되는 상품이 없습니다. 전체 상품은 {allProducts.length.toLocaleString("ko-KR")}건입니다.
+              </span>
+              <button
+                onClick={handleResetListFilters}
+                className="shrink-0 px-3 py-1.5 rounded-md bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 transition-colors"
+              >
+                필터 초기화
+              </button>
+            </div>
+          )}
 
           {/* 테이블 */}
           <ProductTable
