@@ -6,6 +6,9 @@ export async function GET(req: NextRequest) {
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const supabase = getSupabaseClient(token);
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+
   const { data, error } = await supabase
     .from("forbidden_words")
     .select("id, word, created_at")
@@ -20,8 +23,8 @@ export async function POST(req: NextRequest) {
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const supabase = getSupabaseClient(token);
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const { word } = (await req.json()) as { word?: string };
   const trimmed = (word ?? "").trim();
@@ -30,7 +33,7 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await supabase
     .from("forbidden_words")
-    .insert({ word: trimmed })
+    .insert({ user_id: user.id, word: trimmed })
     .select("id, word, created_at")
     .single();
 
@@ -46,13 +49,13 @@ export async function DELETE(req: NextRequest) {
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const supabase = getSupabaseClient(token);
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   const { id } = (await req.json()) as { id?: string };
   if (!id) return NextResponse.json({ error: "id 필요" }, { status: 400 });
 
-  const { error } = await supabase.from("forbidden_words").delete().eq("id", id);
+  const { error } = await supabase.from("forbidden_words").delete().eq("id", id).eq("user_id", user.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
