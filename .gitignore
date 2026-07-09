@@ -49,6 +49,7 @@ yarn-error.log*
 
 # local Codex and MCP secrets
 .codex/
+.claude/
 .mcp.json
 .mcp.local.json
 

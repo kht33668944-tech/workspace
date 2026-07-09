@@ -2,6 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import XLSX from "xlsx-js-style";
 import { getAccessToken, getSupabaseClient, fetchAllRows } from "@/lib/api-helpers";
 
+function normalizeHeader(value: unknown) {
+  return String(value ?? "").replace(/[\s\u00A0\u3000\t\r\n]/g, "").trim();
+}
+
+function findColumnIndex(headers: unknown[], aliases: string[]) {
+  return headers.findIndex((header) => {
+    const normalized = normalizeHeader(header);
+    return aliases.some((alias) => normalized.includes(normalizeHeader(alias)) || normalized === normalizeHeader(alias));
+  });
+}
+
+function cellString(row: unknown[], index: number) {
+  if (index < 0) return "";
+  return String(row[index] ?? "").trim();
+}
+
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
@@ -25,24 +41,28 @@ export async function POST(request: NextRequest) {
     }
     const wb = XLSX.read(buffer, { type: "buffer" });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
+    if (!ws) return NextResponse.json({ error: "엑셀 시트를 찾을 수 없습니다." }, { status: 400 });
+
+    const rawRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "", raw: false, blankrows: false });
 
     const MAX_ROWS = 10000;
-    if (rows.length === 0) return NextResponse.json({ error: "엑셀에 데이터가 없습니다." }, { status: 400 });
-    if (rows.length > MAX_ROWS) return NextResponse.json({ error: `최대 ${MAX_ROWS}행까지 처리 가능합니다.` }, { status: 400 });
+    if (rawRows.length <= 1) return NextResponse.json({ error: "엑셀에 데이터가 없습니다." }, { status: 400 });
+    if (rawRows.length - 1 > MAX_ROWS) return NextResponse.json({ error: `최대 ${MAX_ROWS}행까지 처리 가능합니다.` }, { status: 400 });
 
     // 2. 헤더 검증
-    const firstRow = rows[0];
-    const keys = Object.keys(firstRow);
-    const nameCol = keys.find(k => k.includes("온라인 상품명") || k === "온라인 상품명");
-    const accountCol = keys.find(k => k.includes("쇼핑몰(계정)") || k === "쇼핑몰(계정)");
-    const codeCol = keys.find(k => k.includes("쇼핑몰 상품번호") || k === "쇼핑몰 상품번호");
-    const sellerCodeCol = keys.find(k => k.includes("판매자관리코드") || k === "판매자관리코드");
+    const headers = rawRows[0] ?? [];
+    const nameCol = findColumnIndex(headers, ["온라인 상품명"]);
+    const accountCol = findColumnIndex(headers, ["쇼핑몰(계정)"]);
+    const codeCol = findColumnIndex(headers, ["쇼핑몰 상품번호"]);
+    const sellerCodeCol = findColumnIndex(headers, ["판매자관리코드"]);
     // 쿠팡 가격수정 양식용 옵션 캐시 (선택)
-    const optionCombineCol = keys.find(k => k === "옵션조합" || k.includes("옵션조합"));
-    const optionCol = keys.find(k => k === "옵션" || (k.includes("옵션") && !k.includes("조합")));
+    const optionCombineCol = findColumnIndex(headers, ["옵션조합"]);
+    const optionCol = headers.findIndex((header) => {
+      const normalized = normalizeHeader(header);
+      return normalized === "옵션" || (normalized.includes("옵션") && !normalized.includes("조합"));
+    });
 
-    if (!nameCol || !accountCol || !codeCol) {
+    if (nameCol < 0 || accountCol < 0 || codeCol < 0) {
       return NextResponse.json({
         error: "필수 컬럼을 찾을 수 없습니다. '온라인 상품명', '쇼핑몰(계정)', '쇼핑몰 상품번호' 컬럼이 필요합니다.",
       }, { status: 400 });
@@ -82,11 +102,12 @@ export async function POST(request: NextRequest) {
     const unmatchedNames = new Set<string>();
     let duplicateCount = 0;
 
-    for (const row of rows) {
-      const productName = String(row[nameCol]).trim();
-      const account = String(row[accountCol]).trim();
-      const code = String(row[codeCol]).trim();
-      const sellerCode = sellerCodeCol ? String(row[sellerCodeCol]).trim() : "";
+    const dataRows = rawRows.slice(1);
+    for (const row of dataRows) {
+      const productName = cellString(row, nameCol);
+      const account = cellString(row, accountCol);
+      const code = cellString(row, codeCol);
+      const sellerCode = sellerCodeCol >= 0 ? cellString(row, sellerCodeCol) : "";
 
       if (!productName || !account || !code) continue;
 
@@ -120,12 +141,12 @@ export async function POST(request: NextRequest) {
       }
       // 쿠팡 행 + 옵션 컬럼 있으면 coupang_options 추출 (한 상품당 1회)
       if (
-        optionCombineCol &&
+        optionCombineCol >= 0 &&
         account.toLowerCase().startsWith("쿠팡") &&
         existing.coupang_options === undefined
       ) {
-        const combine = String(row[optionCombineCol] ?? "").trim();
-        const optionRaw = optionCol ? String(row[optionCol] ?? "").trim() : "";
+        const combine = cellString(row, optionCombineCol);
+        const optionRaw = optionCol >= 0 ? cellString(row, optionCol) : "";
         if (combine === "조합형" && optionRaw) {
           const parts = optionRaw.split(/\r?\n/);
           existing.coupang_options = {
@@ -148,7 +169,7 @@ export async function POST(request: NextRequest) {
         duplicateCount,
         matched: updates.size,
         unmatched: [...unmatchedNames],
-        total: rows.length,
+        total: dataRows.length,
       });
     }
 
@@ -181,7 +202,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       matched,
       unmatched: [...unmatchedNames],
-      total: rows.length,
+      total: dataRows.length,
     });
   } catch (err) {
     console.error("[import-platform-codes] 오류:", err instanceof Error ? err.message : String(err));

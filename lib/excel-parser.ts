@@ -1,15 +1,22 @@
-import type { WorkSheet } from "xlsx";
+type WorkSheet = Record<string, unknown> & { "!ref"?: string };
 
-// XLSX를 lazy load하여 클라이언트 번들에서 제외 (~1MB 절감)
+// xlsx-js-style을 lazy load하여 클라이언트 번들에서 제외 (~1MB 절감)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let XLSX: any = null;
 let _xlsxPromise: Promise<void> | null = null;
 async function loadXLSX() {
-  if (!_xlsxPromise) _xlsxPromise = import("xlsx").then(m => { XLSX = m; });
+  if (!_xlsxPromise) _xlsxPromise = import("xlsx-js-style").then(m => { XLSX = m.default ?? m; });
   await _xlsxPromise;
 }
 import { EXCEL_COLUMN_MAP, LEGACY_EXCEL_COLUMN_MAP } from "./constants";
 import type { OrderInsert } from "@/types/database";
+
+const MAX_EXCEL_FILE_SIZE = 25 * 1024 * 1024;
+const MAX_EXCEL_SHEETS = 30;
+const MAX_EXCEL_ROWS = 100_000;
+const MAX_EXCEL_COLUMNS = 250;
+const MAX_EXCEL_CELLS = 1_000_000;
+const ALLOWED_EXCEL_EXTENSIONS = new Set(["xlsx", "xls", "csv"]);
 
 // 판매처별 정산 비율 (판매가 × rate = 정산예정금액)
 const SETTLEMENT_RATES: [string, number][] = [
@@ -22,6 +29,74 @@ const SETTLEMENT_RATES: [string, number][] = [
 
 interface RawRow {
   [key: string]: string | number | undefined;
+}
+
+function validateExcelFile(file: File) {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (!ALLOWED_EXCEL_EXTENSIONS.has(extension)) {
+    throw new Error("엑셀 파일만 업로드할 수 있습니다. (.xlsx, .xls, .csv)");
+  }
+  if (file.size > MAX_EXCEL_FILE_SIZE) {
+    throw new Error("엑셀 파일이 너무 큽니다. 25MB 이하 파일만 업로드할 수 있습니다.");
+  }
+}
+
+function assertWorkbookBounds(sheetNames: string[]) {
+  if (sheetNames.length === 0) {
+    throw new Error("엑셀 파일에 시트가 없습니다.");
+  }
+  if (sheetNames.length > MAX_EXCEL_SHEETS) {
+    throw new Error(`엑셀 시트가 너무 많습니다. 최대 ${MAX_EXCEL_SHEETS}개까지 처리할 수 있습니다.`);
+  }
+}
+
+function assertSheetBounds(sheet: WorkSheet) {
+  const ref = sheet["!ref"];
+  if (!ref) return;
+  const range = XLSX.utils.decode_range(ref);
+  const rows = range.e.r - range.s.r + 1;
+  const columns = range.e.c - range.s.c + 1;
+  const cells = rows * columns;
+
+  if (rows > MAX_EXCEL_ROWS) {
+    throw new Error(`엑셀 행이 너무 많습니다. 최대 ${MAX_EXCEL_ROWS.toLocaleString()}행까지 처리할 수 있습니다.`);
+  }
+  if (columns > MAX_EXCEL_COLUMNS) {
+    throw new Error(`엑셀 열이 너무 많습니다. 최대 ${MAX_EXCEL_COLUMNS.toLocaleString()}열까지 처리할 수 있습니다.`);
+  }
+  if (cells > MAX_EXCEL_CELLS) {
+    throw new Error(`엑셀 데이터가 너무 큽니다. 최대 ${MAX_EXCEL_CELLS.toLocaleString()}개 셀까지 처리할 수 있습니다.`);
+  }
+}
+
+function sheetToRows(sheet: WorkSheet): unknown[][] {
+  assertSheetBounds(sheet);
+  return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true, blankrows: false });
+}
+
+function rowsFromHeader(rawData: unknown[][], headerRowIndex: number): { headers: string[]; rows: RawRow[] } {
+  const headerRow = rawData[headerRowIndex] ?? [];
+  const headerEntries: { name: string; idx: number }[] = [];
+  headerRow.forEach((cell, idx) => {
+    const name = String(cell ?? "").trim();
+    if (name) headerEntries.push({ name, idx });
+  });
+
+  const headers = headerEntries.map((h) => h.name);
+  const rows: RawRow[] = [];
+  for (let i = headerRowIndex + 1; i < rawData.length; i++) {
+    const dataRow = rawData[i];
+    const obj: RawRow = {};
+    let hasValue = false;
+    for (const { name, idx } of headerEntries) {
+      const val = dataRow[idx];
+      obj[name] = val === null || val === undefined ? "" : val as string | number;
+      if (val !== null && val !== undefined && val !== "") hasValue = true;
+    }
+    if (hasValue) rows.push(obj);
+  }
+
+  return { headers, rows };
 }
 
 // 금액/수량 셀을 숫자로 파싱. 콤마/통화기호 제거 후 변환.
@@ -169,10 +244,10 @@ function isHeaderRow(row: unknown[]): boolean {
 
 // 시트에서 헤더 행의 시작 위치를 찾고 파싱
 function parseSheet(sheet: WorkSheet): { headers: string[]; rows: RawRow[] } {
-  // 먼저 기본 파싱 시도
-  const defaultRows: RawRow[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
-  if (defaultRows.length > 0) {
-    const firstRowKeys = Object.keys(defaultRows[0]);
+  const rawData = sheetToRows(sheet);
+
+  if (rawData.length > 0) {
+    const firstRowKeys = (rawData[0] ?? []).map((cell) => String(cell ?? "").trim()).filter(Boolean);
     const headerMap = buildHeaderMap(firstRowKeys);
     const mappedCount = Object.keys(headerMap).length;
 
@@ -180,42 +255,21 @@ function parseSheet(sheet: WorkSheet): { headers: string[]; rows: RawRow[] } {
     if (mappedCount >= 3) {
       console.log("[엑셀 파서] 기본 헤더 사용:", firstRowKeys);
       console.log("[엑셀 파서] 매핑 결과:", headerMap);
-      return { headers: firstRowKeys, rows: defaultRows };
+      return rowsFromHeader(rawData, 0);
     }
   }
 
   // 기본 파싱 실패 → 시트를 2D 배열로 읽어서 헤더 행 탐색
   console.log("[엑셀 파서] 기본 헤더 매핑 부족, 헤더 행 탐색 시작...");
-  const rawData: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true });
 
   for (let i = 0; i < Math.min(rawData.length, 10); i++) {
     const row = rawData[i];
     if (isHeaderRow(row)) {
       console.log(`[엑셀 파서] 헤더 행 발견: ${i}행`, row);
-      // 빈 헤더는 건너뛰되, 원래 인덱스를 유지하여 데이터 정렬 보존
-      const headerEntries: { name: string; idx: number }[] = [];
-      row.forEach((cell, idx) => {
-        const name = String(cell ?? "").trim();
-        if (name) headerEntries.push({ name, idx });
-      });
-      const headers = headerEntries.map((h) => h.name);
-      const dataRows: RawRow[] = [];
-
-      for (let j = i + 1; j < rawData.length; j++) {
-        const dataRow = rawData[j];
-        const obj: RawRow = {};
-        let hasValue = false;
-        for (const { name, idx } of headerEntries) {
-          const val = dataRow[idx];
-          obj[name] = val === null || val === undefined ? "" : val as string | number;
-          if (val !== null && val !== undefined && val !== "") hasValue = true;
-        }
-        if (hasValue) dataRows.push(obj);
-      }
+      const { headers, rows: dataRows } = rowsFromHeader(rawData, i);
 
       const headerMap = buildHeaderMap(headers);
       console.log("[엑셀 파서] 재매핑 결과:", headerMap);
-      console.log("[엑셀 파서] 헤더 인덱스:", headerEntries.map((h) => `${h.name}@${h.idx}`));
       if (dataRows.length > 0) {
         console.log("[엑셀 파서] 첫 행 데이터:", JSON.stringify(dataRows[0]).slice(0, 300));
       }
@@ -225,8 +279,7 @@ function parseSheet(sheet: WorkSheet): { headers: string[]; rows: RawRow[] } {
 
   // 찾지 못하면 기본 결과 반환
   console.log("[엑셀 파서] 헤더 행을 찾지 못함, 기본 파싱 사용");
-  const headers = defaultRows.length > 0 ? Object.keys(defaultRows[0]) : [];
-  return { headers, rows: defaultRows };
+  return rawData.length > 0 ? rowsFromHeader(rawData, 0) : { headers: [], rows: [] };
 }
 
 // 기존 발주서 양식 감지: 정산예정/원가/마진/결제방식/구매처 등 고유 헤더가 있으면 레거시
@@ -252,6 +305,7 @@ function parseSheetToOrders(sheet: WorkSheet): { orders: OrderInsert[]; headers:
 }
 
 export async function parseExcelFile(file: File, sheetIndex = 0): Promise<ParsedExcelResult> {
+  validateExcelFile(file);
   await loadXLSX();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -260,6 +314,7 @@ export async function parseExcelFile(file: File, sheetIndex = 0): Promise<Parsed
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: "array", cellDates: false });
         const sheetNames = workbook.SheetNames;
+        assertWorkbookBounds(sheetNames);
         const sheet = workbook.Sheets[sheetNames[sheetIndex] || sheetNames[0]];
         const { orders, headers, headerMap } = parseSheetToOrders(sheet);
         const isLegacyFormat = detectLegacyFormat(headerMap);
@@ -314,6 +369,7 @@ export async function parseExcelFile(file: File, sheetIndex = 0): Promise<Parsed
 }
 
 export async function parseExcelSheet(file: File, sheetIndex: number): Promise<OrderInsert[]> {
+  validateExcelFile(file);
   await loadXLSX();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -321,6 +377,7 @@ export async function parseExcelSheet(file: File, sheetIndex: number): Promise<O
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: "array", cellDates: false });
+        assertWorkbookBounds(workbook.SheetNames);
         const sheet = workbook.Sheets[workbook.SheetNames[sheetIndex]];
         const { orders } = parseSheetToOrders(sheet);
         resolve(orders);
@@ -517,6 +574,7 @@ export interface SettlementRow {
 }
 
 export async function parseSettlementExcel(file: File): Promise<{ rows: SettlementRow[]; sheetName: string }> {
+  validateExcelFile(file);
   await loadXLSX();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -524,9 +582,10 @@ export async function parseSettlementExcel(file: File): Promise<{ rows: Settleme
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: "array", cellDates: false });
+        assertWorkbookBounds(workbook.SheetNames);
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-        const rawData: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true });
+        const rawData = sheetToRows(sheet);
 
         // 헤더 행 찾기
         let headerRowIdx = -1;
