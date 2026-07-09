@@ -100,6 +100,7 @@ export default function ProductsPage() {
   const [coupangApiModalOpen, setCoupangApiModalOpen] = useState(false);
   const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(initialView.priceChangeFilter);
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
+  const [scrapeSoldOutIds, setScrapeSoldOutIds] = useState<string[]>([]);
   const [scrapeResultModalOpen, setScrapeResultModalOpen] = useState(false);
   const [botBlockedItems, setBotBlockedItems] = useState<RetryItem[]>([]);
   const [applyingPrices, setApplyingPrices] = useState(false);
@@ -126,6 +127,21 @@ export default function ProductsPage() {
     [scrapeResults]
   );
   const changedScrapeCount = useMemo(() => scrapeResults.filter(r => r.price !== r.previous).length, [scrapeResults]);
+  const scrapeSoldOutItems = useMemo(() => {
+    const seen = new Set<string>();
+    return scrapeSoldOutIds
+      .filter((id) => {
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .map((id) => ({ id, name: allProducts.find(p => p.id === id)?.product_name ?? "품절 상품" }));
+  }, [scrapeSoldOutIds, allProducts]);
+  const scrapeExportTargetIds = useMemo(() => {
+    const ids = new Set(scrapeResults.filter(r => r.price !== r.previous).map(r => r.id));
+    for (const id of scrapeSoldOutIds) ids.add(id);
+    return [...ids];
+  }, [scrapeResults, scrapeSoldOutIds]);
   const scrapeStats = useMemo(() => {
     let updated = 0, unchanged = 0, botBlocked = 0, failed = 0, soldOut = 0;
     for (const s of scrapeStatus.values()) {
@@ -276,10 +292,10 @@ export default function ProductsPage() {
     return () => gmarketImport.registerHandler(null);
   });
 
-  // 품절 sentinel 마진(20%) / 재입고 복원 기본 마진(7%)
-  const SOLDOUT_MARGIN = 20;
+  // 품절 sentinel 마진(35%) / 재입고 복원 기본 마진(7%)
+  const SOLDOUT_MARGIN = 35;
   const DEFAULT_MARGIN = 7;
-  // 최저가 갱신 결과에 따라 품절 상품은 마진 20%, 재입고(정상가 재수집) 상품은 7%로 자동 세팅
+  // 최저가 갱신 결과에 따라 품절 상품은 마진 35%, 재입고(정상가 재수집) 상품은 7%로 자동 세팅
   const applySoldOutMargins = (inStockIds: string[], soldOutIds: string[]) => {
     const inStock = new Set(inStockIds);
     const sold = new Set(soldOutIds);
@@ -405,6 +421,7 @@ export default function ProductsPage() {
     if (!isRetry) {
       setScrapeLog(["최저가 수집 준비 중..."]);
       setScrapeResults([]);
+      setScrapeSoldOutIds([]);
       setScrapeStatus(new Map());
       setScrapeTotal(ids.length);
     } else {
@@ -442,7 +459,8 @@ export default function ProductsPage() {
       setScrapingPrices(false);
       applySoldOutMargins(allChanges.map(c => c.id), allSoldOut);
       refetchPriceChanges();
-      if (allChanges.length > 0) {
+      setScrapeSoldOutIds([...new Set(allSoldOut)]);
+      if (allChanges.length > 0 || allSoldOut.length > 0) {
         setScrapeResults([...allChanges]);
         setScrapeResultModalOpen(true);
         setScrapeLogCollapsed(true);
@@ -587,6 +605,7 @@ export default function ProductsPage() {
     if (!isRetry) {
       setScrapeLog([`[${version}] ${versionLabel} 최저가 수집 준비 중...`]);
       setScrapeResults([]);
+      setScrapeSoldOutIds([]);
       setScrapeStatus(new Map());
       setScrapeTotal(ids.length);
     } else {
@@ -627,7 +646,8 @@ export default function ProductsPage() {
       setScrapingPrices(false);
       applySoldOutMargins(allChanges.map(c => c.id), allSoldOut);
       refetchPriceChanges();
-      if (allChanges.length > 0) {
+      setScrapeSoldOutIds([...new Set(allSoldOut)]);
+      if (allChanges.length > 0 || allSoldOut.length > 0) {
         setScrapeResults([...allChanges]);
         setScrapeResultModalOpen(true);
         setScrapeLogCollapsed(true);
@@ -691,9 +711,9 @@ export default function ProductsPage() {
     }
   };
 
-  const handleApplyScrapeResults = async () => {
+  const applyScrapePriceChanges = async () => {
     const changed = scrapeResults.filter(r => r.price !== r.previous);
-    if (changed.length === 0) { setScrapeResultModalOpen(false); return; }
+    if (changed.length === 0) return true;
 
     setApplyingPrices(true);
     try {
@@ -708,7 +728,7 @@ export default function ProductsPage() {
       const json = await res.json() as { applied?: number; error?: string };
       if (!res.ok) {
         alert(json.error ?? "가격 적용 실패");
-        return;
+        return false;
       }
       // 로컬 상태 반영
       startBatchUndo();
@@ -717,13 +737,25 @@ export default function ProductsPage() {
       }
       endBatchUndo();
       refetchPriceChanges();
+      return true;
+    } catch {
+      alert("가격 적용 중 오류가 발생했습니다.");
+      return false;
+    } finally {
+      setApplyingPrices(false);
+    }
+  };
+
+  const handleApplyScrapeResults = async () => {
+    const ok = await applyScrapePriceChanges();
+    if (!ok) return;
+    try {
       setScrapeResultModalOpen(false);
       setScrapeResults([]);
+      setScrapeSoldOutIds([]);
       setScrapeLog([]);
     } catch {
       alert("가격 적용 중 오류가 발생했습니다.");
-    } finally {
-      setApplyingPrices(false);
     }
   };
 
@@ -959,8 +991,8 @@ export default function ProductsPage() {
   };
 
   // 가격수정 v2 — 쿠팡·옥션/지마켓·스마트스토어 한 번에 다운로드. 한 플랫폼이 실패해도 나머지는 진행
-  const handlePriceUpdateV2ExportAll = async () => {
-    const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
+  const handlePriceUpdateV2ExportAll = async (overrideIds?: string[]) => {
+    const ids = overrideIds ?? (selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id));
     if (ids.length === 0) {
       alert("내보낼 상품이 없습니다.");
       return;
@@ -984,6 +1016,18 @@ export default function ProductsPage() {
     } finally {
       setPriceUpdateV2Exporting(false);
     }
+  };
+
+  const handleScrapeResultV2ExportAll = async () => {
+    if (scrapeExportTargetIds.length === 0) {
+      alert("내보낼 변동/품절 상품이 없습니다.");
+      return;
+    }
+    const ok = await applyScrapePriceChanges();
+    if (!ok) return;
+    // 품절 마진 자동 변경은 화면 저장 디바운스가 있어 잠깐 기다린 뒤 서버 엑셀을 생성한다.
+    await new Promise(r => setTimeout(r, 250));
+    await handlePriceUpdateV2ExportAll(scrapeExportTargetIds);
   };
 
   const handlePriceUpdateExport = async (target: PlayAutoExportPlatform | "all") => {
@@ -1338,7 +1382,7 @@ export default function ProductsPage() {
                                 <button disabled className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-[var(--text-disabled)] opacity-50 cursor-not-allowed" title="추후 지원 예정">
                                   <span className="w-2 h-2 rounded-full bg-red-400/40" /> 11번가 (추후 지원)
                                 </button>
-                                <button onClick={handlePriceUpdateV2ExportAll} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-orange-400 hover:bg-orange-600/10 transition-colors font-medium disabled:opacity-50 border-t border-[var(--border)]">
+                                <button onClick={() => handlePriceUpdateV2ExportAll()} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-orange-400 hover:bg-orange-600/10 transition-colors font-medium disabled:opacity-50 border-t border-[var(--border)]">
                                   <FileSpreadsheet className="w-3.5 h-3.5" /> {priceUpdateV2Exporting ? "생성 중..." : "전체엑셀 다운로드"}
                                 </button>
                               </div>
@@ -1497,13 +1541,13 @@ export default function ProductsPage() {
       )}
 
       {/* 최저가 갱신 결과 모달 */}
-      {scrapeResultModalOpen && scrapeResults.length > 0 && (
+      {scrapeResultModalOpen && (scrapeResults.length > 0 || scrapeSoldOutItems.length > 0) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setScrapeResultModalOpen(false)} />
           <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-lg p-6">
             <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">최저가 갱신 결과</h3>
             <p className="text-xs text-[var(--text-muted)] mb-4">
-              전체 {scrapeResults.length}개 · <span className="text-orange-400">변동 {changedScrapeCount}개</span> · 변동없음 {scrapeResults.length - changedScrapeCount}개
+              확인 {scrapeStats.processed || scrapeResults.length + scrapeSoldOutItems.length}개 · <span className="text-orange-400">변동 {changedScrapeCount}개</span> · 변동없음 {scrapeStats.unchanged || scrapeResults.length - changedScrapeCount}개 · <span className="text-yellow-400">품절 {scrapeSoldOutItems.length}개</span> · 봇감지 {scrapeStats.botBlocked}개 · 실패 {scrapeStats.failed}개
             </p>
             <div className="max-h-80 overflow-y-auto space-y-1.5 mb-4">
               {sortedScrapeResults.map((r) => {
@@ -1532,10 +1576,16 @@ export default function ProductsPage() {
                   </div>
                 );
               })}
+              {scrapeSoldOutItems.map((item) => (
+                <div key={`soldout-${item.id}`} className="flex items-center justify-between px-3 py-2 rounded-lg bg-yellow-500/10">
+                  <span className="text-sm text-[var(--text-primary)] truncate flex-1 mr-3">{item.name}</span>
+                  <span className="text-xs font-medium text-yellow-400 shrink-0">품절 · 순마진율 35%</span>
+                </div>
+              ))}
             </div>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
-                onClick={() => { setScrapeResultModalOpen(false); setScrapeResults([]); setScrapeLog([]); }}
+                onClick={() => { setScrapeResultModalOpen(false); setScrapeResults([]); setScrapeSoldOutIds([]); setScrapeLog([]); }}
                 className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
               >
                 닫기
@@ -1549,6 +1599,14 @@ export default function ProductsPage() {
                   {applyingPrices ? "적용 중..." : `적용하기 (${changedScrapeCount}개)`}
                 </button>
               )}
+              <button
+                onClick={handleScrapeResultV2ExportAll}
+                disabled={applyingPrices || priceUpdateV2Exporting || scrapeExportTargetIds.length === 0}
+                className="sm:col-span-2 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                {priceUpdateV2Exporting ? "엑셀 생성 중..." : `각수정 v2 전체엑셀 다운로드 (${scrapeExportTargetIds.length}개)`}
+              </button>
             </div>
           </div>
         </div>
