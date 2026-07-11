@@ -127,6 +127,7 @@ function purchasePlatformFromSource(source: string | null | undefined): Purchase
   return entry ? (entry[0] as PurchasePlatform) : null;
 }
 
+
 async function fetchProductCostRows(userId: string): Promise<ProductCostRow[]> {
   const PAGE_SIZE = 1000;
   const rows: ProductCostRow[] = [];
@@ -396,6 +397,7 @@ function OrdersPageInner() {
     let alive = true;
     fetch("/api/credentials", {
       headers: { Authorization: `Bearer ${session.access_token}` },
+      cache: "no-store",
     })
       .then((res) => (res.ok ? res.json() : []))
       .then((data: PurchaseCredential[]) => {
@@ -408,7 +410,7 @@ function OrdersPageInner() {
     return () => {
       alive = false;
     };
-  }, [session?.access_token]);
+  }, [session?.access_token, selectedIds.size]);
 
   const purchaseIdFillOptions = useMemo(() => {
     const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
@@ -432,10 +434,10 @@ function OrdersPageInner() {
       })
       .map((credential) => {
         const platformLabel = PLATFORM_LABELS[credential.platform] ?? credential.platform;
-        const label = credential.label?.trim()
-          ? `${platformLabel} · ${credential.label} (${credential.login_id})`
-          : `${platformLabel} · ${credential.login_id}`;
-        return { value: credential.login_id, label };
+        return {
+          value: credential.login_id,
+          label: `${platformLabel} (${credential.login_id})`,
+        };
       });
   }, [orders, purchaseCredentials, selectedIds]);
 
@@ -645,6 +647,9 @@ function OrdersPageInner() {
           });
           const updates: Record<string, unknown> = {};
           if (order.cost !== nextCost) updates.cost = nextCost;
+          if (result.status === "priced" && group.product.purchase_url && !order.purchase_url) {
+            updates.purchase_url = group.product.purchase_url;
+          }
           if (purchaseSource) updates.purchase_source = purchaseSource;
           if (result.status === "sold_out" && order.delivery_status !== "재고부족") {
             updates.delivery_status = "재고부족";

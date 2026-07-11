@@ -137,19 +137,22 @@ function ColumnFilterDropdown({ columnKey, allOrders, columnFilters, selectedVal
           ) : purchaseIdFillOptions && purchaseIdFillOptions.length > 0 ? (
             <div className="space-y-1">
               <p className="text-[11px] text-[var(--text-muted)] mb-1">체크 {selectedCount}건에 적용</p>
-              {purchaseIdFillOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => {
-                    onFillSelectedPurchaseId(option.value);
-                    onClose();
-                  }}
-                  className="w-full text-left px-2 py-1.5 rounded text-xs text-[var(--text-secondary)] bg-[var(--bg-hover)] hover:bg-blue-600/20 hover:text-blue-300 transition-colors"
-                >
-                  {option.label}
-                </button>
-              ))}
+              <div className="max-h-48 space-y-1 overflow-y-auto overscroll-contain pr-1">
+                {purchaseIdFillOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    title={option.label}
+                    onClick={() => {
+                      onFillSelectedPurchaseId(option.value);
+                      onClose();
+                    }}
+                    className="block w-full whitespace-normal break-words px-2 py-1.5 text-left text-xs leading-5 text-[var(--text-secondary)] bg-[var(--bg-hover)] rounded hover:bg-blue-600/20 hover:text-blue-300 transition-colors"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             <p className="text-xs text-[var(--text-muted)]">등록된 구매 아이디가 없습니다.</p>
