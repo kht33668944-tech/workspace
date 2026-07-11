@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { recalcTotals } from "@/lib/finance-utils";
+import { normalizeCard, normalizePlatform, recalcTotals } from "@/lib/finance-utils";
 import type {
   DailySnapshot,
   DailySnapshotUpdate,
@@ -62,6 +62,23 @@ export function useFinance() {
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchGenRef = useRef(0);
+  const snapshotRef = useRef<DailySnapshot | null>(null);
+  const selectedDateRef = useRef(selectedDate);
+  const saveRevisionRef = useRef(0);
+  const pendingSaveRef = useRef<{
+    snapshotId: string;
+    date: string;
+    revision: number;
+    payload: DailySnapshotUpdate;
+  } | null>(null);
+
+  useEffect(() => {
+    snapshotRef.current = snapshot;
+  }, [snapshot]);
+
+  useEffect(() => {
+    selectedDateRef.current = selectedDate;
+  }, [selectedDate]);
 
   // ─── Fetch ───
   const fetchSnapshot = useCallback(
@@ -97,61 +114,99 @@ export function useFinance() {
     fetchSnapshot(selectedDate);
   }, [selectedDate, fetchSnapshot]);
 
+  const flushPendingSave = useCallback(async () => {
+    if (!session?.access_token) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+
+    const pending = pendingSaveRef.current;
+    if (!pending) return;
+    pendingSaveRef.current = null;
+
+    try {
+      setSaveStatus("saving");
+      const res = await fetch(`/api/finance/${pending.snapshotId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify(pending.payload),
+      });
+
+      if (!res.ok) {
+        console.error("[Finance] save error:", await res.text());
+        setSaveStatus("error");
+        return;
+      }
+
+      const json = await res.json();
+      const savedSnapshot = json.snapshot as DailySnapshot | null;
+      if (
+        savedSnapshot &&
+        savedSnapshot.date === selectedDateRef.current &&
+        pending.revision === saveRevisionRef.current
+      ) {
+        snapshotRef.current = savedSnapshot;
+        setSnapshot(savedSnapshot);
+        if (json.prevSnapshot) setPrevSnapshot(json.prevSnapshot);
+      }
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    } catch (e) {
+      console.error("[Finance] save error:", e instanceof Error ? e.message : String(e));
+      setSaveStatus("error");
+    }
+  }, [session?.access_token]);
+
   // ─── Save (debounced) ───
   const saveSnapshot = useCallback(
     async (updates: DailySnapshotUpdate) => {
-      if (!snapshot || !session?.access_token) return;
+      const current = snapshotRef.current;
+      if (!current || !session?.access_token) return;
 
       // 즉시 로컬 상태 업데이트 (optimistic)
-      const cards = (updates.cards ?? snapshot.cards) as CardEntry[];
-      const platforms = (updates.platforms ?? snapshot.platforms) as PlatformEntry[];
-      const cash = (updates.cash ?? snapshot.cash) as CashEntry[];
-      const pending = updates.pending_purchase ?? snapshot.pending_purchase;
+      const cards = ((updates.cards ?? current.cards) as CardEntry[]).map(normalizeCard);
+      const platforms = ((updates.platforms ?? current.platforms) as PlatformEntry[]).map(normalizePlatform);
+      const cash = (updates.cash ?? current.cash) as CashEntry[];
+      const pending = updates.pending_purchase ?? current.pending_purchase;
       const totals = recalcTotals(cards, platforms, cash, pending);
 
       const merged: DailySnapshot = {
-        ...snapshot,
+        ...current,
         ...updates,
+        cards,
+        platforms,
         ...totals,
       };
+      snapshotRef.current = merged;
       setSnapshot(merged);
+
+      const revision = ++saveRevisionRef.current;
+      pendingSaveRef.current = {
+        snapshotId: merged.id,
+        date: merged.date,
+        revision,
+        payload: {
+          cards: merged.cards,
+          platforms: merged.platforms,
+          cash: merged.cash,
+          pending_purchase: merged.pending_purchase,
+          memo: merged.memo,
+        },
+      };
 
       // 디바운스 저장
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       setSaveStatus("saving");
 
-      saveTimerRef.current = setTimeout(async () => {
-        try {
-          setSaveStatus("saving");
-          const res = await fetch(`/api/finance/${snapshot.id}`, {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
-            },
-            body: JSON.stringify(updates),
-          });
-
-          if (!res.ok) {
-            console.error("[Finance] save error:", await res.text());
-            setSaveStatus("error");
-            return;
-          }
-
-          const json = await res.json();
-          setSnapshot(json.snapshot);
-          if (json.prevSnapshot) setPrevSnapshot(json.prevSnapshot);
-          setSaveStatus("saved");
-          setTimeout(() => setSaveStatus("idle"), 2000);
-        } catch (e) {
-          console.error("[Finance] save error:", e instanceof Error ? e.message : String(e));
-          setSaveStatus("error");
-        } finally {
-          setSaveStatus("idle");
-        }
+      saveTimerRef.current = setTimeout(() => {
+        void flushPendingSave();
       }, 500);
     },
-    [snapshot, session?.access_token]
+    [flushPendingSave, session?.access_token]
   );
 
   // ─── Create ───
@@ -233,17 +288,25 @@ export function useFinance() {
   );
 
   // ─── Navigation ───
-  const goToPrevDay = useCallback(() => {
+  const changeSelectedDate = useCallback(async (date: string) => {
+    await flushPendingSave();
+    setSelectedDate(date);
+  }, [flushPendingSave]);
+
+  const goToPrevDay = useCallback(async () => {
+    await flushPendingSave();
     setSelectedDate((d) => addDays(d, -1));
-  }, []);
+  }, [flushPendingSave]);
 
-  const goToNextDay = useCallback(() => {
+  const goToNextDay = useCallback(async () => {
+    await flushPendingSave();
     setSelectedDate((d) => addDays(d, 1));
-  }, []);
+  }, [flushPendingSave]);
 
-  const goToToday = useCallback(() => {
+  const goToToday = useCallback(async () => {
+    await flushPendingSave();
     setSelectedDate(getLocalDateStr());
-  }, []);
+  }, [flushPendingSave]);
 
   // ─── Computed ───
   const changes = useMemo(
@@ -256,9 +319,12 @@ export function useFinance() {
   // Cleanup
   useEffect(() => {
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        void flushPendingSave();
+      }
     };
-  }, []);
+  }, [flushPendingSave]);
 
   return {
     snapshot,
@@ -267,7 +333,7 @@ export function useFinance() {
     saving,
     saveStatus,
     selectedDate,
-    setSelectedDate,
+    setSelectedDate: changeSelectedDate,
     fetchSnapshot,
     saveSnapshot,
     createSnapshot,

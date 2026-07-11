@@ -145,6 +145,119 @@ function Money({ value, strong = false }: { value: number; strong?: boolean }) {
   return <span className={`${color} ${strong ? "font-semibold" : ""}`}>{formatKRW(value)}</span>;
 }
 
+interface CardMarketplaceRow {
+  key: string;
+  cardName: string;
+  marketplace: string;
+  count: number;
+  revenue: number;
+  settlement: number;
+  cost: number;
+  margin: number;
+}
+
+function normalizeName(value: string | null, fallback: string): string {
+  return value?.trim() || fallback;
+}
+
+function buildCardMarketplaceRows(orders: DetailOrder[]): CardMarketplaceRow[] {
+  const map = new Map<string, CardMarketplaceRow>();
+
+  for (const order of orders) {
+    const cardName = normalizeName(order.payment_method, "미확인");
+    const marketplace = normalizeName(order.marketplace, "미입력");
+    const key = `${cardName}::${marketplace}`;
+    const row = map.get(key) ?? {
+      key,
+      cardName,
+      marketplace,
+      count: 0,
+      revenue: 0,
+      settlement: 0,
+      cost: 0,
+      margin: 0,
+    };
+
+    row.count += 1;
+    row.revenue += order.revenue;
+    row.settlement += order.settlement;
+    row.cost += order.cost;
+    row.margin += order.margin;
+    map.set(key, row);
+  }
+
+  return [...map.values()].sort((a, b) => {
+    const cardCompare = a.cardName.localeCompare(b.cardName, "ko-KR");
+    if (cardCompare !== 0) return cardCompare;
+    return b.cost - a.cost;
+  });
+}
+
+function CardMarketplaceSummary({ orders }: { orders: DetailOrder[] }) {
+  if (orders.length === 0) return null;
+
+  const rows = buildCardMarketplaceRows(orders);
+  const total = rows.reduce(
+    (acc, row) => ({
+      count: acc.count + row.count,
+      revenue: acc.revenue + row.revenue,
+      settlement: acc.settlement + row.settlement,
+      cost: acc.cost + row.cost,
+      margin: acc.margin + row.margin,
+    }),
+    { count: 0, revenue: 0, settlement: 0, cost: 0, margin: 0 }
+  );
+
+  return (
+    <div className="min-w-0">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold text-[var(--text-muted)]">카드 사용 판매처별 합계</p>
+        <p className="text-xs text-[var(--text-muted)]">
+          전체 {total.count.toLocaleString("ko-KR")}건 · <span className="text-[var(--text-primary)]">{formatKRW(total.cost)}</span>
+        </p>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)]">
+        <table className="w-full min-w-[720px] text-xs">
+          <thead className="bg-[var(--bg-main)] text-[var(--text-muted)]">
+            <tr>
+              <th className="px-2 py-2 text-left font-medium">카드</th>
+              <th className="px-2 py-2 text-left font-medium">판매처</th>
+              <th className="px-2 py-2 text-right font-medium">건수</th>
+              <th className="px-2 py-2 text-right font-medium">매출</th>
+              <th className="px-2 py-2 text-right font-medium">정산</th>
+              <th className="px-2 py-2 text-right font-medium">원가</th>
+              <th className="px-2 py-2 text-right font-medium">마진</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key} className="border-t border-[var(--border-subtle)]">
+                <td className="px-2 py-2 text-[var(--text-secondary)]">{row.cardName}</td>
+                <td className="px-2 py-2 text-[var(--text-primary)]">{row.marketplace}</td>
+                <td className="px-2 py-2 text-right text-[var(--text-secondary)]">{row.count.toLocaleString("ko-KR")}건</td>
+                <td className="px-2 py-2 text-right"><Money value={row.revenue} /></td>
+                <td className="px-2 py-2 text-right"><Money value={row.settlement} /></td>
+                <td className="px-2 py-2 text-right"><Money value={row.cost} /></td>
+                <td className="px-2 py-2 text-right"><Money value={row.margin} strong /></td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="border-t border-[var(--border)] bg-[var(--bg-main)]">
+            <tr>
+              <td className="px-2 py-2 font-semibold text-[var(--text-primary)]" colSpan={2}>전체 합계</td>
+              <td className="px-2 py-2 text-right font-semibold text-[var(--text-primary)]">{total.count.toLocaleString("ko-KR")}건</td>
+              <td className="px-2 py-2 text-right"><Money value={total.revenue} strong /></td>
+              <td className="px-2 py-2 text-right"><Money value={total.settlement} strong /></td>
+              <td className="px-2 py-2 text-right"><Money value={total.cost} strong /></td>
+              <td className="px-2 py-2 text-right"><Money value={total.margin} strong /></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function OrderMiniTable({ title, orders }: { title: string; orders: DetailOrder[] }) {
   if (orders.length === 0) return null;
   return (
@@ -394,6 +507,7 @@ export default function OrderProfitTab() {
                           {expanded && (
                             <div className="space-y-4 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4">
                               <ChipList cards={row.cards} />
+                              <CardMarketplaceSummary orders={row.purchasedOrders} />
                               <OrderMiniTable title="배송완료 주문" orders={row.deliveredOrders} />
                               <OrderMiniTable title="구매/카드 사용 주문" orders={row.purchasedOrders} />
                               <OrderMiniTable title="반품완료 주문" orders={row.returnedOrders} />

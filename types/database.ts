@@ -348,8 +348,16 @@ export interface CardEntry {
   daily_payment: number;
   installment: number;
   total: number;
-  payment_day?: number; // 1-31, 카드 결제일
-  payment_made?: number; // 결제일에 실제 납부한 금액
+  personal_excluded?: number; // 사업비에서 제외할 개인 사용분
+  payments?: CardPaymentRecord[]; // 해당 날짜에 실제 납부한 금액 기록
+  payment_day?: number; // legacy: 예전 카드 결제일
+  payment_made?: number; // legacy: 예전 납부액
+}
+
+export interface CardPaymentRecord {
+  date: string;
+  amount: number;
+  memo?: string;
 }
 
 export interface PlatformEntry {

@@ -1,9 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
 import SkeletonBlock from "@/components/workspace/dashboard/skeleton-block";
-import { formatKRW, getNextPaymentDay } from "@/lib/finance-utils";
-import type { DailySnapshot, CardEntry } from "@/types/database";
+import { formatKRW } from "@/lib/finance-utils";
+import type { DailySnapshot } from "@/types/database";
 import type { SnapshotChanges } from "@/hooks/use-finance";
 
 interface FinanceKpiCardsProps {
@@ -25,17 +24,6 @@ function ChangeBadge({ value, favorable }: { value: number; favorable: "up" | "d
 }
 
 export default function FinanceKpiCards({ snapshot, changes, loading }: FinanceKpiCardsProps) {
-  const nearestCard = useMemo(() => {
-    return (snapshot?.cards ?? [])
-      .filter((c: CardEntry) => c.payment_day && c.payment_day > 0)
-      .map((c: CardEntry) => ({
-        name: c.name,
-        ...getNextPaymentDay(c.payment_day!),
-        amount: c.total,
-      }))
-      .sort((a, b) => a.daysLeft - b.daysLeft)[0] ?? null;
-  }, [snapshot?.cards]);
-
   const cards = [
     {
       label: "총 카드값",
@@ -71,7 +59,7 @@ export default function FinanceKpiCards({ snapshot, changes, loading }: FinanceK
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-      {cards.map((card, idx) => (
+      {cards.map((card) => (
         <div
           key={card.label}
           className={`bg-[var(--bg-card)] border ${card.borderClass || "border-[var(--border)]"} rounded-xl p-4 md:p-5`}
@@ -98,15 +86,6 @@ export default function FinanceKpiCards({ snapshot, changes, loading }: FinanceK
                 <ChangeBadge value={card.change} favorable={card.favorable} />
                 {card.change !== 0 && <span>전일 대비</span>}
               </div>
-              {idx === 3 && nearestCard && (
-                <span
-                  className={`text-[10px] mt-0.5 ${
-                    nearestCard.daysLeft <= 3 ? "text-red-400" : "text-[var(--text-muted)]"
-                  }`}
-                >
-                  {nearestCard.name} D-{nearestCard.daysLeft} · -{formatKRW(nearestCard.amount)}
-                </span>
-              )}
             </div>
           )}
         </div>
