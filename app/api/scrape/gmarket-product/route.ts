@@ -29,6 +29,19 @@ export type GmarketScrapeSSEEvent =
   | { type: "done" }
   | { type: "error"; message: string };
 
+/**
+ * 상품명 용량 소수점 보정.
+ * 예: "5 7L" → "5.7L", "287 5g" → "287.5g"
+ * 단, "아이시스 8.0 300ml"처럼 이미 앞에 소수점이 있는 정상 표기는 건드리지 않는다.
+ */
+function restoreSeparatedDecimalUnits(name: string): string {
+  return name.replace(/\b(\d{1,3})\s+(\d|0\d)\s*(ml|mL|ML|[Ll]|[Gg]|[Kk][Gg])\b/g, (match, integerPart, decimalPart, unit, offset, full) => {
+    const prevChar = offset > 0 ? full[offset - 1] : "";
+    if (prevChar === ".") return match;
+    return `${integerPart}.${decimalPart}${unit}`;
+  });
+}
+
 /** 지마켓 상품명 정규화: 불필요한 접두사 / 괄호 텍스트 제거 */
 function normalizeProductName(raw: string): string {
   let name = raw
@@ -66,9 +79,12 @@ function normalizeProductName(raw: string): string {
     name = name.replace(/\s+[가-힣]+$/, "");
   }
   name = name.replace(/[()（）]/g, " ");
-  name = name.replace(/[^\uAC00-\uD7A3\u3130-\u318F\uFFA0-\uFFDCa-zA-Z0-9\s]/g, " ");
+  name = name
+    .replace(/[^\uAC00-\uD7A3\u3130-\u318F\uFFA0-\uFFDCa-zA-Z0-9\s.]/g, " ")
+    .replace(/(^|[^\d])\./g, "$1")
+    .replace(/\.(?=[^\d]|$)/g, " ");
 
-  return name.replace(/\s{2,}/g, " ").trim();
+  return restoreSeparatedDecimalUnits(name.replace(/\s{2,}/g, " ").trim());
 }
 
 /** 지마켓 이미지 URL을 최대 해상도(1000px)로 변환 */

@@ -83,22 +83,25 @@ export async function POST(request: NextRequest) {
     const userId = userData.user.id;
 
     // 상품명 → product_id 매핑 (1000행 초과 누락 방지: 전건 페이지네이션)
-    const products = await fetchAllRows<{ id: string; product_name: string }>(
+    const products = await fetchAllRows<{ id: string; product_name: string; platform_codes: Record<string, string> | null }>(
       (from, to) => supabase
         .from("products")
-        .select("id, product_name")
+        .select("id, product_name, platform_codes")
         .eq("user_id", userId)
         .range(from, to),
     );
 
     const productMap = new Map<string, string>();
+    const productCodesMap = new Map<string, Record<string, string> | null>();
     for (const p of products) {
       productMap.set(normalizeName(p.product_name), p.id);
+      productCodesMap.set(p.id, p.platform_codes);
     }
 
     // 행 → upsert payload 변환
     const inserts: CoupangPriceInventoryInsert[] = [];
     const unmatchedSet = new Set<string>();
+    const coupangCodeByProductId = new Map<string, string>();
     let matchedRowCount = 0;
 
     for (const row of dataRows) {
@@ -111,6 +114,13 @@ export async function POST(request: NextRequest) {
       const productId = productMap.get(normalizeName(registeredName)) ?? null;
       if (productId) {
         matchedRowCount++;
+        const displayCode =
+          cellString(row[COL.vendor_item_id]) ||
+          cellString(row[COL.coupang_product_id]) ||
+          optionId;
+        if (displayCode && !coupangCodeByProductId.has(productId)) {
+          coupangCodeByProductId.set(productId, displayCode);
+        }
       } else if (registeredName) {
         unmatchedSet.add(registeredName);
       }
@@ -154,12 +164,45 @@ export async function POST(request: NextRequest) {
       upsertedCount += count ?? chunk.length;
     }
 
-    console.log(`[coupang-price-inventory/import] 완료: ${inserts.length}행 처리, 매칭 ${matchedRowCount}행, 미매칭 상품 ${unmatchedSet.size}개`);
+    let productStatusUpdatedCount = 0;
+    const productUpdates = [...coupangCodeByProductId.entries()].map(([productId, code]) => ({
+      id: productId,
+      platform_codes: {
+        ...(productCodesMap.get(productId) ?? {}),
+        "쿠팡=가격수정V2": code,
+      },
+    }));
+    for (let i = 0; i < productUpdates.length; i += 100) {
+      const chunk = productUpdates.slice(i, i + 100);
+      const results = await Promise.allSettled(
+        chunk.map((item) =>
+          supabase
+            .from("products")
+            .update({ platform_codes: item.platform_codes })
+            .eq("id", item.id)
+            .eq("user_id", userId)
+        )
+      );
+      for (let j = 0; j < results.length; j++) {
+        const result = results[j];
+        if (result.status === "fulfilled" && !result.value.error) {
+          productStatusUpdatedCount++;
+        } else {
+          const message = result.status === "fulfilled"
+            ? result.value.error?.message
+            : String(result.reason);
+          console.error(`[coupang-price-inventory/import] 상품 쿠팡 임포트 표시 업데이트 실패 (${chunk[j].id}):`, message);
+        }
+      }
+    }
+
+    console.log(`[coupang-price-inventory/import] 완료: ${inserts.length}행 처리, 매칭 ${matchedRowCount}행, 미매칭 상품 ${unmatchedSet.size}개, 상품목록 쿠팡 표시 ${productStatusUpdatedCount}개`);
 
     return NextResponse.json({
       total: inserts.length,
       rowsUpserted: upsertedCount,
       matched: matchedRowCount,
+      productStatusUpdated: productStatusUpdatedCount,
       unmatchedProductNames: [...unmatchedSet],
     });
   } catch (err) {

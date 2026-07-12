@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { extractProductMetadataBatch, suggestSmartStoreCategoryCodes, extractUnitPriceInfo, extractCoupangPurchaseOptions } from "@/lib/gemini";
 import { generatePlayAutoProductExcel, arrayBufferToBase64, PLATFORM_CONFIGS, type PlayAutoExportPlatform } from "@/lib/excel-export";
+import { applyCoupangPlayAutoLearnedRules } from "@/lib/playauto-coupang-rules";
 import type { Product } from "@/types/database";
 
 export async function POST(req: NextRequest) {
@@ -13,11 +14,16 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { productIds, platform = "smartstore", priceUpdate = false } = (await req.json()) as {
+    const { productIds, platform = "smartstore", priceUpdate = false, startIndex = 0 } = (await req.json()) as {
       productIds: string[];
       platform?: PlayAutoExportPlatform;
       priceUpdate?: boolean;
+      startIndex?: number;
     };
+
+    if (platform === "11st") {
+      return NextResponse.json({ error: "11번가는 현재 운영 제외 상태라 내보내기를 만들지 않습니다." }, { status: 400 });
+    }
 
     if (!productIds || productIds.length === 0) {
       return NextResponse.json({ error: "상품 ID가 없습니다." }, { status: 400 });
@@ -95,6 +101,7 @@ export async function POST(req: NextRequest) {
     let smartstoreCategoryCodes: string[];
     let unitPriceInfoList: Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }> | undefined;
     let coupangPurchaseOptions: CoupangOpt[] | undefined;
+    const exportWarnings: Array<{ productName: string; missing: string[] }> = [];
 
     if (priceUpdate) {
       metadataList = productNames.map(() => ({ model: "", brand: "", manufacturer: "" }));
@@ -162,8 +169,36 @@ export async function POST(req: NextRequest) {
       coupangPurchaseOptions = result[3];
     }
 
+    if (!priceUpdate && platform === "coupang" && coupangPurchaseOptions) {
+      const adjusted = applyCoupangPlayAutoLearnedRules(
+        products as unknown as Product[],
+        smartstoreCategoryCodes,
+        coupangPurchaseOptions,
+        availableSsCodes
+      );
+      smartstoreCategoryCodes = adjusted.siteCategoryCodes;
+      coupangPurchaseOptions = adjusted.coupangOptions;
+      exportWarnings.push(...adjusted.warnings);
+    }
+
+    if (!priceUpdate) {
+      const missingCategoryProducts = products
+        .map((p, i) => ({ productName: p.product_name as string, categoryCode: smartstoreCategoryCodes[i] }))
+        .filter((p) => !p.categoryCode || String(p.categoryCode).trim() === "");
+
+      if (missingCategoryProducts.length > 0) {
+        console.error(`[playauto-export] 카테고리코드 매칭 실패 ${missingCategoryProducts.length}/${products.length}개`);
+        return NextResponse.json({
+          error:
+            `카테고리코드 매칭에 실패한 상품이 ${missingCategoryProducts.length}개 있습니다. ` +
+            "빈 카테고리코드로 내보내면 플레이오토 등록이 실패하므로 엑셀 생성을 중단했습니다.",
+          missingCategories: missingCategoryProducts.slice(0, 30),
+        }, { status: 422 });
+      }
+    }
+
     // 쿠팡 필수옵션 누락 경고 집계 (업로드 전 사전 안내 → "필수 추천 옵션" 오류 예방)
-    const warnings: Array<{ productName: string; missing: string[] }> = [];
+    const warnings: Array<{ productName: string; missing: string[] }> = [...exportWarnings];
     if (platform === "coupang" && coupangPurchaseOptions) {
       coupangPurchaseOptions.forEach((opt, i) => {
         const missing = opt?.missingRequired ?? [];
@@ -179,15 +214,15 @@ export async function POST(req: NextRequest) {
     // 사용자 커스텀 설정 (DB에 저장된 값 우선)
     let userConfig = exportConfigResult.data ?? undefined;
 
-    // 개별 ESM 플랫폼(auction, gmarket, 11st)은 gmarket_auction 설정에서 계정명 추출
-    const isIndividualEsm = ["auction", "gmarket", "11st"].includes(platform);
+    // 개별 ESM 플랫폼(auction, gmarket)은 gmarket_auction 설정에서 계정명 추출
+    const isIndividualEsm = ["auction", "gmarket"].includes(platform);
     if (isIndividualEsm && !userConfig) {
       const { data: esmConfig } = await supabase
         .from("playauto_export_configs").select("*")
         .eq("user_id", userId).eq("platform", "gmarket_auction").maybeSingle();
       if (esmConfig?.shop_account) {
         const platformConfig = PLATFORM_CONFIGS[platform as PlayAutoExportPlatform];
-        const prefix = platformConfig.filenameLabel; // "옥션", "지마켓", "11번가"
+        const prefix = platformConfig.filenameLabel; // "옥션", "지마켓"
         const lines = esmConfig.shop_account.split("\n").map((s: string) => s.trim());
         const matchedLine = lines.find((l: string) => l.startsWith(prefix + "="));
         if (matchedLine) {
@@ -224,7 +259,7 @@ export async function POST(req: NextRequest) {
         productInfoNotice: "상세페이지 참조",
       } : undefined,
       Object.keys(noticeMap).length > 0 ? noticeMap : undefined,
-      undefined,
+      { startIndex },
       unitPriceInfoList ?? undefined,
       coupangPurchaseOptions ?? undefined
     );

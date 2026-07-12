@@ -62,6 +62,27 @@ type RetryItem = { id: string; name: string };
 /** 쿠팡 내보내기 시 필수옵션 누락 경고 (route의 warnings 응답 형식) */
 type ExportWarning = { productName: string; missing: string[] };
 
+// 플레이오토 쿠팡은 카테고리/추천옵션 오류를 추적하기 쉽게 더 작게 나눈다.
+// 300개 업로드도 가능하지만 실패 원인 추적과 재시도 효율 기준으로 쿠팡은 150개가 안전하다.
+const DEFAULT_PLAYAUTO_EXPORT_BATCH_SIZE = 300;
+const COUPANG_PLAYAUTO_EXPORT_BATCH_SIZE = 150;
+
+function splitPlayAutoExportIds(ids: string[], platform?: PlayAutoExportPlatform): string[][] {
+  const batchSize = platform === "coupang" ? COUPANG_PLAYAUTO_EXPORT_BATCH_SIZE : DEFAULT_PLAYAUTO_EXPORT_BATCH_SIZE;
+  return Array.from(
+    { length: Math.ceil(ids.length / batchSize) },
+    (_, index) => ids.slice(index * batchSize, (index + 1) * batchSize)
+  );
+}
+
+function addPlayAutoBatchToFilename(filename: string, batchIndex: number, batchTotal: number): string {
+  if (batchTotal <= 1) return filename;
+  const extensionIndex = filename.lastIndexOf(".");
+  const baseName = extensionIndex === -1 ? filename : filename.slice(0, extensionIndex);
+  const extension = extensionIndex === -1 ? "" : filename.slice(extensionIndex);
+  return `${baseName}_${batchIndex + 1}-${batchTotal}${extension}`;
+}
+
 export default function ProductsPage() {
   usePreventBrowserSave();
 
@@ -91,7 +112,7 @@ export default function ProductsPage() {
   const [importingCodes, setImportingCodes] = useState(false);
   const [platformCodeModalOpen, setPlatformCodeModalOpen] = useState(false);
   const [platformCodeDragOver, setPlatformCodeDragOver] = useState(false);
-  const [platformCodeResult, setPlatformCodeResult] = useState<{ matched: number; unmatched: string[]; total: number } | null>(null);
+  const [platformCodeResult, setPlatformCodeResult] = useState<{ matched: number; unmatched: string[]; total: number; ignored11st?: number } | null>(null);
   const [priceUpdateExporting, setPriceUpdateExporting] = useState(false);
   const [priceUpdateV2Exporting, setPriceUpdateV2Exporting] = useState(false);
   const [coupangImportModalOpen, setCoupangImportModalOpen] = useState(false);
@@ -115,7 +136,7 @@ export default function ProductsPage() {
   const platformCodeFileRef = useRef<HTMLInputElement>(null);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
-  const { products, allProducts, loading, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, priceScrapeStatus, refetchPriceChanges } = useProducts({
+  const { products, allProducts, loading, refetch, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, priceScrapeStatus, refetchPriceChanges } = useProducts({
     search: activeSearch,
     columnFilters,
     priceChangeFilter,
@@ -771,42 +792,36 @@ export default function ProductsPage() {
   const handlePlayAutoExport = async (platform: PlayAutoExportPlatform) => {
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) return;
+    const batches = splitPlayAutoExportIds(ids, platform);
     setExportModalOpen(false);
     setExporting(true);
     setExportStep("판매자관리코드 할당 중...");
     await assignSellerCodes(ids);
-    setExportStep("상품 데이터 조회 중...");
-
-    // 단계별 메시지 자동 전환
-    const steps = [
-      { delay: 3000, msg: "수수료 및 카테고리코드 로드 중..." },
-      { delay: 7000, msg: "AI 브랜드/모델명 추출 중..." },
-      { delay: 12000, msg: "AI 카테고리코드 매칭 중 (1단계: 분류 선택)..." },
-      { delay: 20000, msg: "AI 카테고리코드 매칭 중 (2단계: 코드 매칭)..." },
-      { delay: 35000, msg: "엑셀 파일 생성 중..." },
-    ];
-    const timers = steps.map(({ delay, msg }) =>
-      setTimeout(() => setExportStep(msg), delay)
-    );
 
     try {
-      const res = await fetch("/api/products/playauto-export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ productIds: ids, platform }),
-      });
-      const json = await res.json() as { base64?: string; filename?: string; error?: string; warnings?: ExportWarning[] };
-      if (!res.ok || !json.base64 || !json.filename) {
-        alert(json.error ?? "내보내기 실패");
-        return;
+      const warnings: ExportWarning[] = [];
+      let startIndex = 0;
+      for (const [batchIndex, batchIds] of batches.entries()) {
+        setExportStep(`대량등록 엑셀 생성 중... (${batchIndex + 1}/${batches.length}, ${batchIds.length}개)`);
+        const res = await fetch("/api/products/playauto-export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+          body: JSON.stringify({ productIds: batchIds, platform, startIndex }),
+        });
+        const json = await res.json() as { base64?: string; filename?: string; error?: string; warnings?: ExportWarning[] };
+        if (!res.ok || !json.base64 || !json.filename) {
+          throw new Error(json.error ?? `${batchIndex + 1}번째 내보내기 실패`);
+        }
+        const filename = addPlayAutoBatchToFilename(json.filename, batchIndex, batches.length);
+        downloadExcelFromBase64(json.base64, filename);
+        saveToArchive(filename, json.base64, batchIds.length);
+        warnings.push(...(json.warnings ?? []));
+        startIndex += batchIds.length;
       }
-      downloadExcelFromBase64(json.base64, json.filename);
-      saveToArchive(json.filename, json.base64, ids.length);
-      showExportWarnings(json.warnings);
-    } catch {
-      alert("내보내기 중 오류가 발생했습니다.");
+      showExportWarnings(warnings);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "내보내기 중 오류가 발생했습니다.");
     } finally {
-      timers.forEach(clearTimeout);
       setExporting(false);
       setExportStep("");
     }
@@ -846,34 +861,33 @@ export default function ProductsPage() {
 
     setExportStep("판매자관리코드 할당 중...");
     await assignSellerCodes(ids);
-    setExportStep("전체 플랫폼 내보내기 중...");
 
     try {
-      const results = await Promise.allSettled(
-        platforms.map(async (platform) => {
+      for (const platform of platforms) {
+        const batches = splitPlayAutoExportIds(ids, platform);
+        const warnings: ExportWarning[] = [];
+        let startIndex = 0;
+        for (const [batchIndex, batchIds] of batches.entries()) {
+          setExportStep(`${PLATFORM_CONFIGS[platform].filenameLabel} 대량등록 엑셀 생성 중... (${batchIndex + 1}/${batches.length}, ${batchIds.length}개)`);
           const res = await fetch("/api/products/playauto-export", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-            body: JSON.stringify({ productIds: ids, platform }),
+            body: JSON.stringify({ productIds: batchIds, platform, startIndex }),
           });
           const json = await res.json() as { base64?: string; filename?: string; error?: string; warnings?: ExportWarning[] };
           if (!res.ok || !json.base64 || !json.filename) {
             throw new Error(json.error ?? `${PLATFORM_CONFIGS[platform].filenameLabel} 내보내기 실패`);
           }
-          return { platform, ...json } as { platform: PlayAutoExportPlatform; base64: string; filename: string; warnings?: ExportWarning[] };
-        })
-      );
-      for (const r of results) {
-        if (r.status === "fulfilled") {
-          downloadExcelFromBase64(r.value.base64, r.value.filename);
-          saveToArchive(r.value.filename, r.value.base64, ids.length);
-          showExportWarnings(r.value.warnings);
-        } else {
-          alert(r.reason?.message ?? "내보내기 실패");
+          const filename = addPlayAutoBatchToFilename(json.filename, batchIndex, batches.length);
+          downloadExcelFromBase64(json.base64, filename);
+          saveToArchive(filename, json.base64, batchIds.length);
+          warnings.push(...(json.warnings ?? []));
+          startIndex += batchIds.length;
         }
+        showExportWarnings(warnings);
       }
-    } catch {
-      alert("내보내기 중 오류가 발생했습니다.");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "내보내기 중 오류가 발생했습니다.");
     } finally {
       setExporting(false);
       setExportStep("");
@@ -894,7 +908,7 @@ export default function ProductsPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({ excelBase64: base64, overwrite }),
       });
-      const json = await res.json() as { matched?: number; unmatched?: string[]; total?: number; error?: string; confirmOverwrite?: boolean; duplicateCount?: number };
+      const json = await res.json() as { matched?: number; unmatched?: string[]; total?: number; ignored11st?: number; error?: string; confirmOverwrite?: boolean; duplicateCount?: number };
       if (!res.ok) {
         alert(json.error ?? "가져오기 실패");
         return;
@@ -902,14 +916,14 @@ export default function ProductsPage() {
       // 중복 감지 → 사용자 확인 후 덮어쓰기 재요청
       if (json.confirmOverwrite && json.duplicateCount) {
         setImportingCodes(false);
-        if (confirm(`${json.duplicateCount}개 상품에 이미 플랫폼 코드가 존재합니다.\n최신 데이터로 덮어쓰시겠습니까?`)) {
+        if (confirm(`${json.duplicateCount}개 상품에 기존 플레이오토 확인 정보가 있습니다.\n새 목록으로 확인 정보를 갱신할까요? 다른 판매처 정보는 유지됩니다.`)) {
           await handlePlatformCodeFile(file, true);
         }
         return;
       }
-      setPlatformCodeResult({ matched: json.matched ?? 0, unmatched: json.unmatched ?? [], total: json.total ?? 0 });
+      setPlatformCodeResult({ matched: json.matched ?? 0, unmatched: json.unmatched ?? [], total: json.total ?? 0, ignored11st: json.ignored11st ?? 0 });
     } catch {
-      alert("플랫폼 코드 가져오기 중 오류가 발생했습니다.");
+          alert("플레이오토 임포트 확인 중 오류가 발생했습니다.");
     } finally {
       setImportingCodes(false);
     }
@@ -1039,10 +1053,10 @@ export default function ProductsPage() {
     await assignSellerCodes(ids);
     setExportStep("가격수정 엑셀 생성 중...");
 
-    // 가격수정은 ESM을 옥션/지마켓/11번가 개별 파일로 분리 (전체 선택 시 5개 병렬 다운로드)
+    // 가격수정은 ESM을 옥션/지마켓 개별 파일로 분리 (11번가는 운영 제외)
     // priceUpdate=true 플래그로 서버에서 Gemini 호출 skip → 토큰 절감 + 대량 가능
     const platforms: PlayAutoExportPlatform[] = target === "all"
-      ? ["smartstore", "auction", "gmarket", "11st", "coupang"]
+      ? ["smartstore", "auction", "gmarket", "coupang"]
       : [target];
     try {
       const results = await Promise.allSettled(
@@ -1282,7 +1296,7 @@ export default function ProductsPage() {
                             <span className="w-2 h-2 rounded-full bg-green-400" /> 스마트스토어
                           </button>
                           <button onClick={() => handlePlayAutoExport("gmarket_auction")} className="w-full flex items-center gap-2 px-3 pl-7 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-                            <span className="w-2 h-2 rounded-full bg-yellow-400" /> 지마켓·옥션·11번가
+                            <span className="w-2 h-2 rounded-full bg-yellow-400" /> 지마켓·옥션
                           </button>
                           <button onClick={() => handlePlayAutoExport("coupang")} className="w-full flex items-center gap-2 px-3 pl-7 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
                             <span className="w-2 h-2 rounded-full bg-red-400" /> 쿠팡
@@ -1312,9 +1326,6 @@ export default function ProductsPage() {
                             </button>
                             <button onClick={() => handlePriceUpdateExport("gmarket")} disabled={priceUpdateExporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
                               <span className="w-2 h-2 rounded-full bg-yellow-400" /> 지마켓
-                            </button>
-                            <button onClick={() => handlePriceUpdateExport("11st")} disabled={priceUpdateExporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
-                              <span className="w-2 h-2 rounded-full bg-yellow-400" /> 11번가
                             </button>
                             <button onClick={() => handlePriceUpdateExport("coupang")} disabled={priceUpdateExporting} className="w-full flex items-center gap-2 px-3 pl-7 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
                               <span className="w-2 h-2 rounded-full bg-red-400" /> 쿠팡
@@ -1379,9 +1390,6 @@ export default function ProductsPage() {
                                 <button onClick={() => handlePriceUpdateV2Export("smartstore")} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
                                   <span className="w-2 h-2 rounded-full bg-green-400" /> {priceUpdateV2Exporting ? "생성 중..." : "스마트스토어"}
                                 </button>
-                                <button disabled className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-[var(--text-disabled)] opacity-50 cursor-not-allowed" title="추후 지원 예정">
-                                  <span className="w-2 h-2 rounded-full bg-red-400/40" /> 11번가 (추후 지원)
-                                </button>
                                 <button onClick={() => handlePriceUpdateV2ExportAll()} disabled={priceUpdateV2Exporting} className="w-full flex items-center gap-2 px-3 pl-9 py-2 text-sm text-orange-400 hover:bg-orange-600/10 transition-colors font-medium disabled:opacity-50 border-t border-[var(--border)]">
                                   <FileSpreadsheet className="w-3.5 h-3.5" /> {priceUpdateV2Exporting ? "생성 중..." : "전체엑셀 다운로드"}
                                 </button>
@@ -1400,7 +1408,7 @@ export default function ProductsPage() {
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 rounded-lg transition-colors disabled:opacity-50"
               >
                 <Upload className="w-4 h-4" />
-                {importingCodes ? "가져오는 중..." : "플랫폼 코드 가져오기"}
+                {importingCodes ? "확인 중..." : "플레이오토 임포트 확인"}
               </button>
               <button
                 onClick={() => gmarketImport.open({
@@ -1469,21 +1477,25 @@ export default function ProductsPage() {
         </>
       )}
 
-      {/* 플랫폼 코드 가져오기 모달 */}
+      {/* 플레이오토 상품 목록 임포트 확인 모달 */}
       {platformCodeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => !importingCodes && setPlatformCodeModalOpen(false)} />
           <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">플랫폼 코드 가져오기</h3>
+            <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">플레이오토 임포트 확인</h3>
+            <p className="text-xs text-[var(--text-muted)] mb-4">플레이오토에서 내려받은 상품 목록 엑셀을 올리면, 목록에서 임포트 여부를 확인할 수 있습니다.</p>
 
             {platformCodeResult ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 text-green-400">
                   <FileSpreadsheet className="w-5 h-5" />
-                  <span className="text-sm font-medium">가져오기 완료</span>
+                  <span className="text-sm font-medium">임포트 확인 완료</span>
                 </div>
                 <div className="text-sm text-[var(--text-secondary)] space-y-1">
-                  <p>전체 <strong>{platformCodeResult.total}</strong>행 중 <strong className="text-green-400">{platformCodeResult.matched}</strong>개 상품 매칭 성공</p>
+                  <p>전체 <strong>{platformCodeResult.total}</strong>행 중 <strong className="text-green-400">{platformCodeResult.matched}</strong>개 상품 임포트 확인</p>
+                  {(platformCodeResult.ignored11st ?? 0) > 0 && (
+                    <p className="text-xs text-[var(--text-muted)]">11번가 {platformCodeResult.ignored11st}행은 운영 제외 기준으로 건너뜀</p>
+                  )}
                   {platformCodeResult.unmatched.length > 0 && (
                     <div className="mt-2">
                       <p className="text-orange-400 text-xs mb-1">미매칭 상품 ({platformCodeResult.unmatched.length}개):</p>
@@ -1616,7 +1628,7 @@ export default function ProductsPage() {
 
       {/* 쿠팡 가격수정 v2 양식 임포트 모달 */}
       {coupangImportModalOpen && (
-        <CoupangPriceImportModal onClose={() => setCoupangImportModalOpen(false)} />
+        <CoupangPriceImportModal onClose={() => setCoupangImportModalOpen(false)} onImported={() => refetch()} />
       )}
 
       {/* 옥션·지마켓 가격수정 v2 상품목록 임포트 모달 */}

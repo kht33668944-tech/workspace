@@ -110,7 +110,7 @@ export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
     templateCode: "2201548\n2201554",
     headerFooterTemplateCode: "14672\n14672",
     rateKey: "esm",
-    filenameLabel: "지마켓옥션11번가",
+    filenameLabel: "지마켓옥션",
   },
   auction: {
     shopAccount: "옥션=계정명",
@@ -146,7 +146,7 @@ export const PLATFORM_CONFIGS: Record<PlayAutoExportPlatform, {
 export function platformToSellerGroup(platform: PlayAutoExportPlatform): string {
   if (platform === "smartstore") return "smartstore";
   if (platform === "coupang") return "coupang";
-  return "esm"; // gmarket_auction, auction, gmarket, 11st
+  return "esm"; // gmarket_auction, auction, gmarket
 }
 
 /**
@@ -202,7 +202,7 @@ export async function generatePlayAutoProductExcel(
 
   let newCodeCounter = 1;
   const sellerGroup = platformToSellerGroup(platform);
-  const data = products.map((p, i) => {
+  const data = products.flatMap((p, i) => {
     const settlementPrice = calcSettlementPrice(p.lowest_price, p.margin_rate);
     const categoryRates = rateMap[p.category] ?? {};
     const platformRate = (categoryRates as Record<string, number>)[config.rateKey] ?? 0;
@@ -213,17 +213,23 @@ export async function generatePlayAutoProductExcel(
       : (platformRate > 0 ? calcPlatformPrice(settlementPrice, platformRate) : p.lowest_price);
 
     const meta = metadataList[i] ?? { model: "", brand: "", manufacturer: "" };
-    const savedCode = (p.seller_code as Record<string, string> | null)?.[sellerGroup];
+    const savedCode = options?.useSavedSellerCodes
+      ? (p.seller_code as Record<string, string> | null)?.[sellerGroup]
+      : undefined;
     const sellerCode = savedCode ?? `${dateStr}${String((options?.startIndex ?? 0) + newCodeCounter++).padStart(3, "0")}`;
 
     const playautoCode = categoryMappings[p.category] ?? DEFAULT_SCHEMA.code;
     const schema = getSchemaByCode(playautoCode);
 
-    const row: Record<string, string | number> = {
+    const buildRow = (
+      shopAccount: string,
+      templateCode: string,
+      headerFooterTemplateCode: string
+    ): Record<string, string | number> => ({
       판매자관리코드: sellerCode,
       카테고리코드: smartstoreCategoryCodes[i] ?? "",
-      "쇼핑몰(계정)": config.shopAccount,
-      템플릿코드: config.templateCode,
+      "쇼핑몰(계정)": shopAccount,
+      템플릿코드: templateCode,
       "온라인 상품명": p.product_name,
       판매수량: saleQuantity,
       판매가: salePrice,
@@ -241,31 +247,54 @@ export async function generatePlayAutoProductExcel(
       배송비: 0,
       기본이미지: p.thumbnail_url ?? "",
       상세설명: p.detail_html ?? "",
-      "머리말/꼬리말 템플릿코드": config.headerFooterTemplateCode,
+      "머리말/꼬리말 템플릿코드": headerFooterTemplateCode,
       모델명: meta.model,
       브랜드: meta.brand,
       제조사: meta.manufacturer,
       상품분류코드: playautoCode,
-    };
+    });
+
+    const accountLines = config.shopAccount.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    const templateLines = config.templateCode.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    const headerFooterLines = config.headerFooterTemplateCode.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+
+    const rows: Array<Record<string, string | number>> = platform === "gmarket_auction"
+      ? [
+          buildRow(
+            accountLines.find((line) => line.startsWith("옥션=")) ?? "옥션=계정명",
+            templateLines[0] ?? PLATFORM_CONFIGS.auction.templateCode,
+            headerFooterLines[0] ?? PLATFORM_CONFIGS.auction.headerFooterTemplateCode
+          ),
+          buildRow(
+            accountLines.find((line) => line.startsWith("지마켓=")) ?? "지마켓=계정명",
+            templateLines[1] ?? PLATFORM_CONFIGS.gmarket.templateCode,
+            headerFooterLines[1] ?? PLATFORM_CONFIGS.gmarket.headerFooterTemplateCode
+          ),
+        ]
+      : [buildRow(config.shopAccount, config.templateCode, config.headerFooterTemplateCode)];
 
     // 스마트스토어: 단위가격 표시 컬럼 추가
     if (platform === "smartstore") {
       const upi = unitPriceInfoList?.[i] ?? { display: "N", displayAmount: 0, displayUnit: 0, totalAmount: 0 };
-      row["단위 가격 표시 여부"] = upi.display;
-      row["표시 용량"] = upi.displayAmount;
-      row["표시 단위"] = upi.displayUnit;
-      row["총 용량"] = upi.totalAmount;
+      rows.forEach((row) => {
+        row["단위 가격 표시 여부"] = upi.display;
+        row["표시 용량"] = upi.displayAmount;
+        row["표시 단위"] = upi.displayUnit;
+        row["총 용량"] = upi.totalAmount;
+      });
     }
 
     // 이 상품의 고시 항목 채우기 (해당 카테고리 개수만큼 "상세페이지 참조", 나머지 빈칸)
-    for (let n = 1; n <= maxFields; n++) {
-      const customValues = noticeMap?.[playautoCode];
-      row[`상품정보제공고시${n}`] = n <= schema.fields.length
-        ? (customValues?.[n - 1] || productInfoNotice)
-        : "";
-    }
+    rows.forEach((row) => {
+      for (let n = 1; n <= maxFields; n++) {
+        const customValues = noticeMap?.[playautoCode];
+        row[`상품정보제공고시${n}`] = n <= schema.fields.length
+          ? (customValues?.[n - 1] || productInfoNotice)
+          : "";
+      }
+    });
 
-    return row;
+    return rows;
   });
 
   const ws = XLSX.utils.json_to_sheet(data);
@@ -340,7 +369,7 @@ export function downloadExcelFromBase64(base64: string, filename: string) {
 /**
  * 가격수정용 엑셀 2종 생성 (일반상품 + 단일상품)
  * 일반상품: 스마트스토어, 쿠팡
- * 단일상품: 지마켓, 옥션, 11번가
+ * 단일상품: 지마켓, 옥션
  */
 export async function generatePriceUpdateExcel(
   products: Product[],
@@ -353,7 +382,7 @@ export async function generatePriceUpdateExcel(
 
   // 플랫폼별 계정 키 목록 (exportConfigs 우선, 없으면 PLATFORM_CONFIGS 기본값)
   const normalAccounts: string[] = []; // 스마트스토어, 쿠팡
-  const singleAccounts: string[] = []; // 옥션, 지마켓, 11번가
+  const singleAccounts: string[] = []; // 옥션, 지마켓
 
   const smartstoreAccount = exportConfigs?.smartstore?.shopAccount || PLATFORM_CONFIGS.smartstore.shopAccount;
   const coupangAccount = exportConfigs?.coupang?.shopAccount || PLATFORM_CONFIGS.coupang.shopAccount;
@@ -369,7 +398,6 @@ export async function generatePriceUpdateExcel(
     if (lower.startsWith("스마트스토어")) return "smartstore";
     if (lower.startsWith("쿠팡")) return "coupang";
     if (lower.startsWith("옥션") || lower.startsWith("지마켓")) return "esm";
-    if (lower.startsWith("11번가")) return "esm";
     return "esm";
   };
 

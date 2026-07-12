@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
 
     if (nameCol < 0 || accountCol < 0 || codeCol < 0) {
       return NextResponse.json({
-        error: "필수 컬럼을 찾을 수 없습니다. '온라인 상품명', '쇼핑몰(계정)', '쇼핑몰 상품번호' 컬럼이 필요합니다.",
+        error: "필수 컬럼을 찾을 수 없습니다. 플레이오토 상품 목록의 '온라인 상품명', '쇼핑몰(계정)', '쇼핑몰 상품번호' 컬럼이 필요합니다.",
       }, { status: 400 });
     }
 
@@ -101,6 +101,7 @@ export async function POST(request: NextRequest) {
     const updates = new Map<string, UpdateEntry>();
     const unmatchedNames = new Set<string>();
     let duplicateCount = 0;
+    let ignored11stCount = 0;
 
     const dataRows = rawRows.slice(1);
     for (const row of dataRows) {
@@ -110,6 +111,10 @@ export async function POST(request: NextRequest) {
       const sellerCode = sellerCodeCol >= 0 ? cellString(row, sellerCodeCol) : "";
 
       if (!productName || !account || !code) continue;
+      if (account.toLowerCase().startsWith("11번가")) {
+        ignored11stCount++;
+        continue;
+      }
 
       const product = productMap.get(productName);
       if (!product) {
@@ -127,8 +132,10 @@ export async function POST(request: NextRequest) {
 
       const existing: UpdateEntry = updates.get(product.id) ?? {
         id: product.id,
-        platform_codes: overwrite ? {} : { ...(product.platform_codes ?? {}) },
-        seller_code: overwrite ? null : (product.seller_code ? { ...product.seller_code } : null),
+        // 새 플레이오토 목록에는 일부 판매처만 들어올 수 있다. 해당 판매처 코드만 최신값으로
+        // 교체하고, 다른 판매처의 기존 코드는 보존한다.
+        platform_codes: { ...(product.platform_codes ?? {}) },
+        seller_code: product.seller_code ? { ...product.seller_code } : null,
       };
       existing.platform_codes[account] = code;
       // 판매자관리코드를 해당 플랫폼 그룹에 저장
@@ -197,15 +204,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log(`[import-platform-codes] 완료: ${matched}개 매칭, ${unmatchedNames.size}개 미매칭${overwrite ? " (덮어쓰기)" : ""}`);
+    console.log(`[import-platform-codes] 플레이오토 임포트 확인 완료: ${matched}개 매칭, ${unmatchedNames.size}개 미매칭, 11번가 제외 ${ignored11stCount}행${overwrite ? " (최신 정보 갱신)" : ""}`);
 
     return NextResponse.json({
       matched,
       unmatched: [...unmatchedNames],
       total: dataRows.length,
+      ignored11st: ignored11stCount,
     });
   } catch (err) {
     console.error("[import-platform-codes] 오류:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error: "플랫폼 코드 가져오기 실패" }, { status: 500 });
+    return NextResponse.json({ error: "플레이오토 임포트 확인 실패" }, { status: 500 });
   }
 }

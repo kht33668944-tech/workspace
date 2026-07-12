@@ -425,16 +425,113 @@ export async function suggestSmartStoreCategoryCodes(
   const fallback = products.map(() => "");
   if (!process.env.GEMINI_API_KEY || products.length === 0 || availableCodes.length === 0) return fallback;
 
-  const codeList = availableCodes
-    .map((c) => `${c.category_code}: [${c.category_type}] ${c.category_name}`)
-    .join("\n");
+  // 300개 같은 대량 배치를 한 번에 요청하면 Gemini 응답이 길어져 JSON 파싱이 실패하고
+  // 카테고리코드가 전부 빈칸으로 떨어질 수 있다. 상품도 작게 나누고, 각 배치에 필요한
+  // 후보 카테고리만 추려 프롬프트 크기를 제한한다.
+  const BATCH_SIZE = 20;
+  const batches: Array<Array<{ product_name: string; category: string; source_category: string }>> = [];
+  for (let i = 0; i < products.length; i += BATCH_SIZE) {
+    batches.push(products.slice(i, i + BATCH_SIZE));
+  }
 
-  const productList = products
-    .map((p, i) => `${i + 1}. 상품명: ${p.product_name} | 내카테고리: ${p.category || "없음"} | 원본카테고리: ${p.source_category || "없음"}`)
-    .join("\n");
+  const validCodes = new Set(availableCodes.map((c) => c.category_code));
 
-  const result = await generateText(
-    `아래 상품 목록을 분석해서 각 상품에 가장 적합한 스마트스토어 카테고리코드를 선택하세요.
+  const normalize = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+  const addTerms = (text: string, terms: Set<string>, useKeywordRules = true) => {
+    const raw = text.trim();
+    if (!raw) return;
+    raw.split(/[>/|,\s]+/).forEach((part) => {
+      const t = part.trim();
+      if (t.length >= 2) terms.add(t);
+    });
+    if (!useKeywordRules) return;
+
+    const keywordRules: Array<[RegExp, string[]]> = [
+      [/콜라|펩시|코카|닥터페퍼/i, ["콜라", "탄산"]],
+      [/비니거|사과식초|화이트식초|식초/i, ["식초"]],
+      [/스프라이트|킨사이다|사이다/i, ["사이다", "탄산"]],
+      [/트레비|탄산수/i, ["탄산수"]],
+      [/게토레이|포카리|포카리스웨트|토레타|파워에이드/i, ["스포츠이온음료"]],
+      [/밀키스|환타|웰치|오랑지나|탄산/i, ["탄산", "청량음료"]],
+      [/커피|레쓰비|칸타타|조지아|아메리카노|라떼/i, ["커피", "캔커피"]],
+      [/생수|삼다수|아이시스/i, ["생수"]],
+      [/두유|베지밀|아몬드브리즈|아몬드 브리즈/i, ["두유"]],
+      [/우유|멸균우유/i, ["우유", "멸균우유"]],
+      [/라면|짜파게티|불닭|안성탕면|신라면|컵라면|사발면|도시락/i, ["라면", "면류"]],
+      [/햇반|오뚜기밥|즉석밥|쌀밥/i, ["즉석밥"]],
+      [/간장/i, ["간장"]],
+      [/식초/i, ["식초"]],
+      [/포도씨유|카놀라유|식용유|콩기름|오일/i, ["오일류", "식용유"]],
+      [/설탕|스테비아/i, ["설탕"]],
+      [/물엿|올리고당|알룰로스/i, ["물엿", "올리고당"]],
+      [/참치액|연두|다시다|미원|육수|조미료/i, ["조미료", "육수"]],
+      [/파스타소스|소스/i, ["소스"]],
+      [/참깨|깨/i, ["참깨"]],
+      [/멸치|디포리/i, ["멸치", "건어물"]],
+      [/샴푸|헤드앤숄더/i, ["샴푸"]],
+      [/로션|베이비/i, ["로션", "바디"]],
+      [/리스테린|가글/i, ["가글", "구강"]],
+      [/세탁세제|액체세제|리큐|테크|퍼실|액츠|비트/i, ["세탁세제", "액체세제"]],
+      [/섬유유연제|피죤|다우니|샤프란|아우라/i, ["섬유유연제"]],
+      [/주방세제|퐁퐁|트리오|순샘/i, ["주방세제"]],
+      [/락스|곰팡이|욕실|변기|배수관|세정제|클리너/i, ["세정제", "락스", "곰팡이"]],
+    ];
+    keywordRules.forEach(([regex, mapped]) => {
+      if (regex.test(raw)) mapped.forEach((t) => terms.add(t));
+    });
+  };
+
+  const selectCandidateCodes = (batch: Array<{ product_name: string; category: string; source_category: string }>) => {
+    const terms = new Set<string>();
+    batch.forEach((p) => {
+      // 상품명에서 세부 후보를 만들고, 내부 카테고리는 넓은 보조 후보로만 사용한다.
+      // 원본 카테고리(source_category)는 "음료/생수"처럼 큰 분류가 섞여 실제 상품과
+      // 다른 세부 카테고리를 후보로 끌어오는 경우가 있어 후보 생성에서는 제외한다.
+      addTerms(p.product_name, terms, true);
+      addTerms(p.category || "", terms, false);
+    });
+
+    const normalizedTerms = [...terms].map(normalize).filter((t) => t.length >= 2);
+    let candidates = availableCodes.filter((c) => {
+      const haystack = normalize(`${c.category_type} ${c.category_name}`);
+      return normalizedTerms.some((term) => haystack.includes(term));
+    });
+
+    if (candidates.length < 50) {
+      const categoryTerms = new Set(batch.map((p) => p.category).filter(Boolean));
+      candidates = [
+        ...candidates,
+        ...availableCodes.filter((c) => [...categoryTerms].some((term) => c.category_type.includes(term))),
+      ];
+    }
+
+    if (candidates.length === 0) candidates = availableCodes;
+
+    const seen = new Set<string>();
+    return candidates
+      .sort((a, b) => b.category_name.length - a.category_name.length)
+      .filter((c) => {
+        if (seen.has(c.category_code)) return false;
+        seen.add(c.category_code);
+        return true;
+      })
+      .slice(0, 350);
+  };
+
+  const batchResults = await Promise.all(batches.map(async (batch, batchIdx) => {
+    const emptyBatch = batch.map(() => "");
+    const candidateCodes = selectCandidateCodes(batch);
+    const batchValidCodes = new Set(candidateCodes.map((c) => c.category_code));
+    const codeList = candidateCodes
+      .map((c) => `${c.category_code}: [${c.category_type}] ${c.category_name}`)
+      .join("\n");
+
+    const productList = batch
+      .map((p, i) => `${i + 1}. 상품명: ${p.product_name} | 내카테고리: ${p.category || "없음"} | 원본카테고리: ${p.source_category || "없음"}`)
+      .join("\n");
+
+    const result = await generateText(
+      `아래 상품 목록을 분석해서 각 상품에 가장 적합한 스마트스토어 카테고리코드를 선택하세요.
 
 스마트스토어 카테고리코드 목록 (코드: [분류] 카테고리명):
 ${codeList}
@@ -448,25 +545,38 @@ ${productList}
 - 반드시 아래 JSON 배열 형식으로만 출력 (다른 설명 없이):
 ["코드1", "코드2", ...]
 
-상품 개수: ${products.length}개, 배열 항목도 반드시 ${products.length}개`,
-    options
-  );
+상품 개수: ${batch.length}개, 배열 항목도 반드시 ${batch.length}개`,
+      options
+    );
 
-  if (!result) return fallback;
+    if (!result) {
+      console.warn(`[suggestSmartStoreCategoryCodes] 배치 ${batchIdx + 1}/${batches.length} Gemini 응답 없음`);
+      return emptyBatch;
+    }
 
-  try {
-    const jsonMatch = result.match(/\[[\s\S]*?\]/);
-    if (!jsonMatch) return fallback;
-    const parsed = JSON.parse(jsonMatch[0]) as string[];
-    if (!Array.isArray(parsed)) return fallback;
-    const validCodes = new Set(availableCodes.map((c) => c.category_code));
-    return products.map((_, i) => {
-      const code = String(parsed[i] ?? "").trim();
-      return validCodes.has(code) ? code : "";
-    });
-  } catch {
-    return fallback;
-  }
+    try {
+      const firstBracket = result.indexOf("[");
+      const lastBracket = result.lastIndexOf("]");
+      if (firstBracket < 0 || lastBracket < firstBracket) {
+        console.warn(`[suggestSmartStoreCategoryCodes] 배치 ${batchIdx + 1}/${batches.length} JSON 배열 패턴 없음`);
+        return emptyBatch;
+      }
+      const parsed = JSON.parse(result.slice(firstBracket, lastBracket + 1)) as string[];
+      if (!Array.isArray(parsed)) return emptyBatch;
+      if (parsed.length < batch.length) {
+        console.warn(`[suggestSmartStoreCategoryCodes] 배치 ${batchIdx + 1}/${batches.length} 응답 길이 부족 (${parsed.length}/${batch.length})`);
+      }
+      return batch.map((_, i) => {
+        const code = String(parsed[i] ?? "").trim();
+        return validCodes.has(code) && batchValidCodes.has(code) ? code : "";
+      });
+    } catch (e) {
+      console.warn(`[suggestSmartStoreCategoryCodes] 배치 ${batchIdx + 1}/${batches.length} JSON 파싱 실패:`, e instanceof Error ? e.message : String(e));
+      return emptyBatch;
+    }
+  }));
+
+  return batchResults.flat();
 }
 
 /**
@@ -615,6 +725,14 @@ display가 "N"인 경우: displayAmount:0, displayUnit:0, totalAmount:0
  * 상품명 정규화 전용 헬퍼
  * 구조: 브랜드 + 제품명 + 옵션(용량/무게) + 수량
  */
+function restoreSeparatedDecimalUnits(name: string): string {
+  return name.replace(/\b(\d{1,3})\s+(\d|0\d)\s*(ml|mL|ML|[Ll]|[Gg]|[Kk][Gg])\b/g, (match, integerPart, decimalPart, unit, offset, full) => {
+    const prevChar = offset > 0 ? full[offset - 1] : "";
+    if (prevChar === ".") return match;
+    return `${integerPart}.${decimalPart}${unit}`;
+  });
+}
+
 export async function normalizeProductName(rawName: string, options?: GeminiCallOptions): Promise<string | null> {
   const prompt = `지마켓에서 크롤링한 상품명을 아래 규칙으로 정리해주세요.
 
@@ -668,6 +786,7 @@ export async function normalizeProductName(rawName: string, options?: GeminiCall
     .replace(/\.(?=[^\d]|$)/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+  cleaned = restoreSeparatedDecimalUnits(cleaned);
 
   return cleaned || null;
 }
