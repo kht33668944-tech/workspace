@@ -163,12 +163,12 @@ export default function EsmPriceImportModal({ onClose, onImported }: Props) {
                 <>
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div>
-                      <p className="text-[10px] text-[var(--text-muted)]">전체 행</p>
-                      <p className="text-sm font-semibold text-[var(--text-primary)]">{status.totalRows}</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">연결된 상품</p>
+                      <p className="text-sm font-semibold text-green-400">{status.matchedProductCount}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] text-[var(--text-muted)]">매칭된 상품</p>
-                      <p className="text-sm font-semibold text-green-400">{status.matchedProductCount}</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">엑셀 행</p>
+                      <p className="text-sm font-semibold text-[var(--text-primary)]">{status.totalRows}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-[var(--text-muted)]">최근 임포트</p>
@@ -275,22 +275,25 @@ export default function EsmPriceImportModal({ onClose, onImported }: Props) {
 
               <div className="grid grid-cols-4 gap-2 text-center">
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
-                  <p className="text-xs text-[var(--text-muted)]">전체 행</p>
-                  <p className="text-lg font-semibold text-[var(--text-primary)]">{result.total}</p>
-                </div>
-                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
-                  <p className="text-xs text-[var(--text-muted)]">매칭</p>
-                  <p className="text-lg font-semibold text-green-400">{result.matched}</p>
-                </div>
-                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
-                  <p className="text-xs text-[var(--text-muted)]">목록 표시</p>
-                  <p className="text-lg font-semibold text-red-400">{result.productStatusUpdated ?? 0}</p>
+                  <p className="text-xs text-[var(--text-muted)]">연결된 상품</p>
+                  <p className="text-lg font-semibold text-green-400">{result.productStatusUpdated ?? 0}</p>
                 </div>
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
                   <p className="text-xs text-[var(--text-muted)]">미매칭 상품</p>
                   <p className="text-lg font-semibold text-amber-400">{result.unmatchedProductNames.length}</p>
                 </div>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
+                  <p className="text-xs text-[var(--text-muted)]">엑셀 행</p>
+                  <p className="text-lg font-semibold text-[var(--text-primary)]">{result.total}</p>
+                </div>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
+                  <p className="text-xs text-[var(--text-muted)]">매칭 행</p>
+                  <p className="text-lg font-semibold text-blue-400">{result.matched}</p>
+                </div>
               </div>
+              <p className="text-xs text-[var(--text-muted)]">
+                상품 수를 먼저 보여줍니다. 엑셀 행은 옥션·지마켓 행이 따로 있어서 상품 수보다 클 수 있습니다.
+              </p>
 
               {result.unmatchedProductNames.length > 0 && (
                 <div className="space-y-2">
