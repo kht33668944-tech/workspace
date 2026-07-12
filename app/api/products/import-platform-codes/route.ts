@@ -18,6 +18,13 @@ function cellString(row: unknown[], index: number) {
   return String(row[index] ?? "").trim();
 }
 
+function normalizeProductKey(value: string) {
+  return value
+    .normalize("NFC")
+    .replace(/[^\uAC00-\uD7A3\u3130-\u318Fa-zA-Z0-9.]+/g, "")
+    .toLowerCase();
+}
+
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
@@ -76,10 +83,17 @@ export async function POST(request: NextRequest) {
         .range(from, to),
     );
 
-    // 상품명 → product Map
+    // 판매자관리코드/상품명 → product Map
     const productMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>();
+    const normalizedProductMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>();
+    const sellerCodeMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>();
     for (const p of products) {
-      productMap.set(p.product_name, { id: p.id, platform_codes: p.platform_codes, seller_code: p.seller_code as Record<string, string> | null });
+      const product = { id: p.id, platform_codes: p.platform_codes, seller_code: p.seller_code as Record<string, string> | null };
+      productMap.set(p.product_name, product);
+      normalizedProductMap.set(normalizeProductKey(p.product_name), product);
+      for (const sellerCode of Object.values(p.seller_code ?? {})) {
+        if (sellerCode) sellerCodeMap.set(String(sellerCode).trim(), product);
+      }
     }
 
     // 쇼핑몰 계정 → seller_code 그룹 매핑
@@ -116,9 +130,12 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      const product = productMap.get(productName);
+      const product =
+        (sellerCode ? sellerCodeMap.get(sellerCode) : undefined)
+        ?? productMap.get(productName)
+        ?? normalizedProductMap.get(normalizeProductKey(productName));
       if (!product) {
-        unmatchedNames.add(productName);
+        unmatchedNames.add(sellerCode ? `${sellerCode} / ${productName}` : productName);
         continue;
       }
 

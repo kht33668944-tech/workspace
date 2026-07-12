@@ -171,7 +171,7 @@ export async function generatePlayAutoProductExcel(
   platform: PlayAutoExportPlatform = "smartstore",
   userConfig?: ExportConfigOverride,
   noticeMap?: Record<string, string[]>,
-  options?: { useSavedSellerCodes?: boolean; startIndex?: number },
+  options?: { useSavedSellerCodes?: boolean; startIndex?: number; sellerCodes?: string[] },
   unitPriceInfoList?: Array<{ display: string; displayAmount: number; displayUnit: string | number; totalAmount: number }>,
   coupangPurchaseOptions?: Array<{ hasOption: boolean; optionName: string; optionValue: string; missingRequired?: string[] }>
 ): Promise<{ buffer: ArrayBuffer; filename: string }> {
@@ -216,7 +216,9 @@ export async function generatePlayAutoProductExcel(
     const savedCode = options?.useSavedSellerCodes
       ? (p.seller_code as Record<string, string> | null)?.[sellerGroup]
       : undefined;
-    const sellerCode = savedCode ?? `${dateStr}${String((options?.startIndex ?? 0) + newCodeCounter++).padStart(3, "0")}`;
+    const sellerCode = options?.sellerCodes?.[i]
+      ?? savedCode
+      ?? `${dateStr}${String((options?.startIndex ?? 0) + newCodeCounter++).padStart(3, "0")}`;
 
     const playautoCode = categoryMappings[p.category] ?? DEFAULT_SCHEMA.code;
     const schema = getSchemaByCode(playautoCode);

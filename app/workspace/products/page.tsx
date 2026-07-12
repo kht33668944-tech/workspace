@@ -922,6 +922,7 @@ export default function ProductsPage() {
         return;
       }
       setPlatformCodeResult({ matched: json.matched ?? 0, unmatched: json.unmatched ?? [], total: json.total ?? 0, ignored11st: json.ignored11st ?? 0 });
+      await refetch();
     } catch {
           alert("플레이오토 임포트 확인 중 오류가 발생했습니다.");
     } finally {
@@ -1633,7 +1634,7 @@ export default function ProductsPage() {
 
       {/* 옥션·지마켓 가격수정 v2 상품목록 임포트 모달 */}
       {esmImportModalOpen && (
-        <EsmPriceImportModal onClose={() => setEsmImportModalOpen(false)} />
+        <EsmPriceImportModal onClose={() => setEsmImportModalOpen(false)} onImported={() => refetch()} />
       )}
 
       {/* 스마트스토어 가격수정 v2 일괄수정 양식 임포트 모달 */}

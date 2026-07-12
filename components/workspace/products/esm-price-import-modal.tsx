@@ -13,6 +13,7 @@ interface ImportResult {
   total: number;
   rowsUpserted: number;
   matched: number;
+  productStatusUpdated?: number;
   unmatchedProductNames: string[];
 }
 
@@ -107,6 +108,7 @@ export default function EsmPriceImportModal({ onClose, onImported }: Props) {
         total: json.total,
         rowsUpserted: json.rowsUpserted,
         matched: json.matched,
+        productStatusUpdated: json.productStatusUpdated ?? 0,
         unmatchedProductNames: json.unmatchedProductNames ?? [],
       });
       onImported?.(json);
@@ -259,7 +261,7 @@ export default function EsmPriceImportModal({ onClose, onImported }: Props) {
 
               <div className="text-xs text-[var(--text-muted)] space-y-1 px-1">
                 <p>• ESM Plus → 상품관리 → 상품목록에서 받은 <strong>전체 상품목록 엑셀</strong>이 필요합니다.</p>
-                <p>• 양식의 C열(상품명)과 우리 상품명이 <strong>정확히 일치</strong>해야 매칭됩니다.</p>
+                <p>• 판매자관리코드를 우선으로 매칭하고, 없으면 상품명으로 매칭합니다.</p>
                 <p>• 상품번호(B열) 기준으로 저장됩니다. 한 상품에 옥션·지마켓 2개 행이 보통입니다.</p>
                 <p>• 새 상품을 ESM에 등록한 뒤에는 상품목록을 다시 임포트하세요.</p>
               </div>
@@ -271,7 +273,7 @@ export default function EsmPriceImportModal({ onClose, onImported }: Props) {
                 <p className="text-sm text-green-400">임포트 완료</p>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="grid grid-cols-4 gap-2 text-center">
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
                   <p className="text-xs text-[var(--text-muted)]">전체 행</p>
                   <p className="text-lg font-semibold text-[var(--text-primary)]">{result.total}</p>
@@ -279,6 +281,10 @@ export default function EsmPriceImportModal({ onClose, onImported }: Props) {
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
                   <p className="text-xs text-[var(--text-muted)]">매칭</p>
                   <p className="text-lg font-semibold text-green-400">{result.matched}</p>
+                </div>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
+                  <p className="text-xs text-[var(--text-muted)]">목록 표시</p>
+                  <p className="text-lg font-semibold text-red-400">{result.productStatusUpdated ?? 0}</p>
                 </div>
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
                   <p className="text-xs text-[var(--text-muted)]">미매칭 상품</p>
