@@ -86,18 +86,37 @@ export async function POST(request: NextRequest) {
     const userId = userData.user.id;
 
     // 상품명 → product_id 매핑 (1000행 초과 누락 방지: 전건 페이지네이션)
-    const products = await fetchAllRows<{ id: string; product_name: string }>(
+    const products = await fetchAllRows<{
+      id: string;
+      product_name: string;
+      platform_codes: Record<string, string> | null;
+      seller_code: Record<string, string> | null;
+    }>(
       (from, to) => supabase
         .from("products")
-        .select("id, product_name")
+        .select("id, product_name, platform_codes, seller_code")
         .eq("user_id", userId)
         .range(from, to),
     );
-    const productMap = new Map<string, string>();
-    for (const p of products) productMap.set(normalizeName(p.product_name), p.id);
+    const productMap = new Map<string, {
+      id: string;
+      platform_codes: Record<string, string> | null;
+      seller_code: Record<string, string> | null;
+    }>();
+    for (const p of products) {
+      productMap.set(normalizeName(p.product_name), {
+        id: p.id,
+        platform_codes: p.platform_codes,
+        seller_code: p.seller_code,
+      });
+    }
 
     const inserts: SmartstorePriceInventoryInsert[] = [];
     const unmatchedSet = new Set<string>();
+    const productUpdates = new Map<string, {
+      platform_codes: Record<string, string>;
+      seller_code: Record<string, string> | null;
+    }>();
     let matchedRowCount = 0;
     let optionRowCount = 0; // 옵션형태 ≠ 설정안함
 
@@ -106,9 +125,21 @@ export async function POST(request: NextRequest) {
       if (!smartstoreProductId) continue; // A열 없는 빈 행 스킵
 
       const productName = cellString(row[COL.product_name]);
-      const productId = productMap.get(normalizeName(productName)) ?? null;
-      if (productId) {
+      const product = productMap.get(normalizeName(productName));
+      const productId = product?.id ?? null;
+      if (product) {
         matchedRowCount++;
+        const sellerProductCode = cellString(row[COL.seller_product_code]);
+        const existingUpdate = productUpdates.get(product.id) ?? {
+          platform_codes: { ...(product.platform_codes ?? {}) },
+          seller_code: product.seller_code ? { ...product.seller_code } : null,
+        };
+        existingUpdate.platform_codes["스마트스토어=가격수정V2"] = smartstoreProductId;
+        if (sellerProductCode) {
+          if (!existingUpdate.seller_code) existingUpdate.seller_code = {};
+          existingUpdate.seller_code.smartstore = sellerProductCode;
+        }
+        productUpdates.set(product.id, existingUpdate);
       } else if (productName) {
         unmatchedSet.add(productName);
       }
@@ -154,12 +185,37 @@ export async function POST(request: NextRequest) {
       upsertedCount += count ?? chunk.length;
     }
 
-    console.log(`[smartstore-price-inventory/import] 완료: ${inserts.length}행, 매칭 ${matchedRowCount}, 미매칭 ${unmatchedSet.size}, 옵션상품 ${optionRowCount}`);
+    let productStatusUpdatedCount = 0;
+    const updateEntries = [...productUpdates.entries()];
+    for (let i = 0; i < updateEntries.length; i += 100) {
+      const chunk = updateEntries.slice(i, i + 100);
+      const results = await Promise.allSettled(
+        chunk.map(([id, payload]) =>
+          supabase
+            .from("products")
+            .update({ platform_codes: payload.platform_codes, seller_code: payload.seller_code })
+            .eq("id", id)
+            .eq("user_id", userId)
+        )
+      );
+      for (let j = 0; j < results.length; j++) {
+        const result = results[j];
+        if (result.status === "fulfilled" && !result.value.error) {
+          productStatusUpdatedCount++;
+        } else {
+          const message = result.status === "fulfilled" ? result.value.error?.message : String(result.reason);
+          console.error(`[smartstore-price-inventory/import] 상품 스마트스토어 임포트 표시 업데이트 실패 (${chunk[j][0]}):`, message);
+        }
+      }
+    }
+
+    console.log(`[smartstore-price-inventory/import] 완료: ${inserts.length}행, 매칭 ${matchedRowCount}, 미매칭 ${unmatchedSet.size}, 옵션상품 ${optionRowCount}, 상품목록 스마트스토어 표시 ${productStatusUpdatedCount}개`);
 
     return NextResponse.json({
       total: inserts.length,
       rowsUpserted: upsertedCount,
       matched: matchedRowCount,
+      productStatusUpdated: productStatusUpdatedCount,
       unmatchedProductNames: [...unmatchedSet],
       optionRowCount,
     });
