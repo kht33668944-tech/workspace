@@ -51,7 +51,8 @@ type CostRefreshResult = {
   orderCount: number;
 };
 
-type CostRetryItem = { id: string; name: string };
+type CostRetryReason = "bot_blocked" | "failed";
+type CostRetryItem = { id: string; name: string; reason?: CostRetryReason };
 type CostRefreshStats = {
   changed: number;
   unchanged: number;
@@ -485,9 +486,10 @@ function OrdersPageInner() {
     productIds: string[],
     productNames: Map<string, string>,
     abortController: AbortController,
-  ): Promise<{ successes: CostRefreshResult[]; botBlocked: CostRetryItem[]; stopped: boolean }> => {
+  ): Promise<{ successes: CostRefreshResult[]; botBlocked: CostRetryItem[]; failed: CostRetryItem[]; stopped: boolean }> => {
     const successes: CostRefreshResult[] = [];
     const botBlocked: CostRetryItem[] = [];
+    const failed: CostRetryItem[] = [];
     let stopped = false;
 
     try {
@@ -503,12 +505,22 @@ function OrdersPageInner() {
 
       if (!res.ok || !res.body) {
         pushCostRefreshLog("원가 수집 실패 (서버 응답 오류)");
-        return { successes, botBlocked, stopped };
+        return {
+          successes,
+          botBlocked,
+          failed: productIds.map((id) => ({
+            id,
+            name: productNames.get(id) ?? "상품명 없음",
+            reason: "failed",
+          })),
+          stopped,
+        };
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      const processedIds = new Set<string>();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -525,6 +537,7 @@ function OrdersPageInner() {
           try {
             const event = JSON.parse(data) as CostScrapeEvent;
             if (event.type === "progress") {
+              processedIds.add(event.id);
               setCostRefreshProcessed(event.index);
 
               const failReasonText: Record<string, string> = {
@@ -555,7 +568,7 @@ function OrdersPageInner() {
               pushCostRefreshLog(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
 
               if (event.bot_blocked) {
-                botBlocked.push({ id: event.id, name: event.name });
+                botBlocked.push({ id: event.id, name: event.name, reason: "bot_blocked" });
               } else if (event.fail_reason === "sold_out") {
                 successes.push({
                   productId: event.id,
@@ -574,6 +587,8 @@ function OrdersPageInner() {
                   status: "priced",
                   orderCount: 0,
                 });
+              } else {
+                failed.push({ id: event.id, name: event.name, reason: "failed" });
               }
             } else if (event.type === "done") {
               setCostRefreshStats({
@@ -588,8 +603,30 @@ function OrdersPageInner() {
               pushCostRefreshLog(`수집 완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패${soldOutText}${blockedText}`);
             } else if (event.type === "error") {
               pushCostRefreshLog(`오류: ${event.message}`);
+              for (const id of productIds) {
+                if (!processedIds.has(id)) {
+                  failed.push({
+                    id,
+                    name: productNames.get(id) ?? "상품명 없음",
+                    reason: "failed",
+                  });
+                }
+              }
             }
           } catch {}
+        }
+      }
+
+      // 연결이 정상적인 완료 이벤트 없이 끊기면 아직 진행 이벤트가 없던 상품도 재시도 대상에 포함
+      if (!stopped) {
+        for (const id of productIds) {
+          if (!processedIds.has(id)) {
+            failed.push({
+              id,
+              name: productNames.get(id) ?? "상품명 없음",
+              reason: "failed",
+            });
+          }
         }
       }
     } catch (err) {
@@ -601,7 +638,7 @@ function OrdersPageInner() {
       }
     }
 
-    return { successes, botBlocked, stopped };
+    return { successes, botBlocked, failed, stopped };
   }, [pushCostRefreshLog, session?.access_token]);
 
   const applyCostRefreshResults = useCallback(async (
@@ -760,7 +797,7 @@ function OrdersPageInner() {
     try {
       for (let attempt = 1; attempt <= MAX_COST_REFRESH_ATTEMPTS && retryItems.length > 0; attempt++) {
         if (attempt > 1) {
-          pushCostRefreshLog(`봇감지 ${retryItems.length}개 자동 재시도 (${attempt}/${MAX_COST_REFRESH_ATTEMPTS})...`);
+          pushCostRefreshLog(`가격 수집 실패 ${retryItems.length}개 자동 재시도 (${attempt}/${MAX_COST_REFRESH_ATTEMPTS})...`);
           await new Promise((resolve) => setTimeout(resolve, 3000));
           if (abortController.signal.aborted) {
             stopped = true;
@@ -777,7 +814,11 @@ function OrdersPageInner() {
         stopped = result.stopped;
         if (stopped) break;
 
-        retryItems = result.botBlocked.filter((item) => !successMap.has(item.id));
+        const retryMap = new Map<string, CostRetryItem>();
+        for (const item of [...result.botBlocked, ...result.failed]) {
+          if (!successMap.has(item.id)) retryMap.set(item.id, item);
+        }
+        retryItems = [...retryMap.values()];
         if (retryItems.length === 0) break;
       }
 
@@ -789,9 +830,14 @@ function OrdersPageInner() {
         changed: collectedResults.filter((result) => result.status === "priced" && result.price !== result.previous).length,
         unchanged: collectedResults.filter((result) => result.status === "priced" && result.price === result.previous).length,
         soldOut: collectedResults.filter((result) => result.status === "sold_out").length,
-        botBlocked: retryItems.length > 0 && !stopped ? retryItems.length : 0,
+        ...(stopped ? {} : {
+          botBlocked: retryItems.filter((item) => item.reason === "bot_blocked").length,
+          failed: retryItems.filter((item) => item.reason === "failed").length,
+        }),
       }));
-      const remainingText = retryItems.length > 0 && !stopped ? `, 봇감지 미완료 ${retryItems.length}개` : "";
+      const remainingText = retryItems.length > 0 && !stopped
+        ? `, 최대 ${MAX_COST_REFRESH_ATTEMPTS}회 재시도 후 미완료 ${retryItems.length}개`
+        : "";
       const stoppedText = stopped ? ", 중단됨" : "";
       pushCostRefreshLog(`수집 완료: 상품 ${collectedResults.length}개 확인됨${remainingText}${stoppedText}. 결과 확인 후 적용하세요.`);
       if (collectedResults.length > 0) {
