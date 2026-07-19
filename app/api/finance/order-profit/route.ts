@@ -61,6 +61,12 @@ interface CardBucket {
   count: number;
 }
 
+function isActivePurchase(order: Pick<OrderProfitOrder, "purchase_order_no" | "delivery_status">): boolean {
+  const purchaseOrderNo = order.purchase_order_no?.trim();
+  if (!purchaseOrderNo) return false;
+  return !["취소완료", "재고부족", "반품완료", "교환완료"].includes(order.delivery_status);
+}
+
 interface MarketplaceBucket extends MoneyBucket {
   name: string;
   marginRate: number;
@@ -351,7 +357,7 @@ export async function GET(request: NextRequest) {
         if (!order.returned_at) pushIssue("missing_returned_at", "반품완료일 누락", order, values.revenue);
       }
 
-      if (order.purchase_order_no?.trim()) {
+      if (isActivePurchase(order)) {
         if (purchasedDate) {
           const daily = dailyMap.get(purchasedDate);
           const map = dailyCards.get(purchasedDate);

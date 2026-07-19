@@ -8,6 +8,8 @@ type SupabaseClient = ReturnType<typeof getSupabaseClient>;
 interface PurchaseAmountRow {
   cost: number | null;
   payment_method: string | null;
+  purchase_order_no: string | null;
+  delivery_status: string | null;
 }
 
 function addDays(date: string, days: number): string {
@@ -36,11 +38,13 @@ async function getDailyCardPurchases(supabase: SupabaseClient, userId: string, d
   const { start, end } = kstDayRange(date);
   const { data, error } = await supabase
     .from("orders")
-    .select("cost,payment_method")
+    .select("cost,payment_method,purchase_order_no,delivery_status")
     .eq("user_id", userId)
     .gte("purchased_at", start)
     .lt("purchased_at", end)
-    .not("purchase_order_no", "is", null);
+    .not("purchase_order_no", "is", null)
+    .neq("purchase_order_no", "")
+    .not("delivery_status", "in", "(취소완료,재고부족,반품완료,교환완료)");
 
   if (error) throw error;
 

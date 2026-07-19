@@ -54,6 +54,7 @@ yarn-error.log*
 .claude/
 .mcp.json
 .mcp.local.json
+supabase/.temp/
 
 # vercel
 .vercel

@@ -61,8 +61,6 @@ export const COLUMNS: Col[] = [
   { key: "bundle_no", label: "묶음번호", minWidth: 110 },
   { key: "order_date", label: "주문일시", minWidth: 125 },
   { key: "marketplace", label: "판매처", minWidth: 80 },
-  { key: "marketplace_order_no", label: "판매처주문번호", minWidth: 120 },
-  { key: "marketplace_product_order_no", label: "상품주문번호", minWidth: 130 },
   { key: "marketplace_orderer_name", label: "주문자명", minWidth: 80 },
   { key: "recipient_name", label: "수취인명", minWidth: 70 },
   { key: "product_name", label: "상품명", minWidth: 200 },

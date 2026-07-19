@@ -301,9 +301,16 @@ function parseSheetToOrders(sheet: WorkSheet): { orders: OrderInsert[]; headers:
   const headerMap = normalizeSmartstoreHeaderMap(headers, rows, parsedHeaderMap);
   const bundleKey = headers.find((h) => headerMap[h] === "bundle_no");
   const productKey = headers.find((h) => headerMap[h] === "product_name");
+  const revenueKey = headers.find((h) => headerMap[h] === "revenue");
 
   const orders = rows
     .filter((row) => (bundleKey && row[bundleKey]) || (productKey && row[productKey]))
+    .filter((row) => {
+      if (!revenueKey) return true;
+      const revenueValue = row[revenueKey];
+      if (revenueValue === undefined) return false;
+      return parseNumericCell(revenueValue, "revenue") > 0;
+    })
     .map((row) => mapRowToOrder(row, headerMap));
 
   return { orders, headers, headerMap };
@@ -612,6 +619,9 @@ function parseDate(value: string | number | undefined): string | null {
 export interface SettlementRow {
   recipientName: string;
   ordererName: string;
+  orderDate: string | null;
+  recipientPhone: string;
+  ordererPhone: string;
   marketplaceOrderNo: string;
   marketplaceProductOrderNo: string;
   productName: string;
@@ -666,6 +676,9 @@ export async function parseSettlementExcel(file: File): Promise<{ rows: Settleme
         const idxOrderer = findIndex("구매자명", "주문자명", "구매자", "주문자");
         const idxProductOrderNo = findIndex("상품주문번호", "상품주문ID", "productOrderId");
         const idxOrderNo = findIndex("스마트스토어주문번호", "판매처주문번호", "주문번호", "orderId");
+        const idxOrderDate = findIndex("결제완료일", "결제일", "결제일시", "주문일", "주문일시", "구매확정일");
+        const idxRecipientPhone = findIndex("수령자휴대폰번호", "수취인휴대폰번호", "수령자번호", "수취인번호", "수령인연락처", "수취인연락처");
+        const idxOrdererPhone = findIndex("주문자휴대폰번호", "주문자번호", "주문자연락처", "구매자연락처");
         const idxProduct = findIndex("상품명", "상품 명", "상품명(옵션명)");
         const idxSaleAmount = findIndex("판매금액", "결제금액", "주문금액", "상품금액", "매출액");
         const idxSettlement = findIndex("정산예정금액", "정산금액", "예상정산금액");
@@ -677,6 +690,12 @@ export async function parseSettlementExcel(file: File): Promise<{ rows: Settleme
           const row = rawData[i];
           const recipientName = idxRecipient >= 0 ? String(row[idxRecipient] ?? "").trim() : "";
           const ordererName = idxOrderer >= 0 ? String(row[idxOrderer] ?? "").trim() : "";
+          const orderDateRaw = idxOrderDate >= 0 ? row[idxOrderDate] : undefined;
+          const orderDate = typeof orderDateRaw === "string" || typeof orderDateRaw === "number"
+            ? parseDate(orderDateRaw)
+            : null;
+          const recipientPhone = idxRecipientPhone >= 0 ? String(row[idxRecipientPhone] ?? "").trim() : "";
+          const ordererPhone = idxOrdererPhone >= 0 ? String(row[idxOrdererPhone] ?? "").trim() : "";
           const marketplaceOrderNo = idxOrderNo >= 0 ? String(row[idxOrderNo] ?? "").trim() : "";
           const marketplaceProductOrderNo = idxProductOrderNo >= 0 ? String(row[idxProductOrderNo] ?? "").trim() : "";
           const settlementRaw = row[idxSettlement];
@@ -705,6 +724,9 @@ export async function parseSettlementExcel(file: File): Promise<{ rows: Settleme
           rows.push({
             recipientName: recipientName || ordererName,
             ordererName,
+            orderDate,
+            recipientPhone,
+            ordererPhone,
             marketplaceOrderNo,
             marketplaceProductOrderNo,
             productName,
