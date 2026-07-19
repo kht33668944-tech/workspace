@@ -49,8 +49,12 @@ yarn-error.log*
 
 # local Codex and MCP secrets
 .codex/
+.codex-tmp/
+.gjc/
+.claude/
 .mcp.json
 .mcp.local.json
+supabase/.temp/
 
 # vercel
 .vercel

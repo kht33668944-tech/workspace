@@ -3,18 +3,21 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { Filter, Check, ArrowUp, ArrowDown } from "lucide-react";
 import type { Order } from "@/types/database";
-import type { Col, SortDir } from "./table-utils";
+import type { Col, PurchaseIdFillOption, SortDir } from "./table-utils";
 
 // ════════════════════════════════════
 // ResizableHeader
 // ════════════════════════════════════
-export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allOrders, columnFilters, sort, onSort, isMobile }: {
+export const ResizableHeader = memo(function ResizableHeader({ col, width, onResize, hasFilter, filterOpen, onFilterToggle, selectedValues, onFilterChange, allOrders, columnFilters, sort, onSort, isMobile, selectedCount, purchaseIdFillOptions, onFillSelectedPurchaseId }: {
   col: Col; width: number; onResize: (w: number) => void;
   hasFilter: boolean; filterOpen: boolean; onFilterToggle: () => void;
   selectedValues: string[]; onFilterChange: (v: string[]) => void; allOrders: Order[];
   columnFilters: Record<string, string[]>;
   sort: SortDir; onSort: (d: SortDir) => void;
   isMobile?: boolean;
+  selectedCount?: number;
+  purchaseIdFillOptions?: PurchaseIdFillOption[];
+  onFillSelectedPurchaseId?: (purchaseId: string) => void;
 }) {
   const sx = useRef(0), sw = useRef(0);
   const onMouseDown = (e: React.MouseEvent) => {
@@ -40,7 +43,7 @@ export const ResizableHeader = memo(function ResizableHeader({ col, width, onRes
           )}
         </button>
       </div>
-      {filterOpen && <ColumnFilterDropdown columnKey={col.key} allOrders={allOrders} columnFilters={columnFilters} selectedValues={selectedValues} onChange={onFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} />}
+      {filterOpen && <ColumnFilterDropdown columnKey={col.key} allOrders={allOrders} columnFilters={columnFilters} selectedValues={selectedValues} onChange={onFilterChange} onClose={onFilterToggle} sort={sort} onSort={onSort} selectedCount={selectedCount} purchaseIdFillOptions={purchaseIdFillOptions} onFillSelectedPurchaseId={onFillSelectedPurchaseId} />}
       {!isMobile && (
         <div onMouseDown={onMouseDown} className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group/resize z-10 flex items-center justify-center">
           <div className="w-[2px] h-full opacity-0 group-hover/resize:opacity-100 bg-blue-500/60 transition-opacity" />
@@ -53,10 +56,11 @@ export const ResizableHeader = memo(function ResizableHeader({ col, width, onRes
 // ════════════════════════════════════
 // ColumnFilterDropdown
 // ════════════════════════════════════
-function ColumnFilterDropdown({ columnKey, allOrders, columnFilters, selectedValues, onChange, onClose, sort, onSort }: {
+function ColumnFilterDropdown({ columnKey, allOrders, columnFilters, selectedValues, onChange, onClose, sort, onSort, selectedCount, purchaseIdFillOptions, onFillSelectedPurchaseId }: {
   columnKey: string; allOrders: Order[]; columnFilters: Record<string, string[]>;
   selectedValues: string[];
   onChange: (v: string[]) => void; onClose: () => void; sort: SortDir; onSort: (d: SortDir) => void;
+  selectedCount?: number; purchaseIdFillOptions?: PurchaseIdFillOption[]; onFillSelectedPurchaseId?: (purchaseId: string) => void;
 }) {
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState<string[]>(selectedValues);
@@ -123,6 +127,38 @@ function ColumnFilterDropdown({ columnKey, allOrders, columnFilters, selectedVal
           <ArrowDown className="w-3 h-3" /> 내림차순
         </button>
       </div>
+      {(columnKey === "purchase_order_no" || columnKey === "purchase_id") && onFillSelectedPurchaseId && (
+        <div className="p-2 border-b border-[var(--border)] bg-blue-500/5">
+          <div className="text-[11px] font-medium text-blue-400 mb-1.5">
+            구매아이디 채우기
+          </div>
+          {(selectedCount ?? 0) === 0 ? (
+            <p className="text-xs text-[var(--text-muted)]">먼저 주문을 체크하면 아이디를 선택할 수 있습니다.</p>
+          ) : purchaseIdFillOptions && purchaseIdFillOptions.length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-[11px] text-[var(--text-muted)] mb-1">체크 {selectedCount}건에 적용</p>
+              <div className="max-h-48 space-y-1 overflow-y-auto overscroll-contain pr-1">
+                {purchaseIdFillOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    title={option.label}
+                    onClick={() => {
+                      onFillSelectedPurchaseId(option.value);
+                      onClose();
+                    }}
+                    className="block w-full whitespace-normal break-words px-2 py-1.5 text-left text-xs leading-5 text-[var(--text-secondary)] bg-[var(--bg-hover)] rounded hover:bg-blue-600/20 hover:text-blue-300 transition-colors"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-[var(--text-muted)]">등록된 구매 아이디가 없습니다.</p>
+          )}
+        </div>
+      )}
       <div className="p-2 border-b border-[var(--border)]">
         <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="검색..."
           className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--text-primary)] outline-none"

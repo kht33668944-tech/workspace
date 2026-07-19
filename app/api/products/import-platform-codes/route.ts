@@ -2,6 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import XLSX from "xlsx-js-style";
 import { getAccessToken, getSupabaseClient, fetchAllRows } from "@/lib/api-helpers";
 
+function normalizeHeader(value: unknown) {
+  return String(value ?? "").replace(/[\s\u00A0\u3000\t\r\n]/g, "").trim();
+}
+
+function findColumnIndex(headers: unknown[], aliases: string[]) {
+  return headers.findIndex((header) => {
+    const normalized = normalizeHeader(header);
+    return aliases.some((alias) => normalized.includes(normalizeHeader(alias)) || normalized === normalizeHeader(alias));
+  });
+}
+
+function cellString(row: unknown[], index: number) {
+  if (index < 0) return "";
+  return String(row[index] ?? "").trim();
+}
+
+function normalizeProductKey(value: string) {
+  return value
+    .normalize("NFC")
+    .replace(/[^\uAC00-\uD7A3\u3130-\u318Fa-zA-Z0-9.]+/g, "")
+    .toLowerCase();
+}
+
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
@@ -25,26 +48,30 @@ export async function POST(request: NextRequest) {
     }
     const wb = XLSX.read(buffer, { type: "buffer" });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
+    if (!ws) return NextResponse.json({ error: "엑셀 시트를 찾을 수 없습니다." }, { status: 400 });
+
+    const rawRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "", raw: false, blankrows: false });
 
     const MAX_ROWS = 10000;
-    if (rows.length === 0) return NextResponse.json({ error: "엑셀에 데이터가 없습니다." }, { status: 400 });
-    if (rows.length > MAX_ROWS) return NextResponse.json({ error: `최대 ${MAX_ROWS}행까지 처리 가능합니다.` }, { status: 400 });
+    if (rawRows.length <= 1) return NextResponse.json({ error: "엑셀에 데이터가 없습니다." }, { status: 400 });
+    if (rawRows.length - 1 > MAX_ROWS) return NextResponse.json({ error: `최대 ${MAX_ROWS}행까지 처리 가능합니다.` }, { status: 400 });
 
     // 2. 헤더 검증
-    const firstRow = rows[0];
-    const keys = Object.keys(firstRow);
-    const nameCol = keys.find(k => k.includes("온라인 상품명") || k === "온라인 상품명");
-    const accountCol = keys.find(k => k.includes("쇼핑몰(계정)") || k === "쇼핑몰(계정)");
-    const codeCol = keys.find(k => k.includes("쇼핑몰 상품번호") || k === "쇼핑몰 상품번호");
-    const sellerCodeCol = keys.find(k => k.includes("판매자관리코드") || k === "판매자관리코드");
+    const headers = rawRows[0] ?? [];
+    const nameCol = findColumnIndex(headers, ["온라인 상품명"]);
+    const accountCol = findColumnIndex(headers, ["쇼핑몰(계정)"]);
+    const codeCol = findColumnIndex(headers, ["쇼핑몰 상품번호"]);
+    const sellerCodeCol = findColumnIndex(headers, ["판매자관리코드"]);
     // 쿠팡 가격수정 양식용 옵션 캐시 (선택)
-    const optionCombineCol = keys.find(k => k === "옵션조합" || k.includes("옵션조합"));
-    const optionCol = keys.find(k => k === "옵션" || (k.includes("옵션") && !k.includes("조합")));
+    const optionCombineCol = findColumnIndex(headers, ["옵션조합"]);
+    const optionCol = headers.findIndex((header) => {
+      const normalized = normalizeHeader(header);
+      return normalized === "옵션" || (normalized.includes("옵션") && !normalized.includes("조합"));
+    });
 
-    if (!nameCol || !accountCol || !codeCol) {
+    if (nameCol < 0 || accountCol < 0 || codeCol < 0) {
       return NextResponse.json({
-        error: "필수 컬럼을 찾을 수 없습니다. '온라인 상품명', '쇼핑몰(계정)', '쇼핑몰 상품번호' 컬럼이 필요합니다.",
+        error: "필수 컬럼을 찾을 수 없습니다. 플레이오토 상품 목록의 '온라인 상품명', '쇼핑몰(계정)', '쇼핑몰 상품번호' 컬럼이 필요합니다.",
       }, { status: 400 });
     }
 
@@ -56,10 +83,17 @@ export async function POST(request: NextRequest) {
         .range(from, to),
     );
 
-    // 상품명 → product Map
+    // 판매자관리코드/상품명 → product Map
     const productMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>();
+    const normalizedProductMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>();
+    const sellerCodeMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>();
     for (const p of products) {
-      productMap.set(p.product_name, { id: p.id, platform_codes: p.platform_codes, seller_code: p.seller_code as Record<string, string> | null });
+      const product = { id: p.id, platform_codes: p.platform_codes, seller_code: p.seller_code as Record<string, string> | null };
+      productMap.set(p.product_name, product);
+      normalizedProductMap.set(normalizeProductKey(p.product_name), product);
+      for (const sellerCode of Object.values(p.seller_code ?? {})) {
+        if (sellerCode) sellerCodeMap.set(String(sellerCode).trim(), product);
+      }
     }
 
     // 쇼핑몰 계정 → seller_code 그룹 매핑
@@ -81,18 +115,27 @@ export async function POST(request: NextRequest) {
     const updates = new Map<string, UpdateEntry>();
     const unmatchedNames = new Set<string>();
     let duplicateCount = 0;
+    let ignored11stCount = 0;
 
-    for (const row of rows) {
-      const productName = String(row[nameCol]).trim();
-      const account = String(row[accountCol]).trim();
-      const code = String(row[codeCol]).trim();
-      const sellerCode = sellerCodeCol ? String(row[sellerCodeCol]).trim() : "";
+    const dataRows = rawRows.slice(1);
+    for (const row of dataRows) {
+      const productName = cellString(row, nameCol);
+      const account = cellString(row, accountCol);
+      const code = cellString(row, codeCol);
+      const sellerCode = sellerCodeCol >= 0 ? cellString(row, sellerCodeCol) : "";
 
       if (!productName || !account || !code) continue;
+      if (account.toLowerCase().startsWith("11번가")) {
+        ignored11stCount++;
+        continue;
+      }
 
-      const product = productMap.get(productName);
+      const product =
+        (sellerCode ? sellerCodeMap.get(sellerCode) : undefined)
+        ?? productMap.get(productName)
+        ?? normalizedProductMap.get(normalizeProductKey(productName));
       if (!product) {
-        unmatchedNames.add(productName);
+        unmatchedNames.add(sellerCode ? `${sellerCode} / ${productName}` : productName);
         continue;
       }
 
@@ -106,8 +149,10 @@ export async function POST(request: NextRequest) {
 
       const existing: UpdateEntry = updates.get(product.id) ?? {
         id: product.id,
-        platform_codes: overwrite ? {} : { ...(product.platform_codes ?? {}) },
-        seller_code: overwrite ? null : (product.seller_code ? { ...product.seller_code } : null),
+        // 새 플레이오토 목록에는 일부 판매처만 들어올 수 있다. 해당 판매처 코드만 최신값으로
+        // 교체하고, 다른 판매처의 기존 코드는 보존한다.
+        platform_codes: { ...(product.platform_codes ?? {}) },
+        seller_code: product.seller_code ? { ...product.seller_code } : null,
       };
       existing.platform_codes[account] = code;
       // 판매자관리코드를 해당 플랫폼 그룹에 저장
@@ -120,12 +165,12 @@ export async function POST(request: NextRequest) {
       }
       // 쿠팡 행 + 옵션 컬럼 있으면 coupang_options 추출 (한 상품당 1회)
       if (
-        optionCombineCol &&
+        optionCombineCol >= 0 &&
         account.toLowerCase().startsWith("쿠팡") &&
         existing.coupang_options === undefined
       ) {
-        const combine = String(row[optionCombineCol] ?? "").trim();
-        const optionRaw = optionCol ? String(row[optionCol] ?? "").trim() : "";
+        const combine = cellString(row, optionCombineCol);
+        const optionRaw = optionCol >= 0 ? cellString(row, optionCol) : "";
         if (combine === "조합형" && optionRaw) {
           const parts = optionRaw.split(/\r?\n/);
           existing.coupang_options = {
@@ -148,7 +193,7 @@ export async function POST(request: NextRequest) {
         duplicateCount,
         matched: updates.size,
         unmatched: [...unmatchedNames],
-        total: rows.length,
+        total: dataRows.length,
       });
     }
 
@@ -176,15 +221,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log(`[import-platform-codes] 완료: ${matched}개 매칭, ${unmatchedNames.size}개 미매칭${overwrite ? " (덮어쓰기)" : ""}`);
+    console.log(`[import-platform-codes] 플레이오토 임포트 확인 완료: ${matched}개 매칭, ${unmatchedNames.size}개 미매칭, 11번가 제외 ${ignored11stCount}행${overwrite ? " (최신 정보 갱신)" : ""}`);
 
     return NextResponse.json({
       matched,
       unmatched: [...unmatchedNames],
-      total: rows.length,
+      total: dataRows.length,
+      ignored11st: ignored11stCount,
     });
   } catch (err) {
     console.error("[import-platform-codes] 오류:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error: "플랫폼 코드 가져오기 실패" }, { status: 500 });
+    return NextResponse.json({ error: "플레이오토 임포트 확인 실패" }, { status: 500 });
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { X, Upload, Loader2, CheckCircle, AlertCircle, FileSpreadsheet, ChevronDown, ChevronUp, Package } from "lucide-react";
+import { X, Upload, Loader2, CheckCircle, AlertCircle, FileSpreadsheet, ChevronDown, ChevronUp, Package, Trash2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
 interface Props {
@@ -13,6 +13,7 @@ interface ImportResult {
   total: number;
   rowsUpserted: number;
   matched: number;
+  productStatusUpdated?: number;
   unmatchedProductNames: string[];
 }
 
@@ -32,6 +33,7 @@ export default function CoupangPriceImportModal({ onClose, onImported }: Props) 
   const [result, setResult] = useState<ImportResult | null>(null);
   const [status, setStatus] = useState<StatusData | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
+  const [clearing, setClearing] = useState(false);
   const [showMatchedList, setShowMatchedList] = useState(false);
   const [productFilter, setProductFilter] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -107,6 +109,7 @@ export default function CoupangPriceImportModal({ onClose, onImported }: Props) 
         total: json.total,
         rowsUpserted: json.rowsUpserted,
         matched: json.matched,
+        productStatusUpdated: json.productStatusUpdated ?? 0,
         unmatchedProductNames: json.unmatchedProductNames ?? [],
       });
       onImported?.(json);
@@ -117,6 +120,35 @@ export default function CoupangPriceImportModal({ onClose, onImported }: Props) 
       setUploading(false);
     }
   }, [file, session, onImported, fetchStatus]);
+
+  const handleClear = useCallback(async () => {
+    if (!session?.access_token || !status?.totalRows || clearing) return;
+    const confirmed = window.confirm(
+      `기존 쿠팡 가격수정 V2 정보 ${status.totalRows}행을 모두 삭제할까요?\n소싱 상품과 다른 판매처 정보는 삭제되지 않습니다.`
+    );
+    if (!confirmed) return;
+
+    setClearing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/coupang-price-inventory/clear", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const json = await res.json() as { deleted?: number; error?: string };
+      if (!res.ok) {
+        setError(json.error ?? "기존 정보 삭제 실패");
+        return;
+      }
+      setResult(null);
+      setFile(null);
+      await fetchStatus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "기존 정보 삭제 실패");
+    } finally {
+      setClearing(false);
+    }
+  }, [session, status, clearing, fetchStatus]);
 
   const copyUnmatched = () => {
     if (!result?.unmatchedProductNames.length) return;
@@ -162,18 +194,28 @@ export default function CoupangPriceImportModal({ onClose, onImported }: Props) 
                 <>
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div>
-                      <p className="text-[10px] text-[var(--text-muted)]">전체 옵션 행</p>
-                      <p className="text-sm font-semibold text-[var(--text-primary)]">{status.totalRows}</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">연결된 상품</p>
+                      <p className="text-sm font-semibold text-green-400">{status.matchedProductCount}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] text-[var(--text-muted)]">매칭된 상품</p>
-                      <p className="text-sm font-semibold text-green-400">{status.matchedProductCount}</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">옵션 행</p>
+                      <p className="text-sm font-semibold text-[var(--text-primary)]">{status.totalRows}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-[var(--text-muted)]">최근 임포트</p>
                       <p className="text-[11px] font-medium text-[var(--text-primary)]">{formatDate(status.lastImportedAt)}</p>
                     </div>
                   </div>
+                  {status.totalRows > 0 && (
+                    <button
+                      onClick={handleClear}
+                      disabled={clearing}
+                      className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-red-500/40 px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                    >
+                      {clearing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                      {clearing ? "기존 정보 비우는 중..." : "기존 쿠팡 가격수정 정보 비우기"}
+                    </button>
+                  )}
                   {status.matchedProductCount > 0 && (
                     <button
                       onClick={() => setShowMatchedList(v => !v)}
@@ -268,20 +310,27 @@ export default function CoupangPriceImportModal({ onClose, onImported }: Props) 
                 <p className="text-sm text-green-400">임포트 완료</p>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="grid grid-cols-4 gap-2 text-center">
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
-                  <p className="text-xs text-[var(--text-muted)]">전체 행</p>
-                  <p className="text-lg font-semibold text-[var(--text-primary)]">{result.total}</p>
-                </div>
-                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
-                  <p className="text-xs text-[var(--text-muted)]">매칭</p>
-                  <p className="text-lg font-semibold text-green-400">{result.matched}</p>
+                  <p className="text-xs text-[var(--text-muted)]">연결된 상품</p>
+                  <p className="text-lg font-semibold text-green-400">{result.productStatusUpdated ?? 0}</p>
                 </div>
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
                   <p className="text-xs text-[var(--text-muted)]">미매칭 상품</p>
                   <p className="text-lg font-semibold text-amber-400">{result.unmatchedProductNames.length}</p>
                 </div>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
+                  <p className="text-xs text-[var(--text-muted)]">옵션 행</p>
+                  <p className="text-lg font-semibold text-[var(--text-primary)]">{result.total}</p>
+                </div>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-main)] py-3">
+                  <p className="text-xs text-[var(--text-muted)]">매칭 행</p>
+                  <p className="text-lg font-semibold text-blue-400">{result.matched}</p>
+                </div>
               </div>
+              <p className="text-xs text-[var(--text-muted)]">
+                상품 수를 먼저 보여줍니다. 옵션 행은 쿠팡 옵션/판매 단위 때문에 상품 수보다 클 수 있습니다.
+              </p>
 
               {result.unmatchedProductNames.length > 0 && (
                 <div className="space-y-2">

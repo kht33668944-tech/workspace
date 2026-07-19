@@ -15,6 +15,8 @@ const eslintConfig = defineConfig([
     // 스크래치/임시 파일 (git 미추적)
     ".tmp-*",
     ".tmp/**",
+    ".codex-tmp/**",
+    ".gjc/**",
     ".omc/**",
     "scraper-service/.venv/**",
     "scraper-service/**/__pycache__/**",

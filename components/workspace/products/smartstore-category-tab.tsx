@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Plus, Trash2, Upload, Save, Search, X, ChevronDown, ChevronRight } from "lucide-react";
-import * as XLSX from "xlsx";
+import XLSX from "xlsx-js-style";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import type { SmartStoreCategoryCode } from "@/types/database";
@@ -18,6 +18,42 @@ interface Row {
 let tempId = 0;
 function newTempId() {
   return `__new__${++tempId}`;
+}
+
+const MAX_CATEGORY_EXCEL_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_CATEGORY_EXCEL_ROWS = 50_000;
+const MAX_CATEGORY_EXCEL_COLUMNS = 50;
+const ALLOWED_CATEGORY_EXCEL_EXTENSIONS = new Set(["xlsx", "xls", "csv"]);
+
+function validateCategoryExcelFile(file: File) {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (!ALLOWED_CATEGORY_EXCEL_EXTENSIONS.has(extension)) {
+    throw new Error("엑셀 파일만 업로드할 수 있습니다. (.xlsx, .xls, .csv)");
+  }
+  if (file.size > MAX_CATEGORY_EXCEL_FILE_SIZE) {
+    throw new Error("엑셀 파일이 너무 큽니다. 10MB 이하 파일만 업로드할 수 있습니다.");
+  }
+}
+
+function normalizeExcelHeader(value: unknown) {
+  return String(value ?? "").replace(/[\s\u00A0\u3000\t\r\n]/g, "").trim().toLowerCase();
+}
+
+function findHeaderIndex(headers: unknown[], aliases: string[]) {
+  const normalizedAliases = aliases.map(normalizeExcelHeader);
+  return headers.findIndex((header) => normalizedAliases.includes(normalizeExcelHeader(header)));
+}
+
+function isCategoryHeaderRow(row: unknown[]) {
+  return findHeaderIndex(row, ["표준카테고리코드", "카테고리코드", "category_code", "A"]) >= 0
+    && (
+      findHeaderIndex(row, ["분류명", "분류", "category_type", "B"]) >= 0
+      || findHeaderIndex(row, ["카테고리명", "category_name", "C"]) >= 0
+    );
+}
+
+function cellToString(value: unknown) {
+  return String(value ?? "").trim();
 }
 
 export default function SmartStoreCategoryTab() {
@@ -214,28 +250,54 @@ export default function SmartStoreCategoryTab() {
     if (!file) return;
     e.target.value = "";
 
+    try {
+      validateCategoryExcelFile(file);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : String(err), "error");
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target?.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: "array" });
+        if (wb.SheetNames.length === 0) {
+          addToast("엑셀 파일에 시트가 없습니다.", "error");
+          return;
+        }
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json<Record<string, string | number>>(ws, { defval: "" });
+        const range = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]) : null;
+        if (range) {
+          const rows = range.e.r - range.s.r + 1;
+          const columns = range.e.c - range.s.c + 1;
+          if (rows > MAX_CATEGORY_EXCEL_ROWS || columns > MAX_CATEGORY_EXCEL_COLUMNS) {
+            addToast("엑셀 데이터가 너무 큽니다.", "error");
+            return;
+          }
+        }
 
-        const newRows: Row[] = json
-          .map((row) => {
-            const code = String(
-              row["표준카테고리코드"] ?? row["카테고리코드"] ?? row["category_code"] ?? row["A"] ?? ""
-            ).trim();
-            const type = String(
-              row["분류명"] ?? row["분류"] ?? row["category_type"] ?? row["B"] ?? ""
-            ).trim();
-            const name = String(
-              row["카테고리명"] ?? row["category_name"] ?? row["C"] ?? ""
-            ).trim();
+        const rawRows = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+          header: 1,
+          defval: "",
+          raw: true,
+          blankrows: false,
+        });
+        const firstRow = rawRows[0] ?? [];
+        const hasHeader = isCategoryHeaderRow(firstRow);
+        const codeIndex = hasHeader ? findHeaderIndex(firstRow, ["표준카테고리코드", "카테고리코드", "category_code", "A"]) : 0;
+        const typeIndex = hasHeader ? findHeaderIndex(firstRow, ["분류명", "분류", "category_type", "B"]) : 1;
+        const nameIndex = hasHeader ? findHeaderIndex(firstRow, ["카테고리명", "category_name", "C"]) : 2;
+
+        const newRows: Row[] = rawRows
+          .slice(hasHeader ? 1 : 0)
+          .map((row: unknown[]) => {
+            const code = cellToString(row[codeIndex]);
+            const type = typeIndex >= 0 ? cellToString(row[typeIndex]) : "";
+            const name = nameIndex >= 0 ? cellToString(row[nameIndex]) : "";
             return { id: newTempId(), category_code: code, category_type: type, category_name: name, dirty: true };
           })
-          .filter((r) => r.category_code !== "");
+          .filter((row: Row) => row.category_code !== "");
 
         if (newRows.length === 0) {
           addToast("유효한 데이터가 없습니다.", "error");

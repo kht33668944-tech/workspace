@@ -209,7 +209,8 @@ export async function POST(request: NextRequest) {
   const serviceForForbidden = getServiceSupabaseClient();
   const { data: forbiddenRows, error: forbiddenErr } = await serviceForForbidden
     .from("forbidden_words")
-    .select("word");
+    .select("word")
+    .eq("user_id", user.id);
   if (forbiddenErr) {
     // 조회 실패 시 금지어 필터가 조용히 무력화되지 않도록 명시적으로 차단
     console.error("[ai/detail] 금지어 목록 조회 실패:", forbiddenErr.message);

@@ -4,6 +4,9 @@ export interface Order {
   bundle_no: string | null;
   order_date: string | null;
   marketplace: string | null;
+  marketplace_order_no: string | null;
+  marketplace_product_order_no: string | null;
+  marketplace_orderer_name: string | null;
   recipient_name: string | null;
   product_name: string | null;
   quantity: number;
@@ -249,6 +252,43 @@ export interface CoupangPriceInventory {
 
 export type CoupangPriceInventoryInsert = Omit<CoupangPriceInventory, "id" | "created_at" | "updated_at">;
 
+// ─── 공식 판매처 API 연동 ───
+export type MarketplaceApiPlatform = "coupang" | "smartstore" | "esm";
+export type MarketplaceApiTestStatus = "success" | "failed";
+export type MarketplaceApiLogStatus = "success" | "failed";
+export type MarketplaceApiAction = "test" | "price" | "stock" | "stop" | "resume";
+
+export interface MarketplaceApiCredential {
+  id: string;
+  user_id: string;
+  platform: MarketplaceApiPlatform;
+  label: string | null;
+  account_id: string;
+  meta: Record<string, unknown>;
+  last_tested_at: string | null;
+  last_test_status: MarketplaceApiTestStatus | null;
+  last_test_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplaceApiLog {
+  id: string;
+  user_id: string;
+  credential_id: string | null;
+  platform: MarketplaceApiPlatform | string;
+  action: MarketplaceApiAction | string;
+  status: MarketplaceApiLogStatus;
+  product_id: string | null;
+  product_name: string | null;
+  vendor_item_id: string | null;
+  previous_value: string | null;
+  new_value: string | null;
+  error_message: string | null;
+  response_payload: Record<string, unknown> | null;
+  created_at: string;
+}
+
 // ─── 옥션·지마켓(ESM) 가격 인벤토리 ───
 export interface EsmPriceInventory {
   id: string;
@@ -311,8 +351,16 @@ export interface CardEntry {
   daily_payment: number;
   installment: number;
   total: number;
-  payment_day?: number; // 1-31, 카드 결제일
-  payment_made?: number; // 결제일에 실제 납부한 금액
+  personal_excluded?: number; // 사업비에서 제외할 개인 사용분
+  payments?: CardPaymentRecord[]; // 해당 날짜에 실제 납부한 금액 기록
+  payment_day?: number; // legacy: 예전 카드 결제일
+  payment_made?: number; // legacy: 예전 납부액
+}
+
+export interface CardPaymentRecord {
+  date: string;
+  amount: number;
+  memo?: string;
 }
 
 export interface PlatformEntry {

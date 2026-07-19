@@ -3,6 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Lock, ArrowRight } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { checkPasswordSecurity } from "@/lib/password-client";
 
 export function ResetPasswordForm() {
   const { updatePassword } = useAuth();
@@ -18,12 +19,18 @@ export function ResetPasswordForm() {
       setError("비밀번호가 일치하지 않습니다.");
       return;
     }
-    if (password.length < 6) {
-      setError("비밀번호는 6자 이상이어야 합니다.");
+    if (password.length < 8) {
+      setError("비밀번호는 8자 이상이어야 합니다.");
       return;
     }
     setLoading(true);
     setError(null);
+    const passwordError = await checkPasswordSecurity(password);
+    if (passwordError) {
+      setError(passwordError);
+      setLoading(false);
+      return;
+    }
     const err = await updatePassword(password);
     if (err) {
       setError(err);
@@ -76,7 +83,7 @@ export function ResetPasswordForm() {
             className="absolute text-sm text-gray-300 duration-300 transform -translate-y-6 scale-75 top-3 -z-10 origin-[0] peer-focus:left-0 peer-focus:text-blue-400 peer-placeholder-shown:scale-100 peer-placeholder-shown:translate-y-0 peer-focus:scale-75 peer-focus:-translate-y-6"
           >
             <Lock className="inline-block mr-2 -mt-1" size={16} />
-            새 비밀번호 (6자 이상)
+            새 비밀번호 (8자 이상)
           </label>
         </div>
         <div className="relative z-0">

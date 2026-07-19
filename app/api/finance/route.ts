@@ -1,7 +1,108 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
-import { recalcTotals } from "@/lib/finance-utils";
-import type { CardEntry, PlatformEntry, CashEntry } from "@/types/database";
+import { getCardPaymentTotal, normalizeCard, normalizePlatform, recalcTotals } from "@/lib/finance-utils";
+import type { CardEntry, PlatformEntry, CashEntry, DailySnapshot } from "@/types/database";
+
+type SupabaseClient = ReturnType<typeof getSupabaseClient>;
+
+interface PurchaseAmountRow {
+  cost: number | null;
+  payment_method: string | null;
+  purchase_order_no: string | null;
+  delivery_status: string | null;
+}
+
+function addDays(date: string, days: number): string {
+  const d = new Date(date + "T00:00:00+09:00");
+  d.setUTCDate(d.getUTCDate() + days);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const year = parts.find((part) => part.type === "year")?.value ?? "1970";
+  const month = parts.find((part) => part.type === "month")?.value ?? "01";
+  const day = parts.find((part) => part.type === "day")?.value ?? "01";
+  return `${year}-${month}-${day}`;
+}
+
+function kstDayRange(date: string): { start: string; end: string } {
+  return {
+    start: new Date(date + "T00:00:00+09:00").toISOString(),
+    end: new Date(addDays(date, 1) + "T00:00:00+09:00").toISOString(),
+  };
+}
+
+async function getDailyCardPurchases(supabase: SupabaseClient, userId: string, date: string): Promise<Map<string, number>> {
+  const { start, end } = kstDayRange(date);
+  const { data, error } = await supabase
+    .from("orders")
+    .select("cost,payment_method,purchase_order_no,delivery_status")
+    .eq("user_id", userId)
+    .gte("purchased_at", start)
+    .lt("purchased_at", end)
+    .not("purchase_order_no", "is", null)
+    .neq("purchase_order_no", "")
+    .not("delivery_status", "in", "(취소완료,재고부족,반품완료,교환완료)");
+
+  if (error) throw error;
+
+  const map = new Map<string, number>();
+  for (const row of (data ?? []) as PurchaseAmountRow[]) {
+    const cardName = row.payment_method?.trim() || "미확인";
+    map.set(cardName, (map.get(cardName) ?? 0) + (row.cost ?? 0));
+  }
+  return map;
+}
+
+function applyCardPurchases(cards: CardEntry[], purchases: Map<string, number>): CardEntry[] {
+  const next = cards.map((card) => {
+    const name = card.name?.trim() || "미확인";
+    const daily_payment = purchases.get(name) ?? 0;
+    purchases.delete(name);
+    return normalizeCard({ ...card, name, daily_payment });
+  });
+
+  for (const [name, daily_payment] of purchases) {
+    next.push(normalizeCard({ name, accumulated: 0, daily_payment, installment: 0, personal_excluded: 0, payments: [], total: 0 }));
+  }
+
+  return next;
+}
+
+function normalizeSnapshot(snapshot: DailySnapshot): DailySnapshot {
+  const cards = ((snapshot.cards ?? []) as CardEntry[]).map(normalizeCard);
+  const platforms = ((snapshot.platforms ?? []) as PlatformEntry[]).map(normalizePlatform);
+  const cash = (snapshot.cash ?? []) as CashEntry[];
+  const totals = recalcTotals(cards, platforms, cash, snapshot.pending_purchase ?? 0);
+  return { ...snapshot, cards, platforms, cash, ...totals };
+}
+
+function carryPreviousCardTotals(snapshot: DailySnapshot | null, prevSnapshot: DailySnapshot | null): DailySnapshot | null {
+  if (!snapshot || !prevSnapshot) return snapshot;
+
+  const prevCards = ((prevSnapshot.cards ?? []) as CardEntry[]).map(normalizeCard);
+  const cards = ((snapshot.cards ?? []) as CardEntry[]).map((card) => {
+    const normalized = normalizeCard(card);
+    const prev = prevCards.find((prevCard) => prevCard.name === normalized.name);
+    return prev ? normalizeCard({ ...normalized, accumulated: prev.total }) : normalized;
+  });
+  const platforms = ((snapshot.platforms ?? []) as PlatformEntry[]).map(normalizePlatform);
+  const cash = (snapshot.cash ?? []) as CashEntry[];
+  const totals = recalcTotals(cards, platforms, cash, snapshot.pending_purchase ?? 0);
+  return { ...snapshot, cards, platforms, cash, ...totals };
+}
+
+async function hydrateSnapshot(supabase: SupabaseClient, userId: string, snapshot: DailySnapshot | null): Promise<DailySnapshot | null> {
+  if (!snapshot) return null;
+  const purchases = await getDailyCardPurchases(supabase, userId, snapshot.date);
+  const cards = applyCardPurchases((snapshot.cards ?? []) as CardEntry[], purchases);
+  const platforms = ((snapshot.platforms ?? []) as PlatformEntry[]).map(normalizePlatform);
+  const cash = (snapshot.cash ?? []) as CashEntry[];
+  const totals = recalcTotals(cards, platforms, cash, snapshot.pending_purchase ?? 0);
+  return { ...snapshot, cards, platforms, cash, ...totals };
+}
 
 // GET: 스냅샷 조회
 // ?date=YYYY-MM-DD → { snapshot, prevSnapshot }
@@ -15,6 +116,8 @@ export async function GET(request: NextRequest) {
   const date = searchParams.get("date");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
   // 범위 조회 (추이 탭용)
   if (from && to) {
@@ -26,7 +129,7 @@ export async function GET(request: NextRequest) {
       .order("date", { ascending: true });
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ snapshots: data });
+    return NextResponse.json({ snapshots: ((data ?? []) as DailySnapshot[]).map(normalizeSnapshot) });
   }
 
   // 단일 날짜 조회
@@ -48,7 +151,13 @@ export async function GET(request: NextRequest) {
       .limit(1)
       .maybeSingle();
 
-    return NextResponse.json({ snapshot, prevSnapshot });
+    const hydratedPrev = await hydrateSnapshot(supabase, user.id, prevSnapshot as DailySnapshot | null);
+    const hydratedSnapshot = await hydrateSnapshot(supabase, user.id, snapshot as DailySnapshot | null);
+
+    return NextResponse.json({
+      snapshot: carryPreviousCardTotals(hydratedSnapshot, hydratedPrev),
+      prevSnapshot: hydratedPrev,
+    });
   }
 
   return NextResponse.json({ error: "date 또는 from/to 파라미터 필요" }, { status: 400 });
@@ -110,21 +219,33 @@ export async function POST(request: NextRequest) {
 
     if (prev) {
       // 과거 스냅샷에 필드가 누락됐을 수 있어 빈 배열로 방어 (reduce 런타임 예외 방지)
-      const prevCards = (prev.cards ?? []) as CardEntry[];
-      const prevPlatforms = (prev.platforms ?? []) as PlatformEntry[];
+      const prevSnapshot = await hydrateSnapshot(supabase, user.id, prev as DailySnapshot);
+      const prevCards = (prevSnapshot?.cards ?? []) as CardEntry[];
+      const prevPlatforms = (prevSnapshot?.platforms ?? []) as PlatformEntry[];
       const prevCash = (prev.cash ?? []) as CashEntry[];
 
       // 전날 카드 납부액 합계 (돈 나감 → 현금 감소)
-      const totalPaymentMade = prevCards.reduce((s, c) => s + (c.payment_made ?? 0), 0);
+      const totalPaymentMade = prevCards.reduce((s, c) => s + getCardPaymentTotal(c), 0);
       // 전날 플랫폼 정산입금 합계 (돈 들어옴 → 현금 증가)
       const totalSettled = prevPlatforms.reduce((s, p) => s + (p.settled_amount ?? 0), 0);
       const cashAdjustment = totalSettled - totalPaymentMade;
 
-      // 카드: daily_payment, payment_made 초기화
-      cards = prevCards.map(c => ({ ...c, daily_payment: 0, payment_made: 0 }));
+      const purchases = await getDailyCardPurchases(supabase, user.id, date);
+      cards = applyCardPurchases(
+        prevCards.map((c) => ({
+          ...c,
+          accumulated: c.total,
+          daily_payment: 0,
+          installment: 0,
+          personal_excluded: 0,
+          payments: [],
+          payment_made: 0,
+        })),
+        purchases
+      );
       // 플랫폼: settled_amount 초기화
-      platforms = prevPlatforms.map(p => ({ ...p, settled_amount: 0 }));
-      // 현금: 첫 번째 현금 항목에 정산입금/납부액 반영
+      platforms = prevPlatforms.map(p => normalizePlatform({ ...p, settled_amount: 0 }));
+      // 현금: 첫 번째 현금 항목에 전날 정산입금 반영
       cash = prevCash.map((c, i) => i === 0 ? { ...c, amount: c.amount + cashAdjustment } : { ...c });
       pending_purchase = prev.pending_purchase;
       memo = null;
@@ -135,6 +256,9 @@ export async function POST(request: NextRequest) {
       cash = DEFAULT_CASH;
     }
   }
+
+  cards = applyCardPurchases(cards, await getDailyCardPurchases(supabase, user.id, date));
+  platforms = platforms.map(normalizePlatform);
 
   const totals = recalcTotals(cards, platforms, cash, pending_purchase);
 
@@ -164,5 +288,11 @@ export async function POST(request: NextRequest) {
     .limit(1)
     .maybeSingle();
 
-  return NextResponse.json({ snapshot: data, prevSnapshot });
+  const hydratedPrev = await hydrateSnapshot(supabase, user.id, prevSnapshot as DailySnapshot | null);
+  const hydratedSnapshot = await hydrateSnapshot(supabase, user.id, data as DailySnapshot);
+
+  return NextResponse.json({
+    snapshot: carryPreviousCardTotals(hydratedSnapshot, hydratedPrev),
+    prevSnapshot: hydratedPrev,
+  });
 }

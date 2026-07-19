@@ -98,7 +98,7 @@ function FinancePageInner() {
           {activeTab === "detail" && finance.snapshot && (
             <FinanceDetailTab
               snapshot={finance.snapshot}
-              changes={finance.changes}
+              prevSnapshot={finance.prevSnapshot}
               onSave={finance.saveSnapshot}
             />
           )}
@@ -107,7 +107,6 @@ function FinancePageInner() {
           )}
           {activeTab === "summary" && (
             <FinanceSummaryTab
-              snapshot={finance.snapshot}
               fetchTrendData={finance.fetchTrendData}
             />
           )}

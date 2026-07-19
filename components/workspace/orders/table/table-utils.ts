@@ -47,7 +47,7 @@ function safeMathEval(expr: string): number {
 
 // margin 제외 모든 컬럼 편집 가능 (address 포함)
 export const EDITABLE_KEYS = new Set([
-  "bundle_no", "order_date", "marketplace", "recipient_name", "product_name",
+  "bundle_no", "order_date", "marketplace", "marketplace_order_no", "marketplace_product_order_no", "marketplace_orderer_name", "recipient_name", "product_name",
   "quantity", "recipient_phone", "orderer_phone", "postal_code", "address", "address_detail",
   "delivery_memo", "revenue", "settlement", "cost", "payment_method",
   "purchase_id", "purchase_source", "purchase_url", "purchase_order_no", "courier", "tracking_no", "delivery_status", "memo",
@@ -61,6 +61,7 @@ export const COLUMNS: Col[] = [
   { key: "bundle_no", label: "묶음번호", minWidth: 110 },
   { key: "order_date", label: "주문일시", minWidth: 125 },
   { key: "marketplace", label: "판매처", minWidth: 80 },
+  { key: "marketplace_orderer_name", label: "주문자명", minWidth: 80 },
   { key: "recipient_name", label: "수취인명", minWidth: 70 },
   { key: "product_name", label: "상품명", minWidth: 200 },
   { key: "quantity", label: "수량", minWidth: 45, align: "right" },
@@ -171,6 +172,11 @@ export function formatCell(key: string, val: unknown, order?: { courier?: string
   return React.createElement("span", { title: String(val), className: "text-[var(--text-secondary)] text-xs truncate block max-w-full" }, String(val));
 }
 
+export interface PurchaseIdFillOption {
+  value: string;
+  label: string;
+}
+
 export interface OrderTableProps {
   orders: Order[];
   allOrders: Order[];
@@ -187,4 +193,6 @@ export interface OrderTableProps {
   onClearPurchaseDuplicate?: (order: Order) => void;
   columnFilters: Record<string, string[]>;
   onColumnFilterChange: (key: string, values: string[]) => void;
+  purchaseIdFillOptions?: PurchaseIdFillOption[];
+  onFillSelectedPurchaseId?: (purchaseId: string) => void;
 }

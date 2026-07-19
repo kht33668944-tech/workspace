@@ -13,7 +13,7 @@ export const NUMERIC_KEYS = new Set(["lowest_price", "margin_rate"]);
 export const COMPUTED_KEYS = new Set([
   "name_length", "net_margin", "settlement_price",
   "price_smartstore", "price_esm", "price_coupang",
-  "price_change", "platform_codes",
+  "price_change", "playauto_import_status",
 ]);
 
 /** 플랫폼 판매가 키 → 저장되는 고정값 DB 컬럼 키 매핑 */
@@ -50,7 +50,7 @@ export const COLUMNS: Col[] = [
   { key: "price_smartstore", label: "스마트스토어", minWidth: 95, align: "right" },
   { key: "price_esm", label: "ESM 11번가", minWidth: 90, align: "right" },
   { key: "price_coupang", label: "쿠팡", minWidth: 80, align: "right" },
-  { key: "platform_codes", label: "플랫폼 코드", minWidth: 90 },
+  { key: "playauto_import_status", label: "플레이오토 임포트", minWidth: 105 },
   { key: "purchase_url", label: "상품 구매 URL", minWidth: 150 },
   { key: "thumbnail_url", label: "썸네일 URL", minWidth: 80 },
   { key: "detail_html", label: "상세페이지", minWidth: 80 },
@@ -127,19 +127,36 @@ export function formatCell(
   priceChanges?: Record<string, number>,
   priceScrapeStatus?: Record<string, PriceScrapeStatus>
 ): React.ReactNode {
-  // 플랫폼 코드 (별도 처리)
-  if (key === "platform_codes" && product) {
+  // 플레이오토 상품 엑셀을 가져온 뒤 생성되는 쇼핑몰 상품번호를 내부 확인값으로 사용
+  if (key === "playauto_import_status" && product) {
     const codes = product.platform_codes;
     if (!codes || Object.keys(codes).length === 0) {
-      return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
+      return React.createElement("span", {
+        className: "inline-block px-2 py-0.5 rounded text-xs font-medium bg-[var(--bg-hover)] text-[var(--text-muted)]",
+        title: "플레이오토에서 상품 목록 엑셀을 내려받아 가져오면 확인됩니다.",
+      }, "미확인");
     }
-    const platformNames = [...new Set(Object.keys(codes).map(k => k.split("=")[0]))];
-    const count = platformNames.length;
-    const tooltip = platformNames.join(", ");
+    const labelByAccount = (account: string) => {
+      const lower = account.toLowerCase();
+      if (lower.startsWith("스마트스토어")) return "스마트";
+      if (lower.startsWith("쿠팡")) return "쿠팡";
+      return "ESM";
+    };
+    const labelOrder = ["스마트", "쿠팡", "ESM"];
+    const labels = [...new Set(Object.keys(codes).map(labelByAccount))]
+      .sort((a, b) => labelOrder.indexOf(a) - labelOrder.indexOf(b));
+    const badgeClass: Record<string, string> = {
+      스마트: "bg-green-500/15 text-green-400",
+      쿠팡: "bg-red-500/15 text-red-400",
+      ESM: "bg-amber-500/15 text-amber-400",
+    };
     return React.createElement("span", {
-      title: tooltip,
-      className: "inline-block px-2 py-0.5 rounded text-xs font-medium bg-orange-500/20 text-orange-400 cursor-help",
-    }, `${count}개 등록`);
+      title: `플레이오토 임포트 확인: ${labels.join(", ")}`,
+      className: "inline-flex items-center gap-1 whitespace-nowrap",
+    }, labels.map(label => React.createElement("span", {
+      key: label,
+      className: `inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${badgeClass[label]}`,
+    }, label)));
   }
 
   // 계산 필드

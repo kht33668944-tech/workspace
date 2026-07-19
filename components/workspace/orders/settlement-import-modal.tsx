@@ -24,38 +24,115 @@ interface MatchResult {
   selectedOrderId: string | null;
 }
 
-// 매칭 로직: 수령인명 + 판매금액(매출) + 판매처
+function normalizeMatchValue(value: string | null | undefined): string {
+  return String(value ?? "").toLowerCase().replace(/[\s\-()]/g, "");
+}
+
+function sameText(left: string | null | undefined, right: string | null | undefined): boolean {
+  const a = normalizeMatchValue(left);
+  const b = normalizeMatchValue(right);
+  return Boolean(a && b && a === b);
+}
+
+function normalizeMarketplace(value: string | null | undefined): string {
+  const normalized = normalizeMatchValue(value);
+  if (normalized.includes("스마트스토어") || normalized.includes("네이버") || normalized.includes("smartstore") || normalized.includes("naver")) return "스마트스토어";
+  if (normalized.includes("지마켓") || normalized.includes("gmarket")) return "지마켓";
+  if (normalized.includes("옥션") || normalized.includes("auction")) return "옥션";
+  if (normalized.includes("쿠팡") || normalized.includes("coupang")) return "쿠팡";
+  return normalized;
+}
+
+function dateKey(value: string | null | undefined): string {
+  if (!value) return "";
+  const text = String(value);
+  const direct = text.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+  if (direct) {
+    return `${direct[1]}-${direct[2].padStart(2, "0")}-${direct[3].padStart(2, "0")}`;
+  }
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return "";
+  const formatter = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return formatter.format(date);
+}
+
+function narrow<T>(candidates: T[], fn: (candidate: T) => boolean): T[] {
+  const filtered = candidates.filter(fn);
+  return filtered.length > 0 ? filtered : candidates;
+}
+
+// 매칭 로직: 식별번호가 있으면 우선 사용하고, 없으면 주문자·수취인·결제일·휴대폰·금액·상품명으로 보조 매칭
 function matchRows(settlementRows: SettlementRow[], orders: Order[]): MatchResult[] {
   return settlementRows.map((row) => {
-    // 1차: 수령인명으로 후보 필터
-    let candidates = orders.filter(
-      (o) => o.recipient_name?.trim() === row.recipientName
-    );
+    const hasStableIdentifier = Boolean(row.marketplaceProductOrderNo || row.marketplaceOrderNo);
+    let candidates: Order[];
+
+    if (row.marketplaceProductOrderNo) {
+      candidates = orders.filter(
+        (o) => sameText(o.marketplace_product_order_no, row.marketplaceProductOrderNo)
+      );
+    } else if (row.marketplaceOrderNo) {
+      candidates = orders.filter(
+        (o) => sameText(o.marketplace_order_no, row.marketplaceOrderNo)
+      );
+    } else {
+      // 식별번호가 없는 과거 행만 이름 기반 후보를 만든다.
+      candidates = orders.filter((o) =>
+        sameText(o.recipient_name, row.recipientName) ||
+        sameText(o.marketplace_orderer_name, row.ordererName) ||
+        sameText(o.recipient_name, row.ordererName)
+      );
+    }
+
+    // 식별번호가 있었는데 DB에 없는 경우에는 이름으로 잘못 연결하지 않는다.
+    if (hasStableIdentifier && candidates.length === 0) {
+      return { row, status: "unmatched" as MatchStatus, candidates: [], selectedOrderId: null };
+    }
 
     // 판매처가 있으면 추가 필터
     if (row.marketplace && candidates.length > 1) {
-      const filtered = candidates.filter(
-        (o) => o.marketplace === row.marketplace
+      candidates = narrow(
+        candidates,
+        (o) => normalizeMarketplace(o.marketplace) === normalizeMarketplace(row.marketplace)
       );
-      if (filtered.length > 0) candidates = filtered;
     }
 
-    // 2차: 판매금액(매출)이 일치하는 후보
+    // 결제완료일/주문일이 있으면 같은 날짜 후보로 좁힌다.
+    if (candidates.length > 1 && row.orderDate) {
+      const rowDate = dateKey(row.orderDate);
+      candidates = narrow(candidates, (o) => dateKey(o.order_date) === rowDate);
+    }
+
+    // 전화번호가 있으면 수취인/주문자 번호 양쪽을 모두 대조한다.
+    if (candidates.length > 1 && (row.recipientPhone || row.ordererPhone)) {
+      candidates = narrow(candidates, (o) =>
+        sameText(o.recipient_phone, row.recipientPhone) ||
+        sameText(o.orderer_phone, row.recipientPhone) ||
+        sameText(o.recipient_phone, row.ordererPhone) ||
+        sameText(o.orderer_phone, row.ordererPhone)
+      );
+    }
+
+    // 판매금액(매출)이 일치하는 후보
     if (candidates.length > 1 && row.saleAmount > 0) {
-      const amountMatch = candidates.filter(
+      candidates = narrow(
+        candidates,
         (o) => o.revenue === row.saleAmount
       );
-      if (amountMatch.length > 0) candidates = amountMatch;
     }
 
-    // 3차: 상품명 부분 일치
+    // 상품명 부분 일치
     if (candidates.length > 1 && row.productName) {
-      const nameNorm = row.productName.toLowerCase().replace(/\s+/g, "");
-      const nameMatch = candidates.filter((o) => {
-        const orderName = (o.product_name || "").toLowerCase().replace(/\s+/g, "");
+      const nameNorm = normalizeMatchValue(row.productName);
+      candidates = narrow(candidates, (o) => {
+        const orderName = normalizeMatchValue(o.product_name);
         return orderName.includes(nameNorm) || nameNorm.includes(orderName);
       });
-      if (nameMatch.length > 0) candidates = nameMatch;
     }
 
     if (candidates.length === 1) {
@@ -219,8 +296,8 @@ export default function SettlementImportModal({
                 `}
               >
                 <Upload className="w-10 h-10 text-[var(--text-muted)] mb-3" />
-                <p className="text-[var(--text-tertiary)] text-sm">옥션/지마켓 정산 엑셀 파일을 드래그하거나 클릭해서 선택</p>
-                <p className="text-[var(--text-muted)] text-xs mt-1">수령인명 기준으로 발주서와 매칭합니다 (.xlsx, .xls)</p>
+                <p className="text-[var(--text-tertiary)] text-sm">정산 엑셀 파일을 드래그하거나 클릭해서 선택</p>
+                <p className="text-[var(--text-muted)] text-xs mt-1">번호가 없으면 수취인·주문자·결제일·휴대폰·금액·상품명으로 보조 매칭합니다 (.xlsx, .xls)</p>
               </div>
               <input
                 ref={fileRef}
@@ -283,6 +360,7 @@ export default function SettlementImportModal({
                     <tr>
                       <th className="px-3 py-2 text-left">상태</th>
                       <th className="px-3 py-2 text-left">수령인명</th>
+                      <th className="px-3 py-2 text-left">주문자명</th>
                       <th className="px-3 py-2 text-left">판매처</th>
                       <th className="px-3 py-2 text-left">상품명 (엑셀)</th>
                       <th className="px-3 py-2 text-right">판매금액</th>
@@ -297,6 +375,7 @@ export default function SettlementImportModal({
                           {statusLabel(result.status)}
                         </td>
                         <td className="px-3 py-1.5">{result.row.recipientName}</td>
+                        <td className="px-3 py-1.5">{result.row.ordererName || "-"}</td>
                         <td className="px-3 py-1.5">{result.row.marketplace || "-"}</td>
                         <td className="px-3 py-1.5 max-w-40 truncate">{result.row.productName || "-"}</td>
                         <td className="px-3 py-1.5 text-right">{result.row.saleAmount.toLocaleString()}</td>
@@ -316,12 +395,12 @@ export default function SettlementImportModal({
                                 onChange={(e) => handleCandidateSelect(i, e.target.value)}
                                 className="w-full px-1.5 py-1 bg-[var(--bg-hover)] border border-yellow-500/40 rounded text-xs text-[var(--text-primary)] outline-none"
                               >
-                                <option value="">선택...</option>
-                                {result.candidates.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.product_name?.slice(0, 25)} ({c.revenue?.toLocaleString()}원)
-                                  </option>
-                                ))}
+                                  <option value="">선택...</option>
+                                  {result.candidates.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                    {c.marketplace_orderer_name || c.recipient_name || c.product_name?.slice(0, 20)} · {c.product_name?.slice(0, 20)} ({c.revenue?.toLocaleString()}원)
+                                    </option>
+                                  ))}
                               </select>
                             </div>
                           )}

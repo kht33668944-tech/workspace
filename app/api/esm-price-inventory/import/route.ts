@@ -80,20 +80,28 @@ export async function POST(request: NextRequest) {
     if (userErr || !userData.user) return NextResponse.json({ error: "인증 실패" }, { status: 401 });
     const userId = userData.user.id;
 
-    // 상품명 → product_id 매핑 (1000행 초과 누락 방지: 전건 페이지네이션)
-    const products = await fetchAllRows<{ id: string; product_name: string }>(
+    // 상품명/판매자관리코드 → product 매핑 (1000행 초과 누락 방지: 전건 페이지네이션)
+    const products = await fetchAllRows<{ id: string; product_name: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>(
       (from, to) => supabase
         .from("products")
-        .select("id, product_name")
+        .select("id, product_name, platform_codes, seller_code")
         .eq("user_id", userId)
         .range(from, to),
     );
-    const productMap = new Map<string, string>();
-    for (const p of products) productMap.set(normalizeName(p.product_name), p.id);
+    const productMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>();
+    const sellerCodeMap = new Map<string, { id: string; platform_codes: Record<string, string> | null; seller_code: Record<string, string> | null }>();
+    for (const p of products) {
+      const product = { id: p.id, platform_codes: p.platform_codes, seller_code: p.seller_code };
+      productMap.set(normalizeName(p.product_name), product);
+      for (const sellerCode of Object.values(p.seller_code ?? {})) {
+        if (sellerCode) sellerCodeMap.set(String(sellerCode).trim(), product);
+      }
+    }
 
     // 행 → upsert payload 변환
     const inserts: EsmPriceInventoryInsert[] = [];
     const unmatchedSet = new Set<string>();
+    const productUpdates = new Map<string, { platform_codes: Record<string, string>; seller_code: Record<string, string> | null }>();
     let matchedRowCount = 0;
 
     for (const row of dataRows) {
@@ -101,11 +109,25 @@ export async function POST(request: NextRequest) {
       if (!siteProductId) continue; // 상품번호 없는 행 스킵
 
       const productName = cellString(row[DATA_COL.product_name]);
-      const productId = productMap.get(normalizeName(productName)) ?? null;
-      if (productId) {
+      const sellerCode = cellString(row[DATA_COL.seller_code]);
+      const product = (sellerCode ? sellerCodeMap.get(sellerCode) : undefined) ?? productMap.get(normalizeName(productName));
+      const productId = product?.id ?? null;
+      if (product) {
         matchedRowCount++;
+        const site = cellString(row[DATA_COL.site]) || "ESM";
+        const sellerId = cellString(row[DATA_COL.seller_id]) || "가격수정V2";
+        const existingUpdate = productUpdates.get(product.id) ?? {
+          platform_codes: { ...(product.platform_codes ?? {}) },
+          seller_code: product.seller_code ? { ...product.seller_code } : null,
+        };
+        existingUpdate.platform_codes[`${site}=${sellerId}`] = siteProductId;
+        if (sellerCode) {
+          if (!existingUpdate.seller_code) existingUpdate.seller_code = {};
+          existingUpdate.seller_code.esm = sellerCode;
+        }
+        productUpdates.set(product.id, existingUpdate);
       } else if (productName) {
-        unmatchedSet.add(productName);
+        unmatchedSet.add(sellerCode ? `${sellerCode} / ${productName}` : productName);
       }
 
       inserts.push({
@@ -115,7 +137,7 @@ export async function POST(request: NextRequest) {
         site_product_id: siteProductId,
         site: cellString(row[DATA_COL.site]) || null,
         product_name: productName || null,
-        seller_code: cellString(row[DATA_COL.seller_code]) || null,
+        seller_code: sellerCode || null,
         seller_id: cellString(row[DATA_COL.seller_id]) || null,
         sale_status: cellString(row[DATA_COL.sale_status]) || null,
         sale_price: cellInt(row[DATA_COL.sale_price]),
@@ -123,6 +145,30 @@ export async function POST(request: NextRequest) {
         category: cellString(row[DATA_COL.category]) || null,
         site_category: cellString(row[DATA_COL.site_category]) || null,
       });
+    }
+
+    let productStatusUpdatedCount = 0;
+    const updateEntries = [...productUpdates.entries()];
+    for (let i = 0; i < updateEntries.length; i += 100) {
+      const chunk = updateEntries.slice(i, i + 100);
+      const results = await Promise.allSettled(
+        chunk.map(([id, payload]) =>
+          supabase
+            .from("products")
+            .update({ platform_codes: payload.platform_codes, seller_code: payload.seller_code })
+            .eq("id", id)
+            .eq("user_id", userId)
+        )
+      );
+      for (let j = 0; j < results.length; j++) {
+        const result = results[j];
+        if (result.status === "fulfilled" && !result.value.error) {
+          productStatusUpdatedCount++;
+        } else {
+          const message = result.status === "fulfilled" ? result.value.error?.message : String(result.reason);
+          console.error(`[esm-price-inventory/import] 상품 ESM 임포트 표시 업데이트 실패 (${chunk[j][0]}):`, message);
+        }
+      }
     }
 
     if (inserts.length === 0) {
@@ -143,12 +189,13 @@ export async function POST(request: NextRequest) {
       upsertedCount += count ?? chunk.length;
     }
 
-    console.log(`[esm-price-inventory/import] 완료: ${inserts.length}행, 매칭 ${matchedRowCount}, 미매칭 상품명 ${unmatchedSet.size}`);
+    console.log(`[esm-price-inventory/import] 완료: ${inserts.length}행, 매칭 ${matchedRowCount}, 미매칭 상품명 ${unmatchedSet.size}, 상품목록 ESM 표시 ${productStatusUpdatedCount}개`);
 
     return NextResponse.json({
       total: inserts.length,
       rowsUpserted: upsertedCount,
       matched: matchedRowCount,
+      productStatusUpdated: productStatusUpdatedCount,
       unmatchedProductNames: [...unmatchedSet],
     });
   } catch (err) {

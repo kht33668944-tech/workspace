@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
-import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw } from "lucide-react";
+import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
 import { useOrders } from "@/hooks/use-orders";
@@ -18,6 +18,7 @@ import OrderTable from "@/components/workspace/orders/order-table";
 import OrderModal from "@/components/workspace/orders/order-modal";
 import OrderSidePanel, { OrderSidePanelContent } from "@/components/workspace/orders/order-side-panel";
 import BulkEditBar from "@/components/workspace/orders/bulk-edit-bar";
+import PurchaseCancelModal from "@/components/workspace/orders/purchase-cancel-modal";
 import FilterBar from "@/components/ui/filter-bar";
 import MobileSheet from "@/components/ui/mobile-sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -28,7 +29,9 @@ const SettlementImportModal = dynamic(() => import("@/components/workspace/order
 const BulkSmsModal = dynamic(() => import("@/components/workspace/orders/bulk-sms-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
 import { useAutoPurchaseController, useTrackingCollectController } from "@/context/modal-controllers";
-import type { Order, OrderInsert } from "@/types/database";
+import { PLATFORM_LABELS } from "@/types/database";
+import type { Order, OrderInsert, OrderUpdate, PurchaseCredential, PurchasePlatform } from "@/types/database";
+import type { PurchaseCancelMode, PurchaseCancelReason } from "@/lib/purchase-cancellation";
 
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
 
@@ -50,7 +53,8 @@ type CostRefreshResult = {
   orderCount: number;
 };
 
-type CostRetryItem = { id: string; name: string };
+type CostRetryReason = "bot_blocked" | "failed";
+type CostRetryItem = { id: string; name: string; reason?: CostRetryReason };
 type CostRefreshStats = {
   changed: number;
   unchanged: number;
@@ -83,15 +87,59 @@ type CostScrapeEvent =
   | { type: "error"; message: string };
 
 const MAX_COST_REFRESH_ATTEMPTS = 5;
-
+const COST_REFRESH_PURCHASE_SOURCES = [
+  { label: "지마켓", patterns: ["gmarket.co.kr"] },
+  { label: "오늘의집", patterns: ["ohou.se", "ohouse"] },
+] as const;
 function normalizeProductNameForMatch(name: string): string {
   return name.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function isSupportedCostRefreshUrl(url: string | null | undefined): boolean {
-  if (!url) return false;
-  return url.includes("gmarket.co.kr") || url.includes("ohou.se") || url.includes("ohouse");
+function detectCostRefreshPurchaseSource(url: string | null | undefined): string | null {
+  const raw = url?.trim().toLowerCase();
+  if (!raw) return null;
+
+  const match = COST_REFRESH_PURCHASE_SOURCES.find((source) =>
+    source.patterns.some((pattern) => raw.includes(pattern))
+  );
+  return match?.label ?? null;
 }
+
+function isSupportedCostRefreshUrl(url: string | null | undefined): boolean {
+  return detectCostRefreshPurchaseSource(url) !== null;
+}
+
+function hasPurchaseEvidence(order: Order): boolean {
+  return Boolean(
+    order.purchase_order_no?.trim() ||
+    order.purchased_at ||
+    order.payment_method?.trim() ||
+    order.purchase_log_order_nos?.length ||
+    (order.cost ?? 0) > 0
+  );
+}
+
+function getAutoPurchaseSourceForCostRefresh(params: {
+  status: CostRefreshResult["status"];
+  purchaseUrl: string | null | undefined;
+  currentPurchaseSource: string | null;
+  settlement: number;
+  nextCost: number;
+}): string | null {
+  if (params.status !== "priced") return null;
+  if (params.currentPurchaseSource?.trim()) return null;
+  if (params.settlement - params.nextCost <= 0) return null;
+  return detectCostRefreshPurchaseSource(params.purchaseUrl);
+}
+
+function purchasePlatformFromSource(source: string | null | undefined): PurchasePlatform | null {
+  const normalized = source?.trim();
+  if (!normalized) return null;
+
+  const entry = Object.entries(PLATFORM_LABELS).find(([, label]) => label === normalized);
+  return entry ? (entry[0] as PurchasePlatform) : null;
+}
+
 
 async function fetchProductCostRows(userId: string): Promise<ProductCostRow[]> {
   const PAGE_SIZE = 1000;
@@ -196,6 +244,8 @@ function OrdersPageInner() {
   const [showImportMenu, setShowImportMenu] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showPurchaseCancelModal, setShowPurchaseCancelModal] = useState(false);
+  const [purchaseCredentials, setPurchaseCredentials] = useState<PurchaseCredential[]>([]);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(saved?.columnFilters ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [sidePanelOrder, setSidePanelOrder] = useState<Order | null>(null);
@@ -352,6 +402,73 @@ function OrdersPageInner() {
     dateTo: selectedDateTo,
     columnFilters,
   });
+  useEffect(() => {
+    if (!session?.access_token) {
+      setPurchaseCredentials([]);
+      return;
+    }
+
+    let alive = true;
+    fetch("/api/credentials", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      cache: "no-store",
+    })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: PurchaseCredential[]) => {
+        if (alive) setPurchaseCredentials(data);
+      })
+      .catch(() => {
+        if (alive) setPurchaseCredentials([]);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [session?.access_token, selectedIds.size]);
+
+  const purchaseIdFillOptions = useMemo(() => {
+    const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
+    const selectedPlatforms = new Set(
+      selectedOrders
+        .map((order) => purchasePlatformFromSource(order.purchase_source))
+        .filter((platform): platform is PurchasePlatform => Boolean(platform))
+    );
+
+    const candidates = selectedPlatforms.size > 0
+      ? purchaseCredentials.filter((credential) => selectedPlatforms.has(credential.platform))
+      : purchaseCredentials;
+
+    const seen = new Set<string>();
+    return candidates
+      .filter((credential) => {
+        const key = `${credential.platform}:${credential.login_id}`;
+        if (!credential.login_id || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((credential) => {
+        const platformLabel = PLATFORM_LABELS[credential.platform] ?? credential.platform;
+        return {
+          value: credential.login_id,
+          label: `${platformLabel} (${credential.login_id})`,
+        };
+      });
+  }, [orders, purchaseCredentials, selectedIds]);
+
+  const handleFillSelectedPurchaseId = useCallback((purchaseId: string) => {
+    const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
+    if (selectedOrders.length === 0) {
+      showToast("먼저 주문을 체크해주세요.", "info");
+      return;
+    }
+
+    startBatchUndo();
+    for (const order of selectedOrders) {
+      updateOrder(order.id, { purchase_id: purchaseId });
+    }
+    endBatchUndo();
+    showToast(`체크한 ${selectedOrders.length}건에 구매아이디를 입력했습니다.`, "success");
+  }, [endBatchUndo, orders, selectedIds, showToast, startBatchUndo, updateOrder]);
   const getLatestSelectedOrders = useCallback(async () => {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return [];
@@ -382,9 +499,10 @@ function OrdersPageInner() {
     productIds: string[],
     productNames: Map<string, string>,
     abortController: AbortController,
-  ): Promise<{ successes: CostRefreshResult[]; botBlocked: CostRetryItem[]; stopped: boolean }> => {
+  ): Promise<{ successes: CostRefreshResult[]; botBlocked: CostRetryItem[]; failed: CostRetryItem[]; stopped: boolean }> => {
     const successes: CostRefreshResult[] = [];
     const botBlocked: CostRetryItem[] = [];
+    const failed: CostRetryItem[] = [];
     let stopped = false;
 
     try {
@@ -400,12 +518,22 @@ function OrdersPageInner() {
 
       if (!res.ok || !res.body) {
         pushCostRefreshLog("원가 수집 실패 (서버 응답 오류)");
-        return { successes, botBlocked, stopped };
+        return {
+          successes,
+          botBlocked,
+          failed: productIds.map((id) => ({
+            id,
+            name: productNames.get(id) ?? "상품명 없음",
+            reason: "failed",
+          })),
+          stopped,
+        };
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      const processedIds = new Set<string>();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -422,6 +550,7 @@ function OrdersPageInner() {
           try {
             const event = JSON.parse(data) as CostScrapeEvent;
             if (event.type === "progress") {
+              processedIds.add(event.id);
               setCostRefreshProcessed(event.index);
 
               const failReasonText: Record<string, string> = {
@@ -452,7 +581,7 @@ function OrdersPageInner() {
               pushCostRefreshLog(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
 
               if (event.bot_blocked) {
-                botBlocked.push({ id: event.id, name: event.name });
+                botBlocked.push({ id: event.id, name: event.name, reason: "bot_blocked" });
               } else if (event.fail_reason === "sold_out") {
                 successes.push({
                   productId: event.id,
@@ -471,6 +600,8 @@ function OrdersPageInner() {
                   status: "priced",
                   orderCount: 0,
                 });
+              } else {
+                failed.push({ id: event.id, name: event.name, reason: "failed" });
               }
             } else if (event.type === "done") {
               setCostRefreshStats({
@@ -485,8 +616,30 @@ function OrdersPageInner() {
               pushCostRefreshLog(`수집 완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패${soldOutText}${blockedText}`);
             } else if (event.type === "error") {
               pushCostRefreshLog(`오류: ${event.message}`);
+              for (const id of productIds) {
+                if (!processedIds.has(id)) {
+                  failed.push({
+                    id,
+                    name: productNames.get(id) ?? "상품명 없음",
+                    reason: "failed",
+                  });
+                }
+              }
             }
           } catch {}
+        }
+      }
+
+      // 연결이 정상적인 완료 이벤트 없이 끊기면 아직 진행 이벤트가 없던 상품도 재시도 대상에 포함
+      if (!stopped) {
+        for (const id of productIds) {
+          if (!processedIds.has(id)) {
+            failed.push({
+              id,
+              name: productNames.get(id) ?? "상품명 없음",
+              reason: "failed",
+            });
+          }
         }
       }
     } catch (err) {
@@ -498,7 +651,7 @@ function OrdersPageInner() {
       }
     }
 
-    return { successes, botBlocked, stopped };
+    return { successes, botBlocked, failed, stopped };
   }, [pushCostRefreshLog, session?.access_token]);
 
   const applyCostRefreshResults = useCallback(async (
@@ -535,8 +688,19 @@ function OrdersPageInner() {
 
         for (const order of group.orders) {
           const nextCost = result.status === "sold_out" ? 0 : result.price * (order.quantity || 1);
+          const purchaseSource = getAutoPurchaseSourceForCostRefresh({
+            status: result.status,
+            purchaseUrl: group.product.purchase_url,
+            currentPurchaseSource: order.purchase_source,
+            settlement: order.settlement || 0,
+            nextCost,
+          });
           const updates: Record<string, unknown> = {};
           if (order.cost !== nextCost) updates.cost = nextCost;
+          if (result.status === "priced" && group.product.purchase_url && !order.purchase_url) {
+            updates.purchase_url = group.product.purchase_url;
+          }
+          if (purchaseSource) updates.purchase_source = purchaseSource;
           if (result.status === "sold_out" && order.delivery_status !== "재고부족") {
             updates.delivery_status = "재고부족";
           }
@@ -646,7 +810,7 @@ function OrdersPageInner() {
     try {
       for (let attempt = 1; attempt <= MAX_COST_REFRESH_ATTEMPTS && retryItems.length > 0; attempt++) {
         if (attempt > 1) {
-          pushCostRefreshLog(`봇감지 ${retryItems.length}개 자동 재시도 (${attempt}/${MAX_COST_REFRESH_ATTEMPTS})...`);
+          pushCostRefreshLog(`가격 수집 실패 ${retryItems.length}개 자동 재시도 (${attempt}/${MAX_COST_REFRESH_ATTEMPTS})...`);
           await new Promise((resolve) => setTimeout(resolve, 3000));
           if (abortController.signal.aborted) {
             stopped = true;
@@ -663,7 +827,11 @@ function OrdersPageInner() {
         stopped = result.stopped;
         if (stopped) break;
 
-        retryItems = result.botBlocked.filter((item) => !successMap.has(item.id));
+        const retryMap = new Map<string, CostRetryItem>();
+        for (const item of [...result.botBlocked, ...result.failed]) {
+          if (!successMap.has(item.id)) retryMap.set(item.id, item);
+        }
+        retryItems = [...retryMap.values()];
         if (retryItems.length === 0) break;
       }
 
@@ -675,9 +843,14 @@ function OrdersPageInner() {
         changed: collectedResults.filter((result) => result.status === "priced" && result.price !== result.previous).length,
         unchanged: collectedResults.filter((result) => result.status === "priced" && result.price === result.previous).length,
         soldOut: collectedResults.filter((result) => result.status === "sold_out").length,
-        botBlocked: retryItems.length > 0 && !stopped ? retryItems.length : 0,
+        ...(stopped ? {} : {
+          botBlocked: retryItems.filter((item) => item.reason === "bot_blocked").length,
+          failed: retryItems.filter((item) => item.reason === "failed").length,
+        }),
       }));
-      const remainingText = retryItems.length > 0 && !stopped ? `, 봇감지 미완료 ${retryItems.length}개` : "";
+      const remainingText = retryItems.length > 0 && !stopped
+        ? `, 최대 ${MAX_COST_REFRESH_ATTEMPTS}회 재시도 후 미완료 ${retryItems.length}개`
+        : "";
       const stoppedText = stopped ? ", 중단됨" : "";
       pushCostRefreshLog(`수집 완료: 상품 ${collectedResults.length}개 확인됨${remainingText}${stoppedText}. 결과 확인 후 적용하세요.`);
       if (collectedResults.length > 0) {
@@ -728,6 +901,13 @@ function OrdersPageInner() {
     const orderChanges = (group?.orders ?? []).map((order) => {
       const previousCost = order.cost || 0;
       const nextCost = result.status === "sold_out" ? 0 : result.price * (order.quantity || 1);
+      const purchaseSource = getAutoPurchaseSourceForCostRefresh({
+        status: result.status,
+        purchaseUrl: group?.product.purchase_url,
+        currentPurchaseSource: order.purchase_source,
+        settlement: order.settlement || 0,
+        nextCost,
+      });
       const statusChanged = result.status === "sold_out" && order.delivery_status !== "재고부족";
       return {
         id: order.id,
@@ -735,15 +915,17 @@ function OrdersPageInner() {
         quantity: order.quantity || 1,
         previousCost,
         nextCost,
+        purchaseSource,
         statusChanged,
         changed: previousCost !== nextCost,
+        sourceChanged: Boolean(purchaseSource),
       };
     });
 
     return {
       ...result,
       orderChanges,
-      changedOrderCount: orderChanges.filter((order) => order.changed || order.statusChanged).length,
+      changedOrderCount: orderChanges.filter((order) => order.changed || order.statusChanged || order.sourceChanged).length,
     };
   }), [costRefreshResults]);
 
@@ -848,10 +1030,10 @@ function OrdersPageInner() {
   const handleClearPurchaseDuplicate = useCallback(async (order: Order) => {
     const confirmed = window.confirm(
       [
-        "이 주문의 중복구매 의심을 해제할까요?",
+        "이 주문의 구매취소/정리를 진행할까요?",
         "",
-        "실제 중복구매가 아닌 것이 확인된 경우에만 진행하세요.",
-        "진행하면 구매 로그와 주문의 구매번호/원가/결제방식이 지워지고 상태가 결제전으로 돌아갑니다.",
+        "실제 구매가 취소되었거나 구매되지 않은 것이 확인된 경우에만 진행하세요.",
+        "구매로그는 삭제하지 않고 취소 기록으로 보관하며, 주문 구매정보는 정리됩니다.",
       ].join("\n")
     );
     if (!confirmed) return;
@@ -876,23 +1058,75 @@ function OrdersPageInner() {
         throw new Error(typeof data.error === "string" ? data.error : "중복구매 의심 해제 실패");
       }
 
-      showToast(`중복구매 의심을 해제했습니다. 구매 로그 ${data.deletedLogCount ?? 0}건 삭제`, "success");
+      showToast(`구매취소/정리를 완료했습니다. 구매로그 ${data.cancelledLogCount ?? 0}건 보관`, "success");
       await refetch();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "중복구매 의심 해제 실패", "error");
     }
   }, [session?.access_token, showToast, refetch]);
 
+  const handlePurchaseCancelSubmit = useCallback(async (mode: PurchaseCancelMode, reason: PurchaseCancelReason) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) {
+      showToast("먼저 주문을 체크해주세요.", "info");
+      return;
+    }
+    if (!session?.access_token) {
+      showToast("로그인이 필요합니다.", "error");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/orders/cancel-purchase", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ orderIds: ids, mode, reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = Array.isArray(data.details) && data.details.length > 0 ? `\n${data.details.join("\n")}` : "";
+        throw new Error(`${typeof data.error === "string" ? data.error : "구매취소/정리 실패"}${detail}`);
+      }
+
+      showToast(`${data.processedOrderIds?.length ?? ids.length}건 구매취소/정리를 완료했습니다. 구매로그는 보관됩니다.`, "success");
+      setShowPurchaseCancelModal(false);
+      setSelectedIds(new Set());
+      await refetch();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "구매취소/정리 실패", "error");
+    }
+  }, [refetch, selectedIds, session?.access_token, showToast]);
+
   const handleClearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
   const handleBulkStatusChange = useCallback((status: string) => {
     const ids = [...selectedIds];
+    const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
+
+    if ((status === "결제전" || status === "취소완료") && selectedOrders.some(hasPurchaseEvidence)) {
+      showToast(
+        status === "결제전"
+          ? "구매정보가 있는 주문은 결제전으로 바로 되돌릴 수 없습니다. 구매취소/정리 버튼을 이용해주세요."
+          : "구매정보가 있는 주문은 취소완료로 바로 바꿀 수 없습니다. 구매취소/정리 버튼을 이용해주세요.",
+        "error",
+      );
+      return;
+    }
+
+    const updates: OrderUpdate = { delivery_status: status };
+
     startBatchUndo();
-    for (const id of ids) updateOrder(id, { delivery_status: status }, false);
+    for (const id of ids) updateOrder(id, updates, false);
     endBatchUndo();
-    showToast(`${ids.length}개 주문 상태 변경: ${status}`, "success");
+    showToast(
+      `${ids.length}개 주문 상태 변경: ${status}`,
+      "success"
+    );
     handleClearSelection();
-  }, [selectedIds, startBatchUndo, endBatchUndo, updateOrder, showToast, handleClearSelection]);
+  }, [endBatchUndo, handleClearSelection, orders, selectedIds, showToast, startBatchUndo, updateOrder]);
 
   const handleColumnFilterChange = useCallback((key: string, values: string[]) => {
     setColumnFilters((prev) => {
@@ -919,6 +1153,7 @@ function OrdersPageInner() {
       묶음번호: o.bundle_no,
       주문일시: o.order_date ? formatKoreanDateTime(o.order_date) : null,
       판매처: o.marketplace,
+      주문자명: o.marketplace_orderer_name,
       수취인명: o.recipient_name,
       상품명: o.product_name,
       수량: o.quantity,
@@ -1135,6 +1370,15 @@ function OrdersPageInner() {
               {deleting ? "삭제 중..." : `${selectedIds.size}건 삭제`}
             </button>
           )}
+          {selectedIds.size > 0 && (
+            <button
+              onClick={() => setShowPurchaseCancelModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-red-600/20 text-red-400 hover:bg-red-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Ban className="w-4 h-4" />
+              구매취소/정리 ({selectedIds.size})
+            </button>
+          )}
           <div className="relative" ref={autoMenuRef}>
             <button
               onClick={() => setShowAutoMenu(!showAutoMenu)}
@@ -1291,6 +1535,8 @@ function OrdersPageInner() {
         onClearPurchaseDuplicate={handleClearPurchaseDuplicate}
         columnFilters={columnFilters}
         onColumnFilterChange={handleColumnFilterChange}
+        purchaseIdFillOptions={purchaseIdFillOptions}
+        onFillSelectedPurchaseId={handleFillSelectedPurchaseId}
       />
       </>)}
 
@@ -1353,12 +1599,13 @@ function OrdersPageInner() {
                 return (
                   <div
                     key={`${order.productId}-${order.id}`}
-                    className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-xs ${order.changed || order.statusChanged ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)] opacity-75"}`}
+                    className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-xs ${order.changed || order.statusChanged || order.sourceChanged ? "text-[var(--text-secondary)]" : "text-[var(--text-muted)] opacity-75"}`}
                   >
                     <div className="min-w-0 truncate">
                       <span className="font-medium text-[var(--text-primary)]">{order.productName}</span>
                       <span className="text-[var(--text-muted)]"> · {order.recipient} · 수량 {order.quantity}</span>
                       {order.status === "sold_out" ? <span className="text-amber-400"> · 품절 → 재고부족</span> : !productChanged && <span className="text-[var(--text-muted)]"> · 상품소싱 변동없음</span>}
+                      {order.purchaseSource && <span className="text-emerald-400"> · 구매처 → {order.purchaseSource}</span>}
                     </div>
                     <div className="shrink-0 tabular-nums text-right">
                       <span className="text-[var(--text-muted)]">{order.previousCost.toLocaleString()}</span>
@@ -1465,6 +1712,13 @@ function OrdersPageInner() {
           count={selectedIds.size}
           onChangeStatus={handleBulkStatusChange}
           onClearSelection={handleClearSelection}
+        />
+      )}
+      {showPurchaseCancelModal && (
+        <PurchaseCancelModal
+          count={selectedIds.size}
+          onClose={() => setShowPurchaseCancelModal(false)}
+          onSubmit={handlePurchaseCancelSubmit}
         />
       )}
       {/* 운송장수집 모달은 레이아웃의 TrackingCollectHost에서 렌더 (백그라운드 유지) */}

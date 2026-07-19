@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
-import { recalcTotals } from "@/lib/finance-utils";
+import { normalizeCard, normalizePlatform, recalcTotals } from "@/lib/finance-utils";
 import type { CardEntry, PlatformEntry, CashEntry } from "@/types/database";
 
 // PUT: 스냅샷 업데이트
@@ -27,11 +27,13 @@ export async function PUT(
       .single();
 
     if (current) {
-      const cards = (body.cards ?? current.cards) as CardEntry[];
-      const platforms = (body.platforms ?? current.platforms) as PlatformEntry[];
+      const cards = ((body.cards ?? current.cards) as CardEntry[]).map(normalizeCard);
+      const platforms = ((body.platforms ?? current.platforms) as PlatformEntry[]).map(normalizePlatform);
       const cash = (body.cash ?? current.cash) as CashEntry[];
       const pending = body.pending_purchase ?? current.pending_purchase;
       const totals = recalcTotals(cards, platforms, cash, pending);
+      updateData.cards = cards;
+      updateData.platforms = platforms;
       Object.assign(updateData, totals);
     }
   }

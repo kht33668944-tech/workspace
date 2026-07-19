@@ -76,7 +76,7 @@ export default function DailyProfitSummary({ rows, summary, loading }: DailyProf
         <div>
           <h2 className="text-sm font-semibold text-[var(--text-secondary)]">이번 달 손익</h2>
           <p className="text-xs text-[var(--text-muted)] mt-1">
-            매출은 배송완료일, 카드 사용은 구매일, 반품은 반품완료일 기준
+            매출·마진·반품은 주문일 기준(배송완료 주문만 합산), 카드 사용은 구매일 기준
           </p>
         </div>
         <div className="flex flex-col gap-2 md:items-end">

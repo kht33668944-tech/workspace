@@ -49,8 +49,15 @@ function describeAddress(order: Order | OrderUpdate): string {
 // 중복 판별 키 생성
 function makeDuplicateKey(
   bundleNo: string | null, recipientName: string | null, productName: string | null,
-  orderDate: string | null, marketplace: string | null
+  orderDate: string | null, marketplace: string | null,
+  marketplaceOrderNo: string | null = null, marketplaceProductOrderNo: string | null = null
 ): string | null {
+  if (marketplaceProductOrderNo) {
+    return `MP:${marketplace || ""}|${marketplaceProductOrderNo}`;
+  }
+  if (marketplaceOrderNo) {
+    return `MO:${marketplace || ""}|${marketplaceOrderNo}`;
+  }
   if (bundleNo) {
     // 묶음번호 + 수취인명 + 상품명
     return `B:${bundleNo}|${recipientName || ""}|${productName || ""}`;
@@ -66,6 +73,34 @@ function makeDuplicateKey(
 
 function hasText(value: unknown): boolean {
   return typeof value === "string" && value.trim() !== "";
+}
+
+const PURCHASE_DATA_KEYS = [
+  "purchase_order_no",
+  "purchased_at",
+  "cost",
+  "payment_method",
+  "purchase_id",
+  "purchase_source",
+  "purchase_url",
+] as const;
+
+function hasPurchaseEvidence(order: Order): boolean {
+  return Boolean(
+    hasText(order.purchase_order_no) ||
+    order.purchased_at ||
+    hasText(order.payment_method) ||
+    order.purchase_log_order_nos?.length ||
+    (order.cost ?? 0) > 0
+  );
+}
+
+function isClearingPurchaseData(updates: OrderUpdate): boolean {
+  return PURCHASE_DATA_KEYS.some((key) => {
+    if (!Object.prototype.hasOwnProperty.call(updates, key)) return false;
+    const value = updates[key];
+    return value === null || (typeof value === "string" && value.trim() === "");
+  });
 }
 
 function getMonthBounds(month: string): { from: string; to: string } {
@@ -146,7 +181,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
       if (options.search) {
         const s = options.search.replace(/[%_\\]/g, "\\$&").replace(/[,().]/g, "");
         query = query.or(
-          `product_name.ilike.%${s}%,recipient_name.ilike.%${s}%,bundle_no.ilike.%${s}%,marketplace.ilike.%${s}%,recipient_phone.ilike.%${s}%,orderer_phone.ilike.%${s}%,address.ilike.%${s}%,address_detail.ilike.%${s}%,delivery_memo.ilike.%${s}%,purchase_id.ilike.%${s}%,purchase_source.ilike.%${s}%,purchase_order_no.ilike.%${s}%,courier.ilike.%${s}%,tracking_no.ilike.%${s}%,memo.ilike.%${s}%`
+          `product_name.ilike.%${s}%,recipient_name.ilike.%${s}%,marketplace_order_no.ilike.%${s}%,marketplace_product_order_no.ilike.%${s}%,marketplace_orderer_name.ilike.%${s}%,bundle_no.ilike.%${s}%,marketplace.ilike.%${s}%,recipient_phone.ilike.%${s}%,orderer_phone.ilike.%${s}%,address.ilike.%${s}%,address_detail.ilike.%${s}%,delivery_memo.ilike.%${s}%,purchase_id.ilike.%${s}%,purchase_source.ilike.%${s}%,purchase_order_no.ilike.%${s}%,courier.ilike.%${s}%,tracking_no.ilike.%${s}%,memo.ilike.%${s}%`
         );
       }
 
@@ -171,7 +206,9 @@ export function useOrders(options: UseOrdersOptions = {}) {
         .select("order_id, purchase_order_no")
         .eq("user_id", userId)
         .in("order_id", batch)
-        .not("purchase_order_no", "is", null);
+        .eq("status", "success")
+        .not("purchase_order_no", "is", null)
+        .neq("purchase_order_no", "");
 
       if (purchaseLogError) {
         console.error("[use-orders] 구매 중복 로그 조회 실패:", purchaseLogError.message);
@@ -310,7 +347,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
         const monthBounds = getMonthBounds(month);
         const { data } = await supabase
           .from("orders")
-          .select("bundle_no, recipient_name, product_name, order_date, marketplace")
+          .select("bundle_no, recipient_name, product_name, order_date, marketplace, marketplace_order_no, marketplace_product_order_no")
           .eq("user_id", user.id)
           .gte("order_date", monthBounds.from)
           .lt("order_date", monthBounds.to)
@@ -325,7 +362,15 @@ export function useOrders(options: UseOrdersOptions = {}) {
     // 기존 주문의 키 Set 생성
     const existingKeys = new Set<string>();
     for (const o of existingOrders) {
-      const key = makeDuplicateKey(o.bundle_no, o.recipient_name, o.product_name, o.order_date, o.marketplace);
+      const key = makeDuplicateKey(
+        o.bundle_no,
+        o.recipient_name,
+        o.product_name,
+        o.order_date,
+        o.marketplace,
+        o.marketplace_order_no,
+        o.marketplace_product_order_no,
+      );
       if (key) existingKeys.add(key);
     }
 
@@ -333,7 +378,15 @@ export function useOrders(options: UseOrdersOptions = {}) {
     const duplicateIndices = new Set<number>();
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      const key = makeDuplicateKey(r.bundle_no ?? null, r.recipient_name ?? null, r.product_name ?? null, r.order_date ?? null, r.marketplace ?? null);
+      const key = makeDuplicateKey(
+        r.bundle_no ?? null,
+        r.recipient_name ?? null,
+        r.product_name ?? null,
+        r.order_date ?? null,
+        r.marketplace ?? null,
+        r.marketplace_order_no ?? null,
+        r.marketplace_product_order_no ?? null,
+      );
       if (key && existingKeys.has(key)) {
         duplicateIndices.add(i);
       }
@@ -366,6 +419,17 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const updateOrder = (id: string, updates: OrderUpdate, skipUndo = false): Promise<void> => {
     let autoStatusUpdates: OrderUpdate = { ...updates };
     const currentOrder = orders.find((o) => o.id === id);
+
+    if (currentOrder && hasPurchaseEvidence(currentOrder)) {
+      if (isClearingPurchaseData(autoStatusUpdates)) {
+        showToast("구매정보가 있는 주문은 항목을 직접 지울 수 없습니다. 구매취소/정리 버튼을 이용해주세요.", "error");
+        return Promise.resolve();
+      }
+      if (autoStatusUpdates.delivery_status === "취소완료") {
+        showToast("구매정보가 있는 주문은 취소완료로 바로 바꿀 수 없습니다. 구매취소/정리 버튼을 이용해주세요.", "error");
+        return Promise.resolve();
+      }
+    }
 
     if (currentOrder && !skipUndo && hasAddressChange(currentOrder, autoStatusUpdates)) {
       let confirmed = true;

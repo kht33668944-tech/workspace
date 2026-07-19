@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getServiceSupabaseClient, getSupabaseClient } from "@/lib/api-helpers";
+import {
+  cancelPurchaseOrders,
+  PurchaseCancellationError,
+} from "@/lib/purchase-cancellation";
 
 export const revalidate = 0;
 
@@ -7,8 +11,7 @@ type ClearDuplicateBody = {
   orderId?: string;
 };
 
-const BLOCKED_STATUSES = new Set(["배송완료", "반품완료", "교환완료", "취소완료"]);
-
+// 기존 단건 버튼과의 호환용입니다. 구매로그를 삭제하지 않고 취소 상태로 보관합니다.
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
@@ -16,83 +19,33 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as ClearDuplicateBody;
     const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
-    if (!orderId) {
-      return NextResponse.json({ error: "주문 ID가 필요합니다." }, { status: 400 });
-    }
+    if (!orderId) return NextResponse.json({ error: "주문 ID가 필요합니다." }, { status: 400 });
 
     const userSupabase = getSupabaseClient(token);
-    const { data: { user }, error: userErr } = await userSupabase.auth.getUser();
-    if (userErr || !user) {
-      return NextResponse.json({ error: "인증 필요" }, { status: 401 });
-    }
+    const { data: { user }, error: userError } = await userSupabase.auth.getUser();
+    if (userError || !user) return NextResponse.json({ error: "인증 필요" }, { status: 401 });
 
-    const supabase = getServiceSupabaseClient();
-    const { data: order, error: orderErr } = await supabase
-      .from("orders")
-      .select("id, delivery_status, tracking_no")
-      .eq("id", orderId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (orderErr) {
-      console.error("[clear-purchase-duplicate] 주문 조회 실패:", orderErr.message);
-      return NextResponse.json({ error: orderErr.message }, { status: 500 });
-    }
-    if (!order) {
-      return NextResponse.json({ error: "주문을 찾을 수 없습니다." }, { status: 404 });
-    }
-
-    const trackingNo = typeof order.tracking_no === "string" ? order.tracking_no.trim() : "";
-    if (trackingNo || BLOCKED_STATUSES.has(order.delivery_status)) {
-      return NextResponse.json(
-        { error: "운송장 또는 완료 상태가 있는 주문은 중복구매 의심 해제를 할 수 없습니다." },
-        { status: 409 }
-      );
-    }
-
-    const { data: deletedLogs, error: deleteErr } = await supabase
-      .from("purchase_logs")
-      .delete()
-      .eq("user_id", user.id)
-      .eq("order_id", orderId)
-      .select("id");
-
-    if (deleteErr) {
-      console.error("[clear-purchase-duplicate] 구매 로그 삭제 실패:", deleteErr.message);
-      return NextResponse.json({ error: deleteErr.message }, { status: 500 });
-    }
-
-    const { data: updatedOrder, error: updateErr } = await supabase
-      .from("orders")
-      .update({
-        purchase_order_no: null,
-        cost: null,
-        payment_method: null,
-        purchased_at: null,
-        delivery_status: "결제전",
-      })
-      .eq("id", orderId)
-      .eq("user_id", user.id)
-      .select("id")
-      .maybeSingle();
-
-    if (updateErr) {
-      console.error("[clear-purchase-duplicate] 주문 구매정보 초기화 실패:", updateErr.message);
-      return NextResponse.json({ error: updateErr.message }, { status: 500 });
-    }
-    if (!updatedOrder) {
-      return NextResponse.json({ error: "주문 구매정보를 초기화하지 못했습니다." }, { status: 500 });
-    }
+    const result = await cancelPurchaseOrders(
+      getServiceSupabaseClient(),
+      user.id,
+      [orderId],
+      "purchased_cancelled",
+      "기타",
+    );
 
     return NextResponse.json({
       ok: true,
-      deletedLogCount: deletedLogs?.length ?? 0,
+      cancelledLogCount: result.cancelledLogCount,
+      targetStatus: result.targetStatus,
     });
-  } catch (err) {
-    console.error("[clear-purchase-duplicate] 처리 실패:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "중복구매 의심 해제 실패" },
-      { status: 500 }
-    );
+  } catch (error) {
+    if (error instanceof PurchaseCancellationError) {
+      return NextResponse.json(
+        { error: error.message, details: error.details ?? [] },
+        { status: error.statusCode },
+      );
+    }
+    console.error("[clear-purchase-duplicate] 처리 실패:", error instanceof Error ? error.message : String(error));
+    return NextResponse.json({ error: "중복구매 의심 정리 중 오류가 발생했습니다." }, { status: 500 });
   }
 }

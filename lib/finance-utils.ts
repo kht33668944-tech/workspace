@@ -1,14 +1,60 @@
 import type { CardEntry, PlatformEntry, CashEntry } from "@/types/database";
 
+function numeric(value: number | null | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+export function getCardPersonalExcluded(card: CardEntry): number {
+  if (card.personal_excluded !== undefined) return numeric(card.personal_excluded);
+  const legacyInstallment = numeric(card.installment);
+  return legacyInstallment > 0 ? -legacyInstallment : legacyInstallment;
+}
+
+export function getCardPaymentTotal(card: CardEntry): number {
+  const recordTotal = (card.payments ?? []).reduce((sum, payment) => sum + numeric(payment.amount), 0);
+  return recordTotal + numeric(card.payment_made);
+}
+
+export function calcCardTotal(card: CardEntry): number {
+  return numeric(card.accumulated) + numeric(card.daily_payment) - getCardPaymentTotal(card) + getCardPersonalExcluded(card);
+}
+
+export function normalizeCard(card: CardEntry): CardEntry {
+  return {
+    ...card,
+    accumulated: numeric(card.accumulated),
+    daily_payment: numeric(card.daily_payment),
+    installment: numeric(card.installment),
+    personal_excluded: getCardPersonalExcluded(card),
+    payments: card.payments ?? [],
+    total: calcCardTotal(card),
+  };
+}
+
+export function calcPlatformTotal(platform: PlatformEntry): number {
+  return numeric(platform.delivered) + numeric(platform.shipping) + numeric(platform.cs);
+}
+
+export function normalizePlatform(platform: PlatformEntry): PlatformEntry {
+  return {
+    ...platform,
+    delivered: numeric(platform.delivered),
+    shipping: numeric(platform.shipping),
+    cs: numeric(platform.cs),
+    settled_amount: numeric(platform.settled_amount),
+    total: calcPlatformTotal(platform),
+  };
+}
+
 export function recalcTotals(
   cards: CardEntry[],
   platforms: PlatformEntry[],
   cash: CashEntry[],
   pendingPurchase: number
 ) {
-  const total_cards = cards.reduce((s, c) => s + c.total, 0);
-  const total_platforms = platforms.reduce((s, p) => s + p.total, 0);
-  const total_cash = cash.reduce((s, c) => s + c.amount, 0);
+  const total_cards = cards.reduce((s, c) => s + calcCardTotal(c), 0);
+  const total_platforms = platforms.reduce((s, p) => s + calcPlatformTotal(p), 0);
+  const total_cash = cash.reduce((s, c) => s + numeric(c.amount), 0);
   const net_balance = total_platforms + total_cash + pendingPurchase - total_cards;
   return { total_cards, total_platforms, total_cash, net_balance };
 }

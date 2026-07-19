@@ -1,12 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { CalendarClock } from "lucide-react";
-import { formatKRW, getNextPaymentDay } from "@/lib/finance-utils";
-import type { DailySnapshot, CardEntry } from "@/types/database";
+import { formatKRW } from "@/lib/finance-utils";
+import type { DailySnapshot } from "@/types/database";
 
 interface FinanceSummaryTabProps {
-  snapshot: DailySnapshot | null;
   fetchTrendData: (days: number) => Promise<DailySnapshot[]>;
 }
 
@@ -41,7 +39,7 @@ function SummaryCard({
   );
 }
 
-export default function FinanceSummaryTab({ snapshot, fetchTrendData }: FinanceSummaryTabProps) {
+export default function FinanceSummaryTab({ fetchTrendData }: FinanceSummaryTabProps) {
   const [summary, setSummary] = useState<SummaryData>({
     weekStart: null,
     weekEnd: null,
@@ -79,11 +77,6 @@ export default function FinanceSummaryTab({ snapshot, fetchTrendData }: FinanceS
     return () => { cancelled = true; };
   }, [fetchTrendData]);
 
-  const cardDDays = (snapshot?.cards ?? [])
-    .filter((c: CardEntry) => c.payment_day && c.payment_day > 0)
-    .map((c: CardEntry) => ({ name: c.name, ...getNextPaymentDay(c.payment_day!), amount: c.total }))
-    .sort((a, b) => a.daysLeft - b.daysLeft);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48 text-[var(--text-muted)] text-sm">
@@ -119,44 +112,6 @@ export default function FinanceSummaryTab({ snapshot, fetchTrendData }: FinanceS
             { label: "순잔액 변동", value: monthBalanceChange, color: monthBalanceChange >= 0 ? "text-green-400" : "text-red-400" },
           ]}
         />
-      </div>
-
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4">
-        <h4 className="text-xs font-semibold text-[var(--text-muted)] mb-3 flex items-center gap-1">
-          <CalendarClock className="w-3.5 h-3.5" />
-          카드 결제일
-        </h4>
-        {cardDDays.length === 0 ? (
-          <p className="text-sm text-[var(--text-muted)]">
-            카드 결제일을 입력하면 D-Day가 표시됩니다.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {cardDDays.map((c) => (
-              <div key={c.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`px-2 py-0.5 rounded text-xs font-medium ${
-                      c.daysLeft <= 3
-                        ? "bg-red-500/10 text-red-400"
-                        : c.daysLeft <= 7
-                          ? "bg-yellow-500/10 text-yellow-400"
-                          : "bg-[var(--bg-elevated)] text-[var(--text-muted)]"
-                    }`}
-                  >
-                    D-{c.daysLeft}
-                  </span>
-                  <span className="text-sm text-[var(--text-primary)]">
-                    {c.name} 결제일 ({c.dateStr})
-                  </span>
-                </div>
-                <span className="text-sm font-medium text-red-400">
-                  -{formatKRW(c.amount)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

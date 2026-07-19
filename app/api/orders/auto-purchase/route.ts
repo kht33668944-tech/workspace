@@ -49,6 +49,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "인증 필요" }, { status: 401 });
     }
 
+    const userSupabase = getSupabaseClient(token);
+    const {
+      data: { user },
+      error: userError,
+    } = await userSupabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "인증 필요" }, { status: 401 });
+    }
+
+    const userId = user.id;
     const body = (await request.json()) as AutoPurchaseRequest;
 
     if (!body.orders || body.orders.length === 0) {
@@ -59,13 +70,12 @@ export async function POST(request: NextRequest) {
     let loginId: string;
     let loginPw: string;
 
-    const userSupabaseForCred = getSupabaseClient(token);
-
     if (body.credentialId) {
-      const { data: cred, error } = await userSupabaseForCred
+      const { data: cred, error } = await userSupabase
         .from("purchase_credentials")
         .select("platform, login_id, login_pw_encrypted")
         .eq("id", body.credentialId)
+        .eq("user_id", userId)
         .single();
 
       if (error || !cred) {
@@ -96,10 +106,11 @@ export async function POST(request: NextRequest) {
     let naverLoginPw: string | undefined;
     if (platform === "ohouse") {
       // smartstore 플랫폼으로 등록된 계정 중 첫 번째 사용
-      const { data: naverCred } = await userSupabaseForCred
+      const { data: naverCred } = await userSupabase
         .from("purchase_credentials")
         .select("login_id, login_pw_encrypted")
         .eq("platform", "smartstore")
+        .eq("user_id", userId)
         .limit(1)
         .single();
 
@@ -137,10 +148,6 @@ export async function POST(request: NextRequest) {
 
         // service_role 클라이언트 사용 (JWT 만료와 무관하게 동작)
         const supabase = getServiceSupabaseClient();
-        // JWT에서 user_id 추출 (purchase_logs insert 시 필요)
-        const userSupabase = getSupabaseClient(token);
-        const { data: { user: authUser } } = await userSupabase.auth.getUser();
-        const userId = authUser?.id;
         const batchId = body.batchId || crypto.randomUUID();
         const allSuccess: SSEEvent["success"] = [];
         const allFailed: SSEEvent["failed"] = [];
@@ -170,7 +177,10 @@ export async function POST(request: NextRequest) {
             .from("purchase_logs")
             .select("order_id, purchase_order_no")
             .in("order_id", orderIds)
-            .not("purchase_order_no", "is", null);
+            .eq("user_id", userId)
+            .eq("status", "success")
+            .not("purchase_order_no", "is", null)
+            .neq("purchase_order_no", "");
 
           if (error) {
             console.error("[auto-purchase] 구매 로그 중복 확인 실패:", error.message);
@@ -190,11 +200,11 @@ export async function POST(request: NextRequest) {
         };
 
         const assertOrderStillLockedForPurchase = async (orderId: string) => {
-          let query = supabase
+          const query = supabase
             .from("orders")
             .select("id, purchase_order_no, delivery_status, quantity")
-            .eq("id", orderId);
-          if (userId) query = query.eq("user_id", userId);
+            .eq("id", orderId)
+            .eq("user_id", userId);
 
           const { data: order, error } = await query.maybeSingle();
           if (error) throw new Error(`구매 직전 주문 상태 확인 실패: ${error.message}`);
@@ -234,11 +244,11 @@ export async function POST(request: NextRequest) {
           if (cost !== undefined) updateData.cost = cost;
           if (paymentMethod) updateData.payment_method = paymentMethod;
 
-          let existingQuery = supabase
+          const existingQuery = supabase
             .from("orders")
             .select("purchased_at, purchase_order_no, delivery_status")
-            .eq("id", orderId);
-          if (userId) existingQuery = existingQuery.eq("user_id", userId);
+            .eq("id", orderId)
+            .eq("user_id", userId);
           const { data: existingOrder } = await existingQuery.maybeSingle();
           if (!existingOrder?.purchased_at) updateData.purchased_at = new Date().toISOString();
 
@@ -253,13 +263,13 @@ export async function POST(request: NextRequest) {
             sendEvent({ type: "progress", orderId, status: "failed", message: reason, purchaseOrderNo });
             sendEvent({ type: "db_updated", orderId, status: "error", message: reason, purchaseOrderNo, cost, paymentMethod });
 
-            let reviewQuery = supabase
+            const reviewQuery = supabase
               .from("orders")
               .update({ delivery_status: purchaseReviewStatus })
               .eq("id", orderId)
+              .eq("user_id", userId)
               .eq("delivery_status", purchaseLockStatus)
               .or("purchase_order_no.is.null,purchase_order_no.eq.");
-            if (userId) reviewQuery = reviewQuery.eq("user_id", userId);
             await reviewQuery.then(({ error: reviewErr }) => {
               if (reviewErr) console.error(`[auto-purchase] 구매확인필요 전환 실패 (${orderId}):`, reviewErr.message);
             });
@@ -291,17 +301,14 @@ export async function POST(request: NextRequest) {
             return;
           }
 
-          // service_role(RLS 우회)이므로 소유권 스코핑을 명시.
-          // userId가 있으면 user_id로 한 번 더 제한(IDOR 방어), 만료 JWT로 userId가 없으면
-          // 기존 동작(id-only) 유지 — "JWT 만료와 무관 동작" 의도 보존.
-          let updateQuery = supabase
+          const updateQuery = supabase
             .from("orders")
             .update(updateData)
             .eq("id", orderId)
+            .eq("user_id", userId)
             .eq("delivery_status", purchaseLockStatus)
             .or("purchase_order_no.is.null,purchase_order_no.eq.")
             .select("id");
-          if (userId) updateQuery = updateQuery.eq("user_id", userId);
           const { data: updatedRows, error } = await updateQuery;
 
           if (error) {
@@ -340,13 +347,13 @@ export async function POST(request: NextRequest) {
           if (!lockedOrderIds.has(orderId)) return;
           const restoreStatus = lockReleaseStatusByOrderId.get(orderId) || "결제전";
 
-          let releaseQuery = supabase
+          const releaseQuery = supabase
             .from("orders")
             .update({ delivery_status: restoreStatus })
             .eq("id", orderId)
+            .eq("user_id", userId)
             .eq("delivery_status", purchaseLockStatus)
             .or("purchase_order_no.is.null,purchase_order_no.eq.");
-          if (userId) releaseQuery = releaseQuery.eq("user_id", userId);
 
           const { error: releaseErr } = await releaseQuery;
           if (releaseErr) {
@@ -395,11 +402,11 @@ export async function POST(request: NextRequest) {
           }
 
           if (targetOrders.length > 0) {
-            let orderStateQuery = supabase
+            const orderStateQuery = supabase
               .from("orders")
               .select("id, purchase_order_no, delivery_status, quantity")
-              .in("id", targetOrders.map((order) => order.orderId));
-            if (userId) orderStateQuery = orderStateQuery.eq("user_id", userId);
+              .in("id", targetOrders.map((order) => order.orderId))
+              .eq("user_id", userId);
             const { data: currentOrders, error: currentOrdersErr } = await orderStateQuery;
 
             if (currentOrdersErr) {
@@ -455,14 +462,14 @@ export async function POST(request: NextRequest) {
 
             const lockedOrders: PurchaseOrderInfo[] = [];
             for (const order of lockableOrders) {
-              let lockQuery = supabase
+              const lockQuery = supabase
                 .from("orders")
                 .update({ delivery_status: purchaseLockStatus })
                 .eq("id", order.orderId)
+                .eq("user_id", userId)
                 .eq("delivery_status", "결제전")
                 .or("purchase_order_no.is.null,purchase_order_no.eq.")
                 .select("id");
-              if (userId) lockQuery = lockQuery.eq("user_id", userId);
 
               const { data: lockedRows, error: lockErr } = await lockQuery;
               if (lockErr) {
@@ -557,11 +564,11 @@ export async function POST(request: NextRequest) {
               if (f.cost !== undefined) partialUpdate.cost = f.cost;
               if (f.paymentMethod) partialUpdate.payment_method = f.paymentMethod;
 
-              let existingPartialQuery = supabase
+              const existingPartialQuery = supabase
                 .from("orders")
                 .select("purchased_at, purchase_order_no, delivery_status")
-                .eq("id", f.orderId);
-              if (userId) existingPartialQuery = existingPartialQuery.eq("user_id", userId);
+                .eq("id", f.orderId)
+                .eq("user_id", userId);
               const { data: existingPartialOrder } = await existingPartialQuery.maybeSingle();
               if (!existingPartialOrder?.purchased_at) partialUpdate.purchased_at = new Date().toISOString();
 
@@ -582,14 +589,14 @@ export async function POST(request: NextRequest) {
                   paymentMethod: f.paymentMethod,
                 });
               } else {
-                let partialQuery = supabase
+                const partialQuery = supabase
                   .from("orders")
                   .update(partialUpdate)
                   .eq("id", f.orderId)
+                  .eq("user_id", userId)
                   .eq("delivery_status", purchaseLockStatus)
                   .or("purchase_order_no.is.null,purchase_order_no.eq.")
                   .select("id");
-                if (userId) partialQuery = partialQuery.eq("user_id", userId);
                 const { data: partialRows, error: partialErr } = await partialQuery;
                 if (partialErr) {
                   console.error(`[auto-purchase] 부분구매 DB 업데이트 실패 (${f.orderId}):`, partialErr.message);

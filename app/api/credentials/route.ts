@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { encrypt } from "@/lib/crypto";
 
+export const dynamic = "force-dynamic";
+
 // GET: 본인의 자격증명 목록 조회 (비밀번호 제외)
 export async function GET(request: NextRequest) {
   const token = getAccessToken(request);
@@ -14,7 +16,9 @@ export async function GET(request: NextRequest) {
     .order("platform");
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data);
+  return NextResponse.json(data, {
+    headers: { "Cache-Control": "private, no-store, max-age=0" },
+  });
 }
 
 // POST: 새 자격증명 등록
