@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
-import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw } from "lucide-react";
+import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
 import { useOrders } from "@/hooks/use-orders";
@@ -18,6 +18,7 @@ import OrderTable from "@/components/workspace/orders/order-table";
 import OrderModal from "@/components/workspace/orders/order-modal";
 import OrderSidePanel, { OrderSidePanelContent } from "@/components/workspace/orders/order-side-panel";
 import BulkEditBar from "@/components/workspace/orders/bulk-edit-bar";
+import PurchaseCancelModal from "@/components/workspace/orders/purchase-cancel-modal";
 import FilterBar from "@/components/ui/filter-bar";
 import MobileSheet from "@/components/ui/mobile-sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -30,6 +31,7 @@ import { useToast } from "@/context/ToastContext";
 import { useAutoPurchaseController, useTrackingCollectController } from "@/context/modal-controllers";
 import { PLATFORM_LABELS } from "@/types/database";
 import type { Order, OrderInsert, OrderUpdate, PurchaseCredential, PurchasePlatform } from "@/types/database";
+import type { PurchaseCancelMode, PurchaseCancelReason } from "@/lib/purchase-cancellation";
 
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
 
@@ -105,6 +107,16 @@ function detectCostRefreshPurchaseSource(url: string | null | undefined): string
 
 function isSupportedCostRefreshUrl(url: string | null | undefined): boolean {
   return detectCostRefreshPurchaseSource(url) !== null;
+}
+
+function hasPurchaseEvidence(order: Order): boolean {
+  return Boolean(
+    order.purchase_order_no?.trim() ||
+    order.purchased_at ||
+    order.payment_method?.trim() ||
+    order.purchase_log_order_nos?.length ||
+    (order.cost ?? 0) > 0
+  );
 }
 
 function getAutoPurchaseSourceForCostRefresh(params: {
@@ -232,6 +244,7 @@ function OrdersPageInner() {
   const [showImportMenu, setShowImportMenu] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showPurchaseCancelModal, setShowPurchaseCancelModal] = useState(false);
   const [purchaseCredentials, setPurchaseCredentials] = useState<PurchaseCredential[]>([]);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(saved?.columnFilters ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -1017,10 +1030,10 @@ function OrdersPageInner() {
   const handleClearPurchaseDuplicate = useCallback(async (order: Order) => {
     const confirmed = window.confirm(
       [
-        "이 주문의 중복구매 의심을 해제할까요?",
+        "이 주문의 구매취소/정리를 진행할까요?",
         "",
-        "실제 중복구매가 아닌 것이 확인된 경우에만 진행하세요.",
-        "진행하면 구매 로그와 주문의 구매번호/원가/결제방식이 지워지고 상태가 결제전으로 돌아갑니다.",
+        "실제 구매가 취소되었거나 구매되지 않은 것이 확인된 경우에만 진행하세요.",
+        "구매로그는 삭제하지 않고 취소 기록으로 보관하며, 주문 구매정보는 정리됩니다.",
       ].join("\n")
     );
     if (!confirmed) return;
@@ -1045,46 +1058,75 @@ function OrdersPageInner() {
         throw new Error(typeof data.error === "string" ? data.error : "중복구매 의심 해제 실패");
       }
 
-      showToast(`중복구매 의심을 해제했습니다. 구매 로그 ${data.deletedLogCount ?? 0}건 삭제`, "success");
+      showToast(`구매취소/정리를 완료했습니다. 구매로그 ${data.cancelledLogCount ?? 0}건 보관`, "success");
       await refetch();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "중복구매 의심 해제 실패", "error");
     }
   }, [session?.access_token, showToast, refetch]);
 
+  const handlePurchaseCancelSubmit = useCallback(async (mode: PurchaseCancelMode, reason: PurchaseCancelReason) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) {
+      showToast("먼저 주문을 체크해주세요.", "info");
+      return;
+    }
+    if (!session?.access_token) {
+      showToast("로그인이 필요합니다.", "error");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/orders/cancel-purchase", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ orderIds: ids, mode, reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = Array.isArray(data.details) && data.details.length > 0 ? `\n${data.details.join("\n")}` : "";
+        throw new Error(`${typeof data.error === "string" ? data.error : "구매취소/정리 실패"}${detail}`);
+      }
+
+      showToast(`${data.processedOrderIds?.length ?? ids.length}건 구매취소/정리를 완료했습니다. 구매로그는 보관됩니다.`, "success");
+      setShowPurchaseCancelModal(false);
+      setSelectedIds(new Set());
+      await refetch();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "구매취소/정리 실패", "error");
+    }
+  }, [refetch, selectedIds, session?.access_token, showToast]);
+
   const handleClearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
   const handleBulkStatusChange = useCallback((status: string) => {
     const ids = [...selectedIds];
-    const resetPurchaseInfo = status === "결제전";
+    const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
 
-    if (resetPurchaseInfo) {
-      const ok = confirm(
-        `선택한 ${ids.length}건을 결제전으로 되돌릴까요?\n\n실제 구매처 주문내역에서 구매되지 않은 주문만 되돌려야 합니다. 구매번호, 결제카드, 구매일시는 함께 비워집니다.`
+    if ((status === "결제전" || status === "취소완료") && selectedOrders.some(hasPurchaseEvidence)) {
+      showToast(
+        status === "결제전"
+          ? "구매정보가 있는 주문은 결제전으로 바로 되돌릴 수 없습니다. 구매취소/정리 버튼을 이용해주세요."
+          : "구매정보가 있는 주문은 취소완료로 바로 바꿀 수 없습니다. 구매취소/정리 버튼을 이용해주세요.",
+        "error",
       );
-      if (!ok) return;
+      return;
     }
 
-    const updates: OrderUpdate = resetPurchaseInfo
-      ? {
-          delivery_status: "결제전",
-          purchase_order_no: null,
-          payment_method: null,
-          purchased_at: null,
-        }
-      : { delivery_status: status };
+    const updates: OrderUpdate = { delivery_status: status };
 
     startBatchUndo();
     for (const id of ids) updateOrder(id, updates, false);
     endBatchUndo();
     showToast(
-      resetPurchaseInfo
-        ? `${ids.length}개 주문을 결제전으로 되돌렸습니다.`
-        : `${ids.length}개 주문 상태 변경: ${status}`,
+      `${ids.length}개 주문 상태 변경: ${status}`,
       "success"
     );
     handleClearSelection();
-  }, [selectedIds, startBatchUndo, endBatchUndo, updateOrder, showToast, handleClearSelection]);
+  }, [endBatchUndo, handleClearSelection, orders, selectedIds, showToast, startBatchUndo, updateOrder]);
 
   const handleColumnFilterChange = useCallback((key: string, values: string[]) => {
     setColumnFilters((prev) => {
@@ -1111,6 +1153,7 @@ function OrdersPageInner() {
       묶음번호: o.bundle_no,
       주문일시: o.order_date ? formatKoreanDateTime(o.order_date) : null,
       판매처: o.marketplace,
+      주문자명: o.marketplace_orderer_name,
       수취인명: o.recipient_name,
       상품명: o.product_name,
       수량: o.quantity,
@@ -1325,6 +1368,15 @@ function OrdersPageInner() {
             >
               <Trash2 className="w-4 h-4" />
               {deleting ? "삭제 중..." : `${selectedIds.size}건 삭제`}
+            </button>
+          )}
+          {selectedIds.size > 0 && (
+            <button
+              onClick={() => setShowPurchaseCancelModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-red-600/20 text-red-400 hover:bg-red-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Ban className="w-4 h-4" />
+              구매취소/정리 ({selectedIds.size})
             </button>
           )}
           <div className="relative" ref={autoMenuRef}>
@@ -1660,6 +1712,13 @@ function OrdersPageInner() {
           count={selectedIds.size}
           onChangeStatus={handleBulkStatusChange}
           onClearSelection={handleClearSelection}
+        />
+      )}
+      {showPurchaseCancelModal && (
+        <PurchaseCancelModal
+          count={selectedIds.size}
+          onClose={() => setShowPurchaseCancelModal(false)}
+          onSubmit={handlePurchaseCancelSubmit}
         />
       )}
       {/* 운송장수집 모달은 레이아웃의 TrackingCollectHost에서 렌더 (백그라운드 유지) */}

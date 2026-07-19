@@ -178,7 +178,9 @@ export async function POST(request: NextRequest) {
             .select("order_id, purchase_order_no")
             .in("order_id", orderIds)
             .eq("user_id", userId)
-            .not("purchase_order_no", "is", null);
+            .eq("status", "success")
+            .not("purchase_order_no", "is", null)
+            .neq("purchase_order_no", "");
 
           if (error) {
             console.error("[auto-purchase] 구매 로그 중복 확인 실패:", error.message);

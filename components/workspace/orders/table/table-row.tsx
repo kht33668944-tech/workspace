@@ -199,9 +199,9 @@ const MemoRow = memo(function Row({
                             onClearPurchaseDuplicate(order);
                           }}
                           className="rounded bg-[var(--bg-subtle)] px-1 py-0.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                          title="확인 후 중복구매 의심 해제"
+                          title="구매취소/정리로 중복구매 의심 해제"
                         >
-                          해제
+                          정리
                         </button>
                       )}
                     </span>
