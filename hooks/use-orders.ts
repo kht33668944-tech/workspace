@@ -420,13 +420,10 @@ export function useOrders(options: UseOrdersOptions = {}) {
     let autoStatusUpdates: OrderUpdate = { ...updates };
     const currentOrder = orders.find((o) => o.id === id);
 
-    if (currentOrder && hasPurchaseEvidence(currentOrder)) {
+    // 취소완료는 '주문 종료'를 뜻하는 최종상태이므로 구매정보 유무와 무관하게 항상 허용한다.
+    if (currentOrder && hasPurchaseEvidence(currentOrder) && autoStatusUpdates.delivery_status !== "취소완료") {
       if (isClearingPurchaseData(autoStatusUpdates)) {
         showToast("구매정보가 있는 주문은 항목을 직접 지울 수 없습니다. 구매취소/정리 버튼을 이용해주세요.", "error");
-        return Promise.resolve();
-      }
-      if (autoStatusUpdates.delivery_status === "취소완료") {
-        showToast("구매정보가 있는 주문은 취소완료로 바로 바꿀 수 없습니다. 구매취소/정리 버튼을 이용해주세요.", "error");
         return Promise.resolve();
       }
     }
