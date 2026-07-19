@@ -128,6 +128,7 @@ function normalizeHeader(header: string): string {
 // 알려진 컬럼명 목록 (헤더 행 감지용)
 const KNOWN_HEADERS = [
   "묶음번호", "주문번호", "주문일시", "주문일", "판매처", "수취인명", "수취인",
+  "상품주문번호", "구매자명", "주문자명", "스마트스토어주문번호",
   "상품명", "품명", "수량", "수령자번호", "수취인번호", "주문자번호",
   "우편번호", "주소", "배송메모", "매출", "판매금액", "결제금액",
   "배송지", "수취인연락처", "수령자연락처", "주문자연락처",
@@ -145,6 +146,9 @@ const ALIASES: Record<string, string[]> = {
   bundle_no: ["묶음번호", "묶음 번호", "묶음No", "묶음배송번호", "묶음배송", "묶음관리번호", "Bundle"],
   order_date: ["주문일시", "주문일", "주문 일시", "결제일", "결제일시", "주문날짜", "주문시간", "결제시간", "주문일자", "결제일자", "발주일", "발주일시", "발주일자", "결제완료일", "결제완료일시", "OrderDate"],
   marketplace: ["판매처", "판매 처", "마켓", "쇼핑몰", "소핑몰", "채널", "판매채널"],
+  marketplace_order_no: ["스마트스토어주문번호", "판매처주문번호", "마켓주문번호", "marketplaceOrderNo", "orderId"],
+  marketplace_product_order_no: ["상품주문번호", "상품 주문번호", "상품주문ID", "productOrderId"],
+  marketplace_orderer_name: ["구매자명", "구매자 명", "구매자", "주문자명", "주문자 명", "주문자"],
   recipient_name: ["수취인명", "수취인 명", "수취인", "받는분", "받는사람", "수령인", "수령자명", "수령자", "수량자명"],
   product_name: ["상품명", "상품 명", "품명", "제품명", "상품", "온라인상품명", "온라인 상품명"],
   quantity: ["수량", "주문수량"],
@@ -293,7 +297,8 @@ function detectLegacyFormat(headerMap: Record<string, string>): boolean {
 // 시트 하나를 파싱하여 주문 목록 반환 (내부 공용)
 function parseSheetToOrders(sheet: WorkSheet): { orders: OrderInsert[]; headers: string[]; headerMap: Record<string, string> } {
   const { headers, rows } = parseSheet(sheet);
-  const headerMap = buildHeaderMap(headers);
+  const parsedHeaderMap = buildHeaderMap(headers);
+  const headerMap = normalizeSmartstoreHeaderMap(headers, rows, parsedHeaderMap);
   const bundleKey = headers.find((h) => headerMap[h] === "bundle_no");
   const productKey = headers.find((h) => headerMap[h] === "product_name");
 
@@ -302,6 +307,40 @@ function parseSheetToOrders(sheet: WorkSheet): { orders: OrderInsert[]; headers:
     .map((row) => mapRowToOrder(row, headerMap));
 
   return { orders, headers, headerMap };
+}
+
+// 스마트스토어 주문 엑셀은 일반 발주서와 같은 "주문번호" 헤더를 사용하지만,
+// 내부 DB의 purchase_order_no는 소싱처 구매번호이므로 별도 판매처 주문번호로 분리한다.
+function normalizeSmartstoreHeaderMap(headers: string[], rows: RawRow[], headerMap: Record<string, string>): Record<string, string> {
+  const normalized = headers.map(normalizeHeader);
+  const sellerHeader = headers.find((header) => ["판매아이디", "판매처", "쇼핑몰", "소핑몰"].includes(normalizeHeader(header)));
+  const sellerValues = sellerHeader
+    ? rows.slice(0, 30).map((row) => String(row[sellerHeader] ?? "").toLowerCase())
+    : [];
+  const hasKnownNonSmartstoreSeller = sellerValues.some((value) =>
+    ["지마켓", "옥션", "쿠팡", "11번가", "gmarket", "auction", "coupang"].some((name) => value.includes(name))
+  );
+  const hasExplicitSmartstoreIdentifier = normalized.includes("상품주문번호") ||
+    normalized.includes("상품주문ID") ||
+    normalized.includes("스마트스토어주문번호") ||
+    Object.values(headerMap).includes("marketplace_product_order_no");
+  const hasSmartstoreSeller = sellerValues.some((value) => value.includes("스마트스토어") || value.includes("smartstore") || value.includes("네이버") || value.includes("naver"));
+  const isSmartstore = hasExplicitSmartstoreIdentifier || hasSmartstoreSeller ||
+    (!sellerHeader && (normalized.includes("구매자명") || normalized.includes("주문자명")));
+
+  // 판매처가 명확히 ESM/쿠팡이면 기존 purchase_order_no 의미를 보존한다.
+  if (hasKnownNonSmartstoreSeller && !hasExplicitSmartstoreIdentifier && !hasSmartstoreSeller) {
+    return headerMap;
+  }
+
+  if (!isSmartstore) return headerMap;
+
+  const next = { ...headerMap };
+  const plainOrderNoHeader = headers.find((header) => normalizeHeader(header) === "주문번호");
+  if (plainOrderNoHeader && next[plainOrderNoHeader] === "purchase_order_no") {
+    next[plainOrderNoHeader] = "marketplace_order_no";
+  }
+  return next;
 }
 
 export async function parseExcelFile(file: File, sheetIndex = 0): Promise<ParsedExcelResult> {
@@ -435,6 +474,8 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
 
     switch (engKey) {
       case "bundle_no":
+      case "marketplace_order_no":
+      case "marketplace_product_order_no":
       case "recipient_phone":
       case "orderer_phone":
       case "postal_code":
@@ -472,6 +513,9 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
   if (mapped.bundle_no === undefined) mapped.bundle_no = null;
   if (mapped.order_date === undefined) mapped.order_date = null;
   if (mapped.marketplace === undefined) mapped.marketplace = null;
+  if (mapped.marketplace_order_no === undefined) mapped.marketplace_order_no = null;
+  if (mapped.marketplace_product_order_no === undefined) mapped.marketplace_product_order_no = null;
+  if (mapped.marketplace_orderer_name === undefined) mapped.marketplace_orderer_name = null;
   if (mapped.recipient_name === undefined) mapped.recipient_name = null;
   if (mapped.product_name === undefined) mapped.product_name = null;
   if (mapped.quantity === undefined) mapped.quantity = 1;
@@ -567,6 +611,9 @@ function parseDate(value: string | number | undefined): string | null {
 // 정산 엑셀 파싱 (옥션/지마켓 정산예정금액)
 export interface SettlementRow {
   recipientName: string;
+  ordererName: string;
+  marketplaceOrderNo: string;
+  marketplaceProductOrderNo: string;
   productName: string;
   saleAmount: number;
   settlementAmount: number;
@@ -587,13 +634,18 @@ export async function parseSettlementExcel(file: File): Promise<{ rows: Settleme
         const sheet = workbook.Sheets[sheetName];
         const rawData = sheetToRows(sheet);
 
-        // 헤더 행 찾기
+        // 헤더 행 찾기 — ESM은 수령인명, 스마트스토어는 상품주문번호/주문자명을 사용할 수 있다.
         let headerRowIdx = -1;
         let headers: string[] = [];
         for (let i = 0; i < Math.min(rawData.length, 10); i++) {
           const row = rawData[i];
           const strs = row.map((c) => String(c ?? "").trim());
-          if (strs.includes("수령인명") && strs.includes("정산예정금액")) {
+          const normalizedHeaders = strs.map(normalizeHeader);
+          const hasSettlement = normalizedHeaders.some((h) => ["정산예정금액", "정산금액", "예상정산금액"].includes(h));
+          const hasIdentity = normalizedHeaders.some((h) => [
+            "수령인명", "수취인명", "상품주문번호", "상품주문ID", "구매자명", "주문자명", "주문번호",
+          ].includes(h));
+          if (hasSettlement && hasIdentity) {
             headerRowIdx = i;
             headers = strs;
             break;
@@ -601,26 +653,38 @@ export async function parseSettlementExcel(file: File): Promise<{ rows: Settleme
         }
 
         if (headerRowIdx === -1) {
-          reject(new Error("정산 엑셀 양식이 아닙니다. '수령인명'과 '정산예정금액' 컬럼이 필요합니다."));
+          reject(new Error("정산 엑셀 양식이 아닙니다. 정산예정금액과 주문 식별정보(상품주문번호·주문번호·수령인명 중 하나)가 필요합니다."));
           return;
         }
 
-        const idxRecipient = headers.indexOf("수령인명");
-        const idxProduct = headers.indexOf("상품명");
-        const idxSaleAmount = headers.indexOf("판매금액");
-        const idxSettlement = headers.indexOf("정산예정금액");
-        const idxSeller = headers.indexOf("판매아이디");
+        const normalizedHeaders = headers.map(normalizeHeader);
+        const findIndex = (...names: string[]) => {
+          const normalizedNames = names.map(normalizeHeader);
+          return normalizedHeaders.findIndex((header) => normalizedNames.includes(header));
+        };
+        const idxRecipient = findIndex("수령인명", "수취인명", "수령인", "수취인", "받는분");
+        const idxOrderer = findIndex("구매자명", "주문자명", "구매자", "주문자");
+        const idxProductOrderNo = findIndex("상품주문번호", "상품주문ID", "productOrderId");
+        const idxOrderNo = findIndex("스마트스토어주문번호", "판매처주문번호", "주문번호", "orderId");
+        const idxProduct = findIndex("상품명", "상품 명", "상품명(옵션명)");
+        const idxSaleAmount = findIndex("판매금액", "결제금액", "주문금액", "상품금액", "매출액");
+        const idxSettlement = findIndex("정산예정금액", "정산금액", "예상정산금액");
+        const idxSeller = findIndex("판매아이디", "판매자아이디");
+        const idxMarketplace = findIndex("판매처", "판매처명", "마켓", "쇼핑몰");
 
         const rows: SettlementRow[] = [];
         for (let i = headerRowIdx + 1; i < rawData.length; i++) {
           const row = rawData[i];
-          const recipientName = String(row[idxRecipient] ?? "").trim();
+          const recipientName = idxRecipient >= 0 ? String(row[idxRecipient] ?? "").trim() : "";
+          const ordererName = idxOrderer >= 0 ? String(row[idxOrderer] ?? "").trim() : "";
+          const marketplaceOrderNo = idxOrderNo >= 0 ? String(row[idxOrderNo] ?? "").trim() : "";
+          const marketplaceProductOrderNo = idxProductOrderNo >= 0 ? String(row[idxProductOrderNo] ?? "").trim() : "";
           const settlementRaw = row[idxSettlement];
           const settlementAmount = typeof settlementRaw === "number"
             ? Math.round(settlementRaw)
             : parseInt(String(settlementRaw).replace(/,/g, ""), 10) || 0;
 
-          if (!recipientName || settlementAmount === 0) continue;
+          if ((!recipientName && !ordererName && !marketplaceProductOrderNo && !marketplaceOrderNo) || settlementAmount === 0) continue;
 
           const productName = idxProduct >= 0 ? String(row[idxProduct] ?? "").trim() : "";
           const saleAmountRaw = idxSaleAmount >= 0 ? row[idxSaleAmount] : 0;
@@ -635,8 +699,19 @@ export async function parseSettlementExcel(file: File): Promise<{ rows: Settleme
             if (seller.includes("지마켓")) marketplace = "지마켓";
             else if (seller.includes("옥션")) marketplace = "옥션";
           }
+          if (!marketplace && idxMarketplace >= 0) marketplace = String(row[idxMarketplace] ?? "").trim();
+          if (!marketplace && (marketplaceProductOrderNo || ordererName)) marketplace = "스마트스토어";
 
-          rows.push({ recipientName, productName, saleAmount, settlementAmount, marketplace });
+          rows.push({
+            recipientName: recipientName || ordererName,
+            ordererName,
+            marketplaceOrderNo,
+            marketplaceProductOrderNo,
+            productName,
+            saleAmount,
+            settlementAmount,
+            marketplace,
+          });
         }
 
         resolve({ rows, sheetName });

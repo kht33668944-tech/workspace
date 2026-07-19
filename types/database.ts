@@ -4,6 +4,9 @@ export interface Order {
   bundle_no: string | null;
   order_date: string | null;
   marketplace: string | null;
+  marketplace_order_no: string | null;
+  marketplace_product_order_no: string | null;
+  marketplace_orderer_name: string | null;
   recipient_name: string | null;
   product_name: string | null;
   quantity: number;

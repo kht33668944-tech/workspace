@@ -24,18 +24,57 @@ interface MatchResult {
   selectedOrderId: string | null;
 }
 
-// 매칭 로직: 수령인명 + 판매금액(매출) + 판매처
+function normalizeMatchValue(value: string | null | undefined): string {
+  return String(value ?? "").toLowerCase().replace(/[\s\-()]/g, "");
+}
+
+function sameText(left: string | null | undefined, right: string | null | undefined): boolean {
+  const a = normalizeMatchValue(left);
+  const b = normalizeMatchValue(right);
+  return Boolean(a && b && a === b);
+}
+
+function normalizeMarketplace(value: string | null | undefined): string {
+  const normalized = normalizeMatchValue(value);
+  if (normalized.includes("스마트스토어") || normalized.includes("네이버") || normalized.includes("smartstore") || normalized.includes("naver")) return "스마트스토어";
+  if (normalized.includes("지마켓") || normalized.includes("gmarket")) return "지마켓";
+  if (normalized.includes("옥션") || normalized.includes("auction")) return "옥션";
+  if (normalized.includes("쿠팡") || normalized.includes("coupang")) return "쿠팡";
+  return normalized;
+}
+
+// 매칭 로직: 상품주문번호/판매처주문번호 우선, 없을 때만 수취인·주문자·금액·상품명 보조
 function matchRows(settlementRows: SettlementRow[], orders: Order[]): MatchResult[] {
   return settlementRows.map((row) => {
-    // 1차: 수령인명으로 후보 필터
-    let candidates = orders.filter(
-      (o) => o.recipient_name?.trim() === row.recipientName
-    );
+    const hasStableIdentifier = Boolean(row.marketplaceProductOrderNo || row.marketplaceOrderNo);
+    let candidates: Order[];
+
+    if (row.marketplaceProductOrderNo) {
+      candidates = orders.filter(
+        (o) => sameText(o.marketplace_product_order_no, row.marketplaceProductOrderNo)
+      );
+    } else if (row.marketplaceOrderNo) {
+      candidates = orders.filter(
+        (o) => sameText(o.marketplace_order_no, row.marketplaceOrderNo)
+      );
+    } else {
+      // 식별번호가 없는 과거 행만 이름 기반 후보를 만든다.
+      candidates = orders.filter((o) =>
+        sameText(o.recipient_name, row.recipientName) ||
+        sameText(o.marketplace_orderer_name, row.ordererName) ||
+        sameText(o.recipient_name, row.ordererName)
+      );
+    }
+
+    // 식별번호가 있었는데 DB에 없는 경우에는 이름으로 잘못 연결하지 않는다.
+    if (hasStableIdentifier && candidates.length === 0) {
+      return { row, status: "unmatched" as MatchStatus, candidates: [], selectedOrderId: null };
+    }
 
     // 판매처가 있으면 추가 필터
     if (row.marketplace && candidates.length > 1) {
       const filtered = candidates.filter(
-        (o) => o.marketplace === row.marketplace
+        (o) => normalizeMarketplace(o.marketplace) === normalizeMarketplace(row.marketplace)
       );
       if (filtered.length > 0) candidates = filtered;
     }
@@ -50,9 +89,9 @@ function matchRows(settlementRows: SettlementRow[], orders: Order[]): MatchResul
 
     // 3차: 상품명 부분 일치
     if (candidates.length > 1 && row.productName) {
-      const nameNorm = row.productName.toLowerCase().replace(/\s+/g, "");
+      const nameNorm = normalizeMatchValue(row.productName);
       const nameMatch = candidates.filter((o) => {
-        const orderName = (o.product_name || "").toLowerCase().replace(/\s+/g, "");
+        const orderName = normalizeMatchValue(o.product_name);
         return orderName.includes(nameNorm) || nameNorm.includes(orderName);
       });
       if (nameMatch.length > 0) candidates = nameMatch;
@@ -219,8 +258,8 @@ export default function SettlementImportModal({
                 `}
               >
                 <Upload className="w-10 h-10 text-[var(--text-muted)] mb-3" />
-                <p className="text-[var(--text-tertiary)] text-sm">옥션/지마켓 정산 엑셀 파일을 드래그하거나 클릭해서 선택</p>
-                <p className="text-[var(--text-muted)] text-xs mt-1">수령인명 기준으로 발주서와 매칭합니다 (.xlsx, .xls)</p>
+                <p className="text-[var(--text-tertiary)] text-sm">정산 엑셀 파일을 드래그하거나 클릭해서 선택</p>
+                <p className="text-[var(--text-muted)] text-xs mt-1">상품주문번호 우선, 없으면 수취인명·주문자명으로 보조 매칭합니다 (.xlsx, .xls)</p>
               </div>
               <input
                 ref={fileRef}
@@ -282,6 +321,7 @@ export default function SettlementImportModal({
                   <thead className="bg-[var(--bg-hover)] sticky top-0">
                     <tr>
                       <th className="px-3 py-2 text-left">상태</th>
+                      <th className="px-3 py-2 text-left">상품주문번호</th>
                       <th className="px-3 py-2 text-left">수령인명</th>
                       <th className="px-3 py-2 text-left">판매처</th>
                       <th className="px-3 py-2 text-left">상품명 (엑셀)</th>
@@ -295,6 +335,9 @@ export default function SettlementImportModal({
                       <tr key={i} className={`border-t border-[var(--border-subtle)] ${statusBg(result.status)}`}>
                         <td className={`px-3 py-1.5 font-medium ${statusColor(result.status)}`}>
                           {statusLabel(result.status)}
+                        </td>
+                        <td className="px-3 py-1.5 font-mono text-[10px] max-w-32 truncate" title={result.row.marketplaceProductOrderNo || result.row.marketplaceOrderNo || ""}>
+                          {result.row.marketplaceProductOrderNo || result.row.marketplaceOrderNo || "-"}
                         </td>
                         <td className="px-3 py-1.5">{result.row.recipientName}</td>
                         <td className="px-3 py-1.5">{result.row.marketplace || "-"}</td>
@@ -316,12 +359,12 @@ export default function SettlementImportModal({
                                 onChange={(e) => handleCandidateSelect(i, e.target.value)}
                                 className="w-full px-1.5 py-1 bg-[var(--bg-hover)] border border-yellow-500/40 rounded text-xs text-[var(--text-primary)] outline-none"
                               >
-                                <option value="">선택...</option>
-                                {result.candidates.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.product_name?.slice(0, 25)} ({c.revenue?.toLocaleString()}원)
-                                  </option>
-                                ))}
+                                  <option value="">선택...</option>
+                                  {result.candidates.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                    {c.marketplace_product_order_no || c.marketplace_order_no || c.recipient_name || c.product_name?.slice(0, 20)} · {c.product_name?.slice(0, 20)} ({c.revenue?.toLocaleString()}원)
+                                    </option>
+                                  ))}
                               </select>
                             </div>
                           )}
