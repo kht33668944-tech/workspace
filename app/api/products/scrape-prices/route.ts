@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await request.json().catch(() => ({})) as { productIds?: string[] };
+  const body = await request.json().catch(() => ({})) as { productIds?: string[]; notify?: boolean };
   const sb = getServiceSupabaseClient();
 
   // JWT에서 user_id 추출하여 소유권 검증
@@ -308,32 +308,37 @@ export async function POST(request: NextRequest) {
         }
 
         send({ type: "done", updated, failed, unchanged, bot_blocked: botBlocked, sold_out: soldOut });
-        await notifyAutomationResult({
-          title: "가격 수집",
-          status: getPriceNotifyStatus(updated, failed, unchanged, botBlocked, soldOut),
-          summary: "가격 수집 작업이 끝났습니다.",
-          fields: [
-            { name: "가격 변경", value: updated },
-            { name: "변동 없음", value: unchanged },
-            { name: "품절", value: soldOut },
-            { name: "실패", value: failed },
-            { name: "봇 차단", value: botBlocked },
-          ],
-        });
+        // 재시도 라운드마다 발송하지 않고, 클라이언트가 마지막에 합산 결과로 1회만 발송 (notify:false)
+        if (body.notify !== false) {
+          await notifyAutomationResult({
+            title: "가격 수집",
+            status: getPriceNotifyStatus(updated, failed, unchanged, botBlocked, soldOut),
+            summary: "가격 수집 작업이 끝났습니다.",
+            fields: [
+              { name: "가격 변경", value: updated },
+              { name: "변동 없음", value: unchanged },
+              { name: "품절", value: soldOut },
+              { name: "실패", value: failed },
+              { name: "봇 차단", value: botBlocked },
+            ],
+          });
+        }
       } catch (e) {
         send({ type: "error", message: e instanceof Error ? e.message : String(e) });
-        await notifyAutomationResult({
-          title: "가격 수집",
-          status: "failed",
-          summary: e instanceof Error ? e.message : String(e),
-          fields: [
-            { name: "가격 변경", value: updated },
-            { name: "변동 없음", value: unchanged },
-            { name: "품절", value: soldOut },
-            { name: "실패", value: failed },
-            { name: "봇 차단", value: botBlocked },
-          ],
-        });
+        if (body.notify !== false) {
+          await notifyAutomationResult({
+            title: "가격 수집",
+            status: "failed",
+            summary: e instanceof Error ? e.message : String(e),
+            fields: [
+              { name: "가격 변경", value: updated },
+              { name: "변동 없음", value: unchanged },
+              { name: "품절", value: soldOut },
+              { name: "실패", value: failed },
+              { name: "봇 차단", value: botBlocked },
+            ],
+          });
+        }
       } finally {
         // 변동없음·실패 이력 일괄 저장 (전일대비 컬럼에서 상태 표시·필터링용)
         if (statusHistoryRows.length > 0) {

@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await request.json().catch(() => ({})) as { productIds?: string[] };
+  const body = await request.json().catch(() => ({})) as { productIds?: string[]; notify?: boolean };
   const sb = getServiceSupabaseClient();
 
   const userSb = getSupabaseClient(token);
@@ -183,34 +183,39 @@ export async function POST(request: NextRequest) {
         }
 
         send({ type: "done", updated, failed, unchanged, bot_blocked: botBlocked, sold_out: soldOut, skipped: skippedCount });
-        await notifyAutomationResult({
-          title: "가격 수집 v2",
-          status: getPriceNotifyStatus(updated, failed, unchanged, botBlocked, soldOut),
-          summary: "가격 수집 작업이 끝났습니다.",
-          fields: [
-            { name: "가격 변경", value: updated },
-            { name: "변동 없음", value: unchanged },
-            { name: "품절", value: soldOut },
-            { name: "실패", value: failed },
-            { name: "봇 차단", value: botBlocked },
-            { name: "제외", value: skippedCount },
-          ],
-        });
+        // 재시도 라운드마다 발송하지 않고, 클라이언트가 마지막에 합산 결과로 1회만 발송 (notify:false)
+        if (body.notify !== false) {
+          await notifyAutomationResult({
+            title: "가격 수집 v2",
+            status: getPriceNotifyStatus(updated, failed, unchanged, botBlocked, soldOut),
+            summary: "가격 수집 작업이 끝났습니다.",
+            fields: [
+              { name: "가격 변경", value: updated },
+              { name: "변동 없음", value: unchanged },
+              { name: "품절", value: soldOut },
+              { name: "실패", value: failed },
+              { name: "봇 차단", value: botBlocked },
+              { name: "제외", value: skippedCount },
+            ],
+          });
+        }
       } catch (e) {
         send({ type: "error", message: e instanceof Error ? e.message : String(e) });
-        await notifyAutomationResult({
-          title: "가격 수집 v2",
-          status: "failed",
-          summary: e instanceof Error ? e.message : String(e),
-          fields: [
-            { name: "가격 변경", value: updated },
-            { name: "변동 없음", value: unchanged },
-            { name: "품절", value: soldOut },
-            { name: "실패", value: failed },
-            { name: "봇 차단", value: botBlocked },
-            { name: "제외", value: skippedCount },
-          ],
-        });
+        if (body.notify !== false) {
+          await notifyAutomationResult({
+            title: "가격 수집 v2",
+            status: "failed",
+            summary: e instanceof Error ? e.message : String(e),
+            fields: [
+              { name: "가격 변경", value: updated },
+              { name: "변동 없음", value: unchanged },
+              { name: "품절", value: soldOut },
+              { name: "실패", value: failed },
+              { name: "봇 차단", value: botBlocked },
+              { name: "제외", value: skippedCount },
+            ],
+          });
+        }
       } finally {
         if (statusHistoryRows.length > 0) {
           const { error: histErr } = await sb.from("price_history").insert(statusHistoryRows);

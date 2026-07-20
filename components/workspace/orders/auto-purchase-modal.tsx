@@ -235,7 +235,11 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
   async function readSSEStream(
     response: Response,
     groupOrders: Order[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    collect?: {
+      success: { orderId: string; cost?: number; paymentMethod?: string }[];
+      failedOrderIds: Set<string>;
+    }
   ): Promise<{ isDone: boolean; isCancelled: boolean }> {
     const reader = response.body?.getReader();
     if (!reader) return { isDone: true, isCancelled: false };
@@ -285,6 +289,15 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
               isCancelled = event.type === "cancelled";
               // 최종 결과로 상태 확정
               if (event.success) {
+                // 합산 발송용: 성공 주문의 원가·결제수단(카드사) 수집
+                if (collect) {
+                  for (const s of event.success as { orderId: string; cost?: number; paymentMethod?: string }[]) {
+                    if (!collect.success.some((x) => x.orderId === s.orderId)) {
+                      collect.success.push({ orderId: s.orderId, cost: s.cost, paymentMethod: s.paymentMethod });
+                    }
+                    collect.failedOrderIds.delete(s.orderId);
+                  }
+                }
                 const successMap = new Map(
                   event.success.map((s: { orderId: string; purchaseOrderNo: string }) => [s.orderId, s.purchaseOrderNo])
                 );
@@ -299,6 +312,13 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
                 );
               }
               if (event.failed) {
+                if (collect) {
+                  for (const f of event.failed as { orderId: string }[]) {
+                    if (!collect.success.some((x) => x.orderId === f.orderId)) {
+                      collect.failedOrderIds.add(f.orderId);
+                    }
+                  }
+                }
                 const failMap = new Map(
                   event.failed.map((f: { orderId: string; reason: string }) => [f.orderId, f.reason])
                 );
@@ -313,6 +333,11 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
                 );
               }
             } else if (event.type === "error") {
+              if (collect) {
+                for (const o of groupOrders) {
+                  if (!collect.success.some((x) => x.orderId === o.id)) collect.failedOrderIds.add(o.id);
+                }
+              }
               setOrderStatuses((prev) =>
                 prev.map((s) =>
                   groupOrders.some((o) => o.id === s.orderId) && s.status !== "success"
@@ -370,6 +395,14 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
 
     let cancelled = false;
 
+    // 합산 디스코드 발송용 집계 (개별 그룹 발송은 서버에서 억제)
+    const collect = {
+      success: [] as { orderId: string; cost?: number; paymentMethod?: string }[],
+      failedOrderIds: new Set<string>(),
+    };
+    const quantityMap = new Map<string, number>(allOrders.map((o) => [o.id, Math.max(Number(o.quantity) || 1, 1)]));
+    const platformSet = new Set<PurchasePlatform>(matchedGroups.map((g) => g.platform));
+
     // 그룹별 순차 처리
     for (let gi = 0; gi < matchedGroups.length; gi++) {
       // 다음 그룹 시작 전 중단 확인
@@ -418,6 +451,8 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
           body: JSON.stringify({
             credentialId: group.credentialId,
             batchId,
+            // 개별 그룹 알림 억제 — 마지막에 합산 결과로 1회만 발송
+            notify: false,
             ...(PIN_REQUIRED_PLATFORMS.has(group.platform) && { paymentPin }),
             orders: purchaseOrders,
           }),
@@ -428,6 +463,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
         const contentType = res.headers.get("content-type") || "";
         if (contentType.includes("application/json")) {
           const data = await res.json();
+          for (const o of group.orders) collect.failedOrderIds.add(o.id);
           setOrderStatuses((prev) =>
             prev.map((s) =>
               group.orders.some((o) => o.id === s.orderId)
@@ -439,7 +475,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
         }
 
         // SSE 스트림 읽기
-        const { isCancelled } = await readSSEStream(res, group.orders, controller.signal);
+        const { isCancelled } = await readSSEStream(res, group.orders, controller.signal, collect);
         if (isCancelled) {
           cancelled = true;
           break;
@@ -473,6 +509,59 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
     setWasCancelled(cancelled);
     setIsStopping(false);
     setStep("result");
+
+    // 모든 그룹 완료 후 합산 결과로 디스코드 1회 발송 (개별 그룹 알림은 서버에서 억제됨)
+    const successItems = collect.success;
+    const successCount = successItems.length;
+    const totalQty = successItems.reduce((sum, s) => sum + (quantityMap.get(s.orderId) ?? 1), 0);
+    const failedCount = collect.failedOrderIds.size;
+    const totalCost = successItems.reduce((sum, s) => sum + (s.cost ?? 0), 0);
+    // 결제수단(카드사)별 결제 횟수·금액 집계
+    const cardMap = new Map<string, { count: number; amount: number }>();
+    for (const s of successItems) {
+      const key = s.paymentMethod?.trim() || "미확인";
+      const cur = cardMap.get(key) ?? { count: 0, amount: 0 };
+      cur.count += 1;
+      cur.amount += s.cost ?? 0;
+      cardMap.set(key, cur);
+    }
+    const cardBreakdown =
+      Array.from(cardMap.entries())
+        .map(([name, v]) => `${name} ${v.count}회 ${v.amount.toLocaleString()}원`)
+        .join("\n") || "-";
+    const platformLabels = Array.from(platformSet).map((p) => PLATFORM_LABELS[p]).join(", ") || "-";
+    const status: "success" | "partial" | "failed" | "cancelled" =
+      cancelled && successCount === 0
+        ? "cancelled"
+        : successCount > 0 && failedCount > 0
+          ? "partial"
+          : successCount > 0
+            ? "success"
+            : "failed";
+    try {
+      await fetch("/api/notifications/automation-result", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          title: "자동구매",
+          status,
+          summary: `총 ${successCount}건 주문 · 수량 ${totalQty}개 · 결제금액 ${totalCost.toLocaleString()}원`,
+          fields: [
+            { name: "✅ 성공", value: `${successCount}건` },
+            { name: "📦 총수량", value: `${totalQty}개` },
+            { name: "❌ 실패", value: `${failedCount}건` },
+            { name: "🏬 플랫폼", value: platformLabels },
+            { name: "💳 총결제금액", value: `${totalCost.toLocaleString()}원` },
+            { name: "💳 카드별 결제", value: cardBreakdown },
+          ],
+        }),
+      });
+    } catch (err) {
+      console.error("[auto-purchase] 디스코드 알림 발송 실패:", err instanceof Error ? err.message : String(err));
+    }
   };
 
   const handleStop = () => {

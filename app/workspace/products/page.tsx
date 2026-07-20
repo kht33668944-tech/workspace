@@ -58,6 +58,7 @@ function loadProductsViewState(): ProductsViewState {
 }
 
 type RetryItem = { id: string; name: string };
+type ScrapeStatusKey = "updated" | "unchanged" | "bot_blocked" | "failed" | "sold_out";
 
 /** 쿠팡 내보내기 시 필수옵션 누락 경고 (route의 warnings 응답 형식) */
 type ExportWarning = { productName: string; missing: string[] };
@@ -127,7 +128,7 @@ export default function ProductsPage() {
   const [applyingPrices, setApplyingPrices] = useState(false);
   const [scrapeLog, setScrapeLog] = useState<string[]>([]);
   const [scrapeLogCollapsed, setScrapeLogCollapsed] = useState(false);
-  const [scrapeStatus, setScrapeStatus] = useState<Map<string, "updated" | "unchanged" | "bot_blocked" | "failed" | "sold_out">>(new Map());
+  const [scrapeStatus, setScrapeStatus] = useState<Map<string, ScrapeStatusKey>>(new Map());
   const [scrapeTotal, setScrapeTotal] = useState(0);
   const scrapeLogRef = useRef<HTMLDivElement>(null);
   const scrapeAbortRef = useRef<AbortController | null>(null);
@@ -341,10 +342,13 @@ export default function ProductsPage() {
     botBlocked: Array<{ id: string; name: string }>;
     soldOut: string[];
     stopped: boolean;
+    statuses: Map<string, ScrapeStatusKey>;
   }> => {
     const changes: Array<{ id: string; name: string; previous: number; price: number }> = [];
     const botBlocked: Array<{ id: string; name: string }> = [];
     const soldOut: string[] = [];
+    // 이 라운드에서 처리된 각 상품의 최종 상태 (재시도 시 상위에서 병합)
+    const statuses = new Map<string, ScrapeStatusKey>();
     let stopped = false;
     try {
       const res = await fetch("/api/products/scrape-prices", {
@@ -353,12 +357,13 @@ export default function ProductsPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ productIds: ids }),
+        // 재시도 라운드마다 발송하지 않고 마지막에 합산 1회만 발송
+        body: JSON.stringify({ productIds: ids, notify: false }),
         signal: abortController.signal,
       });
       if (!res.ok || !res.body) {
         pushScrapeLog("최저가 수집 실패 (서버 응답 오류)");
-        return { changes, botBlocked, soldOut, stopped };
+        return { changes, botBlocked, soldOut, stopped, statuses };
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -395,6 +400,7 @@ export default function ProductsPage() {
                 : event.price > 0
                   ? event.price !== event.previous_price ? "updated" : "unchanged"
                   : event.fail_reason === "sold_out" ? "sold_out" : "failed";
+              statuses.set(event.id, statusKey);
               setScrapeStatus(prev => {
                 const next = new Map(prev);
                 next.set(event.id, statusKey);
@@ -425,7 +431,80 @@ export default function ProductsPage() {
         pushScrapeLog("최저가 수집 중 오류 발생");
       }
     }
-    return { changes, botBlocked, soldOut, stopped };
+    return { changes, botBlocked, soldOut, stopped, statuses };
+  };
+
+  // 최저가 갱신: 모든 재시도 라운드 종료 후 합산 결과로 디스코드 1회 발송
+  const sendPriceScrapeNotify = async (args: {
+    finalStatus: Map<string, ScrapeStatusKey>;
+    changes: Array<{ id: string; previous: number; price: number }>;
+    skipped: number;
+    retryCount: number;
+    stopped: boolean;
+  }) => {
+    if (!session?.access_token) return;
+    const { finalStatus, changes, skipped, retryCount, stopped } = args;
+
+    let updated = 0, unchanged = 0, soldOut = 0, failed = 0, botBlocked = 0;
+    for (const st of finalStatus.values()) {
+      if (st === "updated") updated++;
+      else if (st === "unchanged") unchanged++;
+      else if (st === "sold_out") soldOut++;
+      else if (st === "failed") failed++;
+      else if (st === "bot_blocked") botBlocked++;
+    }
+
+    // 인하/인상 (id별 최신 가격 기준, 최종 상태가 updated인 항목만)
+    const priceById = new Map<string, { previous: number; price: number }>();
+    for (const c of changes) priceById.set(c.id, { previous: c.previous, price: c.price });
+    let down = 0, up = 0;
+    for (const [id, st] of finalStatus) {
+      if (st !== "updated") continue;
+      const p = priceById.get(id);
+      if (!p) continue;
+      if (p.price < p.previous) down++;
+      else if (p.price > p.previous) up++;
+    }
+
+    const checked = updated + unchanged + soldOut + failed + botBlocked;
+    const okCount = updated + unchanged + soldOut;
+    const failCount = failed + botBlocked;
+    const status: "success" | "partial" | "failed" | "cancelled" = stopped
+      ? "cancelled"
+      : okCount > 0 && failCount > 0
+        ? "partial"
+        : okCount > 0
+          ? "success"
+          : failCount > 0
+            ? "failed"
+            : "success";
+    const retryText = retryCount > 0 ? ` (재시도 ${retryCount}회)` : "";
+
+    try {
+      await fetch("/api/notifications/automation-result", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          title: "최저가 갱신",
+          status,
+          summary: `총 ${checked}개 검사 · ${updated}개 가격변동${retryText}`,
+          fields: [
+            { name: "🔻 인하", value: `${down}개` },
+            { name: "🔺 인상", value: `${up}개` },
+            { name: "➖ 변동없음", value: `${unchanged}개` },
+            { name: "🚫 품절", value: `${soldOut}개` },
+            { name: "⚠️ 실패", value: `${failed}개` },
+            { name: "🤖 봇차단", value: `${botBlocked}개` },
+            ...(skipped > 0 ? [{ name: "⏭️ 제외(비지마켓)", value: `${skipped}개` }] : []),
+          ],
+        }),
+      });
+    } catch (err) {
+      console.error("[scrape-prices] 디스코드 알림 발송 실패:", err instanceof Error ? err.message : String(err));
+    }
   };
 
   const handleScrapePrices = async (overrideIds?: string[]) => {
@@ -453,6 +532,8 @@ export default function ProductsPage() {
 
     const allChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
     const allSoldOut: string[] = [];
+    // 재시도 라운드 간 상품별 최종 상태 병합 (나중 라운드가 이전 결과를 덮어씀)
+    const finalStatus = new Map<string, ScrapeStatusKey>();
     let remainingBlocked: Array<{ id: string; name: string }> = [];
     let stopped = false;
     let retryCount = 0;
@@ -469,6 +550,7 @@ export default function ProductsPage() {
         const result = await runScrapeOnce(currentIds, abortController);
         allChanges.push(...result.changes);
         allSoldOut.push(...result.soldOut);
+        for (const [id, st] of result.statuses) finalStatus.set(id, st);
         remainingBlocked = result.botBlocked;
         stopped = result.stopped;
         if (stopped || remainingBlocked.length === 0 || retryCount >= MAX_RETRIES) break;
@@ -495,6 +577,8 @@ export default function ProductsPage() {
       if (!stopped && allChanges.length === 0 && remainingBlocked.length === 0) {
         setTimeout(() => setScrapeLog([]), 3000);
       }
+      // 모든 재시도 종료 후 합산 결과로 디스코드 1회 발송
+      await sendPriceScrapeNotify({ finalStatus, changes: allChanges, skipped: 0, retryCount, stopped });
     }
   };
 
@@ -509,11 +593,14 @@ export default function ProductsPage() {
     soldOut: string[];
     skipped: number;
     stopped: boolean;
+    statuses: Map<string, ScrapeStatusKey>;
   }> => {
     const changes: Array<{ id: string; name: string; previous: number; price: number }> = [];
     const botBlocked: RetryItem[] = [];
     const failedItems: RetryItem[] = [];
     const soldOut: string[] = [];
+    // 이 라운드에서 처리된 각 상품의 최종 상태 (재시도 시 상위에서 병합)
+    const statuses = new Map<string, ScrapeStatusKey>();
     let skipped = 0;
     let stopped = false;
     try {
@@ -523,12 +610,13 @@ export default function ProductsPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ productIds: ids }),
+        // 재시도 라운드마다 발송하지 않고 마지막에 합산 1회만 발송
+        body: JSON.stringify({ productIds: ids, notify: false }),
         signal: abortController.signal,
       });
       if (!res.ok || !res.body) {
         pushScrapeLog("최저가 수집 실패 (서버 응답 오류)");
-        return { changes, botBlocked, failedItems, soldOut, skipped, stopped };
+        return { changes, botBlocked, failedItems, soldOut, skipped, stopped, statuses };
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -566,6 +654,7 @@ export default function ProductsPage() {
                 : event.price > 0
                   ? event.price !== event.previous_price ? "updated" : "unchanged"
                   : event.fail_reason === "sold_out" ? "sold_out" : "failed";
+              statuses.set(event.id, statusKey);
               setScrapeStatus(prev => {
                 const next = new Map(prev);
                 next.set(event.id, statusKey);
@@ -602,7 +691,7 @@ export default function ProductsPage() {
         pushScrapeLog("최저가 수집 중 오류 발생");
       }
     }
-    return { changes, botBlocked, failedItems, soldOut, skipped, stopped };
+    return { changes, botBlocked, failedItems, soldOut, skipped, stopped, statuses };
   };
 
   const handleScrapePricesRemote = async (version: "v2" | "v3", overrideIds?: string[]) => {
@@ -637,6 +726,9 @@ export default function ProductsPage() {
 
     const allChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
     const allSoldOut: string[] = [];
+    // 재시도 라운드 간 상품별 최종 상태 병합 (나중 라운드가 이전 결과를 덮어씀)
+    const finalStatus = new Map<string, ScrapeStatusKey>();
+    let skippedCount = 0;
     let remainingRetryItems: RetryItem[] = [];
     let stopped = false;
     let retryCount = 0;
@@ -652,6 +744,8 @@ export default function ProductsPage() {
         const result = await runScrapeRemoteOnce(currentIds, abortController, version);
         allChanges.push(...result.changes);
         allSoldOut.push(...result.soldOut);
+        for (const [id, st] of result.statuses) finalStatus.set(id, st);
+        if (retryCount === 0) skippedCount = result.skipped;
         const retryMap = new Map<string, RetryItem>();
         for (const item of [...result.botBlocked, ...result.failedItems]) {
           retryMap.set(item.id, item);
@@ -682,6 +776,8 @@ export default function ProductsPage() {
       if (!stopped && allChanges.length === 0 && remainingRetryItems.length === 0) {
         setTimeout(() => setScrapeLog([]), 3000);
       }
+      // 모든 재시도 종료 후 합산 결과로 디스코드 1회 발송
+      await sendPriceScrapeNotify({ finalStatus, changes: allChanges, skipped: skippedCount, retryCount, stopped });
     }
   };
 

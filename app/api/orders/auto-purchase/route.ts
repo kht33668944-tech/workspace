@@ -17,6 +17,8 @@ interface AutoPurchaseRequest {
   platform?: "gmarket" | "auction" | "ohouse";
   paymentPin?: string;
   batchId?: string;
+  // 여러 계정(그룹)을 나눠 호출할 때 개별 디스코드 발송을 억제하고, 클라이언트가 마지막에 1회만 발송 (기본 true)
+  notify?: boolean;
   orders: PurchaseOrderInfo[];
 }
 
@@ -515,16 +517,18 @@ export async function POST(request: NextRequest) {
               failCount: allFailed.length,
               message: "구매 가능한 주문이 없습니다. 이미 구매된 주문은 자동구매에서 제외했습니다.",
             });
-            await notifyAutomationResult({
-              title: "자동구매",
-              status: getPurchaseNotifyStatus(allSuccess.length, allFailed.length),
-              summary: "구매 가능한 주문이 없어 작업이 종료됐습니다.",
-              fields: [
-                { name: "성공", value: allSuccess.length },
-                { name: "실패/제외", value: allFailed.length },
-                { name: "플랫폼", value: platform },
-              ],
-            });
+            if (body.notify !== false) {
+              await notifyAutomationResult({
+                title: "자동구매",
+                status: getPurchaseNotifyStatus(allSuccess.length, allFailed.length),
+                summary: "구매 가능한 주문이 없어 작업이 종료됐습니다.",
+                fields: [
+                  { name: "성공", value: allSuccess.length },
+                  { name: "실패/제외", value: allFailed.length },
+                  { name: "플랫폼", value: platform },
+                ],
+              });
+            }
             return;
           }
 
@@ -657,16 +661,18 @@ export async function POST(request: NextRequest) {
             failCount: allFailed.length,
             message: isCancelled ? "사용자가 작업을 중단했습니다." : undefined,
           });
-          await notifyAutomationResult({
-            title: "자동구매",
-            status: getPurchaseNotifyStatus(allSuccess.length, allFailed.length, isCancelled),
-            summary: isCancelled ? "사용자가 작업을 중단했습니다." : "자동구매 작업이 끝났습니다.",
-            fields: [
-              { name: "성공", value: allSuccess.length },
-              { name: "실패", value: allFailed.length },
-              { name: "플랫폼", value: platform },
-            ],
-          });
+          if (body.notify !== false) {
+            await notifyAutomationResult({
+              title: "자동구매",
+              status: getPurchaseNotifyStatus(allSuccess.length, allFailed.length, isCancelled),
+              summary: isCancelled ? "사용자가 작업을 중단했습니다." : "자동구매 작업이 끝났습니다.",
+              fields: [
+                { name: "성공", value: allSuccess.length },
+                { name: "실패", value: allFailed.length },
+                { name: "플랫폼", value: platform },
+              ],
+            });
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           // abort 에러는 cancelled로 처리
@@ -679,28 +685,32 @@ export async function POST(request: NextRequest) {
               failCount: allFailed.length,
               message: "사용자가 작업을 중단했습니다.",
             });
-            await notifyAutomationResult({
-              title: "자동구매",
-              status: "cancelled",
-              summary: "사용자가 작업을 중단했습니다.",
-              fields: [
-                { name: "성공", value: allSuccess.length },
-                { name: "실패", value: allFailed.length },
-                { name: "플랫폼", value: platform },
-              ],
-            });
+            if (body.notify !== false) {
+              await notifyAutomationResult({
+                title: "자동구매",
+                status: "cancelled",
+                summary: "사용자가 작업을 중단했습니다.",
+                fields: [
+                  { name: "성공", value: allSuccess.length },
+                  { name: "실패", value: allFailed.length },
+                  { name: "플랫폼", value: platform },
+                ],
+              });
+            }
           } else {
             sendEvent({ type: "error", message: `서버 오류: ${msg}` });
-            await notifyAutomationResult({
-              title: "자동구매",
-              status: "failed",
-              summary: `서버 오류: ${msg}`,
-              fields: [
-                { name: "성공", value: allSuccess.length },
-                { name: "실패", value: allFailed.length },
-                { name: "플랫폼", value: platform },
-              ],
-            });
+            if (body.notify !== false) {
+              await notifyAutomationResult({
+                title: "자동구매",
+                status: "failed",
+                summary: `서버 오류: ${msg}`,
+                fields: [
+                  { name: "성공", value: allSuccess.length },
+                  { name: "실패", value: allFailed.length },
+                  { name: "플랫폼", value: platform },
+                ],
+              });
+            }
           }
         } finally {
           const purchasedOrderIds = new Set([

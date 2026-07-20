@@ -22,6 +22,10 @@ interface CollectRequest {
   loginPw?: string;
   // 공통
   orderNos: string[];
+  // 여러 계정을 하나의 활동로그로 묶기 위해 클라이언트가 공유 batchId 전달 (선택)
+  batchId?: string;
+  // 디스코드 알림 발송 여부 (기본 true). 다계정 수집 시 마지막에 1회만 보내려면 false로 개별 호출 억제
+  notify?: boolean;
 }
 
 function getTrackingNotifyStatus(successCount: number, failCount: number, notFoundCount: number): AutomationNotifyStatus {
@@ -106,24 +110,28 @@ export async function POST(request: NextRequest) {
       }
 
       // 운송장 로그 저장 (백그라운드, 실패 시 콘솔 경고)
+      // batchId가 전달되면 여러 계정 수집을 하나의 활동로그 배치로 묶는다
       if (supabase) {
-        saveTrackingLogs(supabase, result, platform, loginId, body.orderNos).catch((e) => {
+        saveTrackingLogs(supabase, result, platform, loginId, body.orderNos, body.batchId).catch((e) => {
           console.warn("[collect-tracking] 운송장 로그 저장 실패:", e instanceof Error ? e.message : String(e));
         });
       }
 
-      await notifyAutomationResult({
-        title: "운송장 수집",
-        status: getTrackingNotifyStatus(result.success.length, result.failed.length, result.notFound.length),
-        summary: "운송장 수집 작업이 끝났습니다.",
-        fields: [
-          { name: "성공", value: result.success.length },
-          { name: "실패", value: result.failed.length },
-          { name: "미발견", value: result.notFound.length },
-          { name: "DB 반영", value: appliedCount },
-          { name: "플랫폼", value: platform },
-        ],
-      });
+      // 다계정 수집 시 개별 호출은 알림을 억제하고, 클라이언트가 마지막에 합산 결과로 1회만 발송
+      if (body.notify !== false) {
+        await notifyAutomationResult({
+          title: "운송장 수집",
+          status: getTrackingNotifyStatus(result.success.length, result.failed.length, result.notFound.length),
+          summary: "운송장 수집 작업이 끝났습니다.",
+          fields: [
+            { name: "성공", value: result.success.length },
+            { name: "실패", value: result.failed.length },
+            { name: "미발견", value: result.notFound.length },
+            { name: "DB 반영", value: appliedCount },
+            { name: "플랫폼", value: platform },
+          ],
+        });
+      }
 
       return NextResponse.json({ ...result, appliedCount });
     } finally {
@@ -189,8 +197,9 @@ async function saveTrackingLogs(
   platform: string,
   loginId: string,
   orderNos: string[],
+  sharedBatchId?: string,
 ) {
-  const batchId = randomUUID();
+  const batchId = sharedBatchId ?? randomUUID();
   const { data: { user: authUser } } = await supabase.auth.getUser();
   const userId = authUser?.id ?? null;
 

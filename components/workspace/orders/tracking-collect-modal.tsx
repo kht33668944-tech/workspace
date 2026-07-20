@@ -167,6 +167,10 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     shouldStopRef.current = false;
 
     const allResults: ScrapeResult[] = [];
+    // 여러 계정 수집을 하나의 활동로그 배치로 묶기 위한 공유 batchId
+    const sharedBatchId = crypto.randomUUID();
+    let totalApplied = 0;
+    const platformSet = new Set<Platform>();
 
     for (let i = 0; i < autoCollectGroups.length; i++) {
       // 그룹 간 중단 체크
@@ -184,6 +188,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       }
 
       const { credential, platform: p, targets } = autoCollectGroups[i];
+      platformSet.add(p);
       const label = credential.label || PLATFORM_LABELS[p];
       setProgress(`[${i + 1}/${autoCollectGroups.length}] ${label} 수집 중...`);
       setProgressDetail(`${targets.length}건 처리 중`);
@@ -199,13 +204,15 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
             "Content-Type": "application/json",
             Authorization: `Bearer ${session?.access_token}`,
           },
-          body: JSON.stringify({ credentialId: credential.id, orderNos }),
+          // 공유 batchId로 활동로그를 하나로 묶고, 개별 호출의 디스코드 알림은 억제
+          body: JSON.stringify({ credentialId: credential.id, orderNos, batchId: sharedBatchId, notify: false }),
           signal: controller.signal,
         });
 
         const data = await res.json();
         if (res.ok) {
           allResults.push(data as ScrapeResult);
+          totalApplied += typeof data.appliedCount === "number" ? data.appliedCount : 0;
         } else {
           allResults.push({
             success: [],
@@ -235,6 +242,43 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     setResults(allResults);
     setStep("result");
     setIsStopping(false); // 중단 버튼 상태 복원 — "중단 중..." 고착 방지
+
+    // 모든 계정 수집 완료 후 합산 결과로 디스코드 1회 발송 (개별 계정 알림은 서버에서 억제됨)
+    const successCount = allResults.reduce((sum, r) => sum + r.success.length, 0);
+    const failedCount = allResults.reduce((sum, r) => sum + r.failed.length, 0);
+    const notFoundCount = allResults.reduce((sum, r) => sum + r.notFound.length, 0);
+    const status: "success" | "partial" | "failed" | "cancelled" =
+      shouldStopRef.current && successCount === 0
+        ? "cancelled"
+        : successCount > 0 && (failedCount > 0 || notFoundCount > 0)
+          ? "partial"
+          : successCount > 0
+            ? "success"
+            : "failed";
+    const platformLabels = Array.from(platformSet).map((p) => PLATFORM_LABELS[p]).join(", ") || "-";
+    try {
+      await fetch("/api/notifications/automation-result", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({
+          title: "운송장 수집",
+          status,
+          summary: "운송장 수집 작업이 끝났습니다.",
+          fields: [
+            { name: "성공", value: successCount },
+            { name: "실패", value: failedCount },
+            { name: "미발견", value: notFoundCount },
+            { name: "DB 반영", value: totalApplied },
+            { name: "플랫폼", value: platformLabels },
+          ],
+        }),
+      });
+    } catch (err) {
+      console.error("[tracking-collect] 디스코드 알림 발송 실패:", err instanceof Error ? err.message : String(err));
+    }
   };
 
   // 수동 수집 시작
@@ -353,6 +397,10 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       // 1) 발주서 양식
       const orderResult = await generateOrderExcel(targetOrders);
       downloadExcel(orderResult.buffer, orderResult.filename);
+
+      // Chrome 자동화 프로필에서는 짧은 시간에 여러 다운로드를 동시에 발생시키면
+      // 두 번째 파일이 간헐적으로 "문제가 발생했습니다"로 실패할 수 있어 순차 처리한다.
+      await new Promise((resolve) => window.setTimeout(resolve, 800));
 
       // 2) 플레이오토 운송장 양식
       const playAutoResult = await generatePlayAutoTrackingExcel(targetOrders, courierCodeMap);
