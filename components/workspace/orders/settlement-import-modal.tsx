@@ -69,29 +69,37 @@ function narrow<T>(candidates: T[], fn: (candidate: T) => boolean): T[] {
 // 매칭 로직: 식별번호가 있으면 우선 사용하고, 없으면 주문자·수취인·결제일·휴대폰·금액·상품명으로 보조 매칭
 function matchRows(settlementRows: SettlementRow[], orders: Order[]): MatchResult[] {
   return settlementRows.map((row) => {
-    const hasStableIdentifier = Boolean(row.marketplaceProductOrderNo || row.marketplaceOrderNo);
-    let candidates: Order[];
+    let candidates: Order[] = [];
 
-    if (row.marketplaceProductOrderNo) {
-      candidates = orders.filter(
-        (o) => sameText(o.marketplace_product_order_no, row.marketplaceProductOrderNo)
-      );
-    } else if (row.marketplaceOrderNo) {
-      candidates = orders.filter(
-        (o) => sameText(o.marketplace_order_no, row.marketplaceOrderNo)
-      );
-    } else {
-      // 식별번호가 없는 과거 행만 이름 기반 후보를 만든다.
-      candidates = orders.filter((o) =>
+    const nameCandidates = () =>
+      orders.filter((o) =>
         sameText(o.recipient_name, row.recipientName) ||
         sameText(o.marketplace_orderer_name, row.ordererName) ||
         sameText(o.recipient_name, row.ordererName)
       );
-    }
 
-    // 식별번호가 있었는데 DB에 없는 경우에는 이름으로 잘못 연결하지 않는다.
-    if (hasStableIdentifier && candidates.length === 0) {
-      return { row, status: "unmatched" as MatchStatus, candidates: [], selectedOrderId: null };
+    if (row.marketplaceProductOrderNo) {
+      // 상품주문번호(스마트스토어)는 고유 식별자 → 못 찾으면 이름으로 잘못 연결하지 않는다.
+      candidates = orders.filter(
+        (o) => sameText(o.marketplace_product_order_no, row.marketplaceProductOrderNo)
+      );
+      if (candidates.length === 0) {
+        return { row, status: "unmatched" as MatchStatus, candidates: [], selectedOrderId: null };
+      }
+    } else {
+      // 판매처주문번호/주문번호는 스마트스토어는 marketplace_order_no,
+      // ESM(옥션·지마켓)은 구매 전 purchase_order_no에 저장되므로 두 컬럼을 모두 대조한다.
+      if (row.marketplaceOrderNo) {
+        candidates = orders.filter((o) =>
+          sameText(o.marketplace_order_no, row.marketplaceOrderNo) ||
+          sameText(o.purchase_order_no, row.marketplaceOrderNo)
+        );
+      }
+      // 번호로 못 찾으면(구매완료 시 purchase_order_no가 도매처 번호로 덮이는 ESM 등)
+      // 수취인·주문자 이름으로 보조 매칭한다. 이후 판매처·결제일·휴대폰·금액·상품명으로 좁힌다.
+      if (candidates.length === 0) {
+        candidates = nameCandidates();
+      }
     }
 
     // 판매처가 있으면 추가 필터
