@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import { sendMessages, substituteTemplate } from "@/lib/solapi";
-import { sendGatewayMessage } from "@/lib/sms-gateway";
+import { sendGatewayMessage, checkGatewayOnline } from "@/lib/sms-gateway";
 import { formatKoreanDateTime } from "@/lib/date-utils";
 import type { Order } from "@/types/database";
 
@@ -114,6 +114,19 @@ export async function POST(request: NextRequest) {
 
       if (provider === "phone") {
         // ── v2: 내 휴대폰(SMS Gate 클라우드 릴레이)로 발송 (건당 무료) ──
+        // 발송 전 폰 상태 사전 점검: 앱이 오프라인이면 조용히 큐에 쌓이므로 미리 경고.
+        const gwStatus = await checkGatewayOnline(30);
+        if (!gwStatus.online) {
+          console.warn(`[sms-send] 발송 폰 오프라인 경고: ${gwStatus.reason}`);
+          sendEvent({
+            type: "progress",
+            current: 0,
+            total,
+            status: "warning",
+            message: `⚠️ ${gwStatus.reason}`,
+          });
+        }
+
         // 주문마다 본문이 다르므로 1건씩 큐잉. 폰이 자체 속도제한으로 비동기 발송.
         for (const item of messageList) {
           if (abortController.signal.aborted) break;

@@ -9,6 +9,11 @@ export { getByteLength, getMessageType, substituteTemplate } from "./sms-utils";
 const SMS_GATEWAY_BASE_URL =
   process.env.SMS_GATEWAY_BASE_URL || "https://api.sms-gate.app/3rdparty/v1";
 
+// 문자 유통기한(초). 폰이 오프라인이라 이 시간 안에 발송 못 하면 큐에서 자동 만료.
+// 퍼블릭 클라우드의 "미처리 24시간" 한도에 걸려 신규 발송이 통째로 막히는 사태를 방지.
+// 기본 6시간(24h보다 충분히 짧게). SMS_GATEWAY_TTL_SECONDS로 조정 가능.
+const SMS_GATEWAY_TTL_SECONDS = Number(process.env.SMS_GATEWAY_TTL_SECONDS) || 21600;
+
 function getAuthHeader(): string {
   const username = process.env.SMS_GATEWAY_USERNAME;
   const password = process.env.SMS_GATEWAY_PASSWORD;
@@ -69,6 +74,7 @@ export async function sendGatewayMessage(
     body: JSON.stringify({
       textMessage: { text },
       phoneNumbers: [formatGatewayNumber(to)],
+      ttl: SMS_GATEWAY_TTL_SECONDS, // 미발송 시 자동 만료 → 큐 적체·24h 차단 방지
     }),
   });
 
@@ -79,4 +85,71 @@ export async function sendGatewayMessage(
 
   const data = (await res.json()) as GatewaySendResponse;
   return { messageId: data.id, state: data.state };
+}
+
+interface GatewayDeviceRaw {
+  id: string;
+  name?: string;
+  lastSeen?: string;
+  last_seen?: string;
+}
+
+/** 게이트웨이에 등록된 발송 폰 목록 조회 (lastSeen = 마지막 클라우드 접속 시각). */
+export async function getGatewayDevices(): Promise<
+  Array<{ id: string; name: string; lastSeen: string | null }>
+> {
+  const res = await fetch(`${SMS_GATEWAY_BASE_URL}/devices`, {
+    headers: { Authorization: getAuthHeader() },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`SMS 게이트웨이 기기 조회 오류 (${res.status}): ${body}`);
+  }
+  const data = (await res.json()) as GatewayDeviceRaw | GatewayDeviceRaw[];
+  const list = Array.isArray(data) ? data : [data];
+  return list.map((d) => ({
+    id: d.id,
+    name: d.name || "",
+    lastSeen: d.lastSeen || d.last_seen || null,
+  }));
+}
+
+/**
+ * 발송 폰(SMS Gate 앱)이 최근 maxOfflineMinutes 내에 접속했는지 확인.
+ * 오프라인이면 online=false + 사람이 읽을 사유 반환. 조회 실패 시엔 발송을 막지 않도록 online=true.
+ * 배치 발송 직전 사전 점검용 — 폰이 죽어있는데 조용히 큐에 쌓이는 사태를 미리 경고.
+ */
+export async function checkGatewayOnline(
+  maxOfflineMinutes = 30
+): Promise<{ online: boolean; reason?: string; lastSeen?: string; offlineMinutes?: number }> {
+  try {
+    const devices = await getGatewayDevices();
+    if (devices.length === 0) {
+      return { online: false, reason: "등록된 발송 폰이 없습니다. SMS Gate 앱을 확인하세요." };
+    }
+    // 가장 최근에 접속한 기기 기준으로 판단
+    let newest: { lastSeen: string | null } | null = null;
+    for (const d of devices) {
+      if (!d.lastSeen) continue;
+      if (!newest || new Date(d.lastSeen) > new Date(newest.lastSeen!)) newest = d;
+    }
+    if (!newest?.lastSeen) {
+      return { online: false, reason: "발송 폰의 접속 기록이 없습니다. SMS Gate 앱을 여세요." };
+    }
+    const offlineMinutes = Math.round(
+      (Date.now() - new Date(newest.lastSeen).getTime()) / 60000
+    );
+    if (offlineMinutes > maxOfflineMinutes) {
+      return {
+        online: false,
+        lastSeen: newest.lastSeen,
+        offlineMinutes,
+        reason: `발송 폰(SMS Gate 앱)이 약 ${offlineMinutes}분째 오프라인입니다. 폰에서 앱을 열어 재접속하세요. (그대로 발송 시 문자가 지연·만료될 수 있음)`,
+      };
+    }
+    return { online: true, lastSeen: newest.lastSeen, offlineMinutes };
+  } catch (e) {
+    // 상태 조회 자체가 실패하면 발송을 막지 않고 통과(경고만).
+    return { online: true, reason: `기기 상태 확인 실패: ${e instanceof Error ? e.message : String(e)}` };
+  }
 }
