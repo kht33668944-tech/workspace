@@ -13,7 +13,7 @@ const TIMEOUT_API = 30000;
 const TIMEOUT_TRACKING = 10000;
 // 배송수집 대상은 최근 주문이라 앞쪽 페이지에 있음. 못 찾은 주문 탐색 상한(1페이지=5건).
 // 찾는 주문을 다 찾으면 그 전에 멈추므로, 이 값은 "미발견 주문을 몇 페이지까지 뒤질지"만 결정.
-const MAX_PAGES = 15;
+const MAX_PAGES = 20;
 
 type StealthContext = Awaited<ReturnType<typeof createStealthContext>>;
 
