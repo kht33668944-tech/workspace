@@ -12,6 +12,46 @@ const TIMEOUT_LOGIN = 30000;
 const TIMEOUT_API = 30000;
 const TIMEOUT_TRACKING = 10000;
 
+type StealthContext = Awaited<ReturnType<typeof createStealthContext>>;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * 지마켓 paging API를 재시도와 함께 요청.
+ * ECONNRESET 등 연결 리셋(봇 차단)·HTTP 오류를 지수 백오프로 재시도.
+ * 반환: 번들 배열 | null(빈 페이지=데이터 끝) | "error"(재시도 소진 후에도 실패 → 이 페이지만 건너뜀)
+ */
+async function fetchPageWithRetry(
+  context: StealthContext,
+  url: string,
+  headers: Record<string, string>,
+  pageNo: number,
+  maxRetries = 3
+): Promise<GmarketOrderResponse["data"]["payBundleList"] | null | "error"> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const apiRes = await context.request.get(url, { headers });
+      if (!apiRes.ok()) {
+        console.log(`[gmarket] 페이지 ${pageNo}: HTTP ${apiRes.status()} (시도 ${attempt}/${maxRetries})`);
+        if (attempt < maxRetries) { await sleep(500 * 2 ** (attempt - 1)); continue; }
+        return "error";
+      }
+      const pageData = await apiRes.json() as GmarketOrderResponse;
+      if (!pageData.data?.payBundleList?.length) return null;
+      console.log(`[gmarket] 페이지 ${pageNo}: bundles=${pageData.data.payBundleList.length}`);
+      return pageData.data.payBundleList;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[gmarket] 페이지 ${pageNo}: 네트워크 오류 ${msg} (시도 ${attempt}/${maxRetries})`);
+      if (attempt < maxRetries) { await sleep(500 * 2 ** (attempt - 1)); continue; }
+      return "error";
+    }
+  }
+  return "error";
+}
+
 /**
  * Playwright 기반 지마켓 배송정보 일괄 수집
  * 1. Chromium으로 로그인
@@ -105,8 +145,10 @@ export async function collectGmarketTracking(
       const originalUrl = firstApiRes.url();
       const originalParams = new URL(originalUrl).searchParams;
 
-      // 나머지 페이지를 병렬 배치로 요청 (10페이지씩)
-      const BATCH_SIZE = 10;
+      // 나머지 페이지를 병렬 배치로 요청.
+      // 지마켓/Cloudflare 봇 차단(ECONNRESET) 방지: 동시요청 축소(10→3) + 재시도 + 배치간 딜레이.
+      const BATCH_SIZE = 3;
+      const BATCH_DELAY_MS = 800;
       const maxPage = Math.min(totalPages, 100);
 
       for (let batchStart = 2; batchStart <= maxPage && found.size < targetSet.size; batchStart += BATCH_SIZE) {
@@ -119,38 +161,31 @@ export async function collectGmarketTracking(
         const pageNos = Array.from({ length: batchEnd - batchStart + 1 }, (_, i) => batchStart + i);
 
         const batchResults = await Promise.all(
-          pageNos.map(async (pageNo) => {
+          pageNos.map((pageNo) => {
             const params = new URLSearchParams();
             originalParams.forEach((v, k) => params.set(k, v));
             params.set("pageNo", String(pageNo));
-
-            const apiRes = await context.request.get(`${capturedBaseUrl}?${params}`, {
-              headers: capturedHeaders,
-            });
-
-            if (!apiRes.ok()) {
-              console.log(`[gmarket] 페이지 ${pageNo}: HTTP ${apiRes.status()}`);
-              return null;
-            }
-
-            const pageData = await apiRes.json() as GmarketOrderResponse;
-            if (!pageData.data?.payBundleList?.length) return null;
-            console.log(`[gmarket] 페이지 ${pageNo}: bundles=${pageData.data.payBundleList.length}`);
-            return pageData.data.payBundleList;
+            return fetchPageWithRetry(context, `${capturedBaseUrl}?${params}`, capturedHeaders, pageNo);
           })
         );
 
         let stopped = false;
-        for (const bundles of batchResults) {
-          if (!bundles) { stopped = true; break; }
-          allBundles.push(...bundles);
-          for (const bundle of bundles) {
+        for (const res of batchResults) {
+          if (res === "error") continue;                 // 재시도 소진 후에도 실패 → 이 페이지만 건너뛰고 계속
+          if (res === null) { stopped = true; break; }    // 빈 페이지 = 데이터 끝
+          allBundles.push(...res);
+          for (const bundle of res) {
             for (const order of bundle.orderList) {
               if (targetSet.has(String(order.orderNo))) found.add(String(order.orderNo));
             }
           }
         }
         if (stopped) break;
+
+        // 배치 사이 딜레이 (봇 차단 완화). 다음 배치가 남았고 아직 못 찾은 주문이 있을 때만.
+        if (batchEnd < maxPage && found.size < targetSet.size) {
+          await sleep(BATCH_DELAY_MS);
+        }
       }
     }
 
