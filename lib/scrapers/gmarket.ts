@@ -11,6 +11,9 @@ const TIMEOUT_NAV = 60000;
 const TIMEOUT_LOGIN = 30000;
 const TIMEOUT_API = 30000;
 const TIMEOUT_TRACKING = 10000;
+// 배송수집 대상은 최근 주문이라 앞쪽 페이지에 있음. 못 찾은 주문 탐색 상한(1페이지=5건).
+// 찾는 주문을 다 찾으면 그 전에 멈추므로, 이 값은 "미발견 주문을 몇 페이지까지 뒤질지"만 결정.
+const MAX_PAGES = 15;
 
 type StealthContext = Awaited<ReturnType<typeof createStealthContext>>;
 
@@ -149,7 +152,7 @@ export async function collectGmarketTracking(
       // 지마켓/Cloudflare 봇 차단(ECONNRESET) 방지: 동시요청 축소(10→3) + 재시도 + 배치간 딜레이.
       const BATCH_SIZE = 3;
       const BATCH_DELAY_MS = 800;
-      const maxPage = Math.min(totalPages, 100);
+      const maxPage = Math.min(totalPages, MAX_PAGES);
 
       for (let batchStart = 2; batchStart <= maxPage && found.size < targetSet.size; batchStart += BATCH_SIZE) {
         if (abortSignal?.aborted) {
