@@ -588,8 +588,9 @@ async function applyCheckoutDiscount(page: Page) {
 
 /**
  * 주문서 페이지의 "결제할인" 드롭다운 처리.
- * - "첫결제/첫 결제", "스마일카드", "비씨카드/BC카드" 문구가 있는 옵션은 제외한다.
+ * - "첫결제/첫 결제", "스마일카드", "비씨카드/BC카드", "현대카드", "하나카드", "나라사랑" 문구가 있는 옵션은 제외한다.
  * - 남은 결제할인 select(native) 옵션을 적용해보고 실제 "결제할인 N원" 금액이 가장 큰 옵션을 최종 선택
+ * - 금액이 동일하면 KB/국민 카드 → 삼성카드 순으로 우선 선택
  * 결제할인 select는 옵션 텍스트에 "결제할인"이 포함되어 배송요청 select(#delivery-request-label)와 구분된다.
  */
 async function applyPaymentDiscount(page: Page) {
@@ -613,13 +614,15 @@ async function applyPaymentDiscount(page: Page) {
     const selectableOptions = options.filter(
       (o) => o.value && o.value !== "0" && !o.text.includes("선택해")
     );
-    const candidates = selectableOptions.filter((o) => !/첫\s*결제|스마일\s*카드|비씨\s*카드|bc\s*카드/i.test(o.text));
+    const candidates = selectableOptions.filter(
+      (o) => !/첫\s*결제|스마일\s*카드|비씨\s*카드|bc\s*카드|현대\s*카드|하나\s*카드|나라\s*사랑/i.test(o.text)
+    );
     const excludedDiscountCount = selectableOptions.length - candidates.length;
 
     if (candidates.length === 0) {
       console.log(
         excludedDiscountCount > 0
-          ? "[gmarket-purchase] 결제할인 옵션은 제외 대상(첫결제/스마일카드/비씨카드)만 있어 스킵"
+          ? "[gmarket-purchase] 결제할인 옵션은 제외 대상(첫결제/스마일카드/비씨카드/현대카드/하나카드/나라사랑)만 있어 스킵"
           : "[gmarket-purchase] 결제할인 옵션 없음 (placeholder만) → 스킵"
       );
       return;
@@ -635,6 +638,9 @@ async function applyPaymentDiscount(page: Page) {
         })
         .catch(() => 0);
 
+    // 동점 시 우선순위: KB/국민 카드 → 삼성카드 → 나머지
+    const cardRank = (text: string) => (/kb|국민/i.test(text) ? 0 : /삼성/.test(text) ? 1 : 2);
+
     let best = { value: candidates[0].value, text: candidates[0].text, amount: -1 };
 
     if (candidates.length === 1) {
@@ -648,7 +654,12 @@ async function applyPaymentDiscount(page: Page) {
         await page.waitForTimeout(900);
         const amount = await readDiscount();
         console.log(`[gmarket-purchase] 결제할인 후보: "${opt.text}" → ${amount.toLocaleString()}원`);
-        if (amount > best.amount) best = { value: opt.value, text: opt.text, amount };
+        if (
+          amount > best.amount ||
+          (amount === best.amount && cardRank(opt.text) < cardRank(best.text))
+        ) {
+          best = { value: opt.value, text: opt.text, amount };
+        }
       }
       // 최대 금액 옵션으로 재선택
       await discountSelect.selectOption(best.value).catch(() => {});
