@@ -586,23 +586,35 @@ async function applyCheckoutDiscount(page: Page) {
   }
 }
 
+// 결제할인 제외 대상 카드 (미보유/사용 불가 카드)
+const EXCLUDED_DISCOUNT_RE = /첫\s*결제|스마일\s*카드|비씨\s*카드|bc\s*카드|현대\s*카드|하나\s*카드|나라\s*사랑/i;
+// 동점 시 우선순위: KB/국민 카드 → 삼성카드 → 나머지
+const discountCardRank = (text: string) => (/kb|국민/i.test(text) ? 0 : /삼성/.test(text) ? 1 : 2);
+
 /**
  * 주문서 페이지의 "결제할인" 드롭다운 처리.
  * - "첫결제/첫 결제", "스마일카드", "비씨카드/BC카드", "현대카드", "하나카드", "나라사랑" 문구가 있는 옵션은 제외한다.
  * - 남은 결제할인 select(native) 옵션을 적용해보고 실제 "결제할인 N원" 금액이 가장 큰 옵션을 최종 선택
  * - 금액이 동일하면 KB/국민 카드 → 삼성카드 순으로 우선 선택
  * 결제할인 select는 옵션 텍스트에 "결제할인"이 포함되어 배송요청 select(#delivery-request-label)와 구분된다.
+ * 네이티브 select가 없는 신형 주문서(커스텀 드롭다운)는 applyPaymentDiscountCustomUI로 fallback.
  */
 async function applyPaymentDiscount(page: Page) {
   try {
-    // 결제할인 select 탐색 (옵션에 "결제할인" 텍스트가 있는 select)
+    // 결제할인 select 탐색 (옵션에 "결제할인" 텍스트가 있는 select) — 늦게 렌더링될 수 있어 최대 4초 대기
     const discountSelect = page
       .locator("select")
       .filter({ has: page.locator('option:has-text("결제할인")') })
       .first();
 
-    if ((await discountSelect.count()) === 0) {
-      // 결제할인 드롭다운 없음 → 기존대로 진행
+    const hasNativeSelect = await discountSelect
+      .waitFor({ state: "attached", timeout: 4000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!hasNativeSelect) {
+      // 신형 주문서: 네이티브 select 없이 커스텀 드롭다운으로 렌더링됨
+      await applyPaymentDiscountCustomUI(page);
       return;
     }
 
@@ -614,9 +626,7 @@ async function applyPaymentDiscount(page: Page) {
     const selectableOptions = options.filter(
       (o) => o.value && o.value !== "0" && !o.text.includes("선택해")
     );
-    const candidates = selectableOptions.filter(
-      (o) => !/첫\s*결제|스마일\s*카드|비씨\s*카드|bc\s*카드|현대\s*카드|하나\s*카드|나라\s*사랑/i.test(o.text)
-    );
+    const candidates = selectableOptions.filter((o) => !EXCLUDED_DISCOUNT_RE.test(o.text));
     const excludedDiscountCount = selectableOptions.length - candidates.length;
 
     if (candidates.length === 0) {
@@ -638,9 +648,6 @@ async function applyPaymentDiscount(page: Page) {
         })
         .catch(() => 0);
 
-    // 동점 시 우선순위: KB/국민 카드 → 삼성카드 → 나머지
-    const cardRank = (text: string) => (/kb|국민/i.test(text) ? 0 : /삼성/.test(text) ? 1 : 2);
-
     let best = { value: candidates[0].value, text: candidates[0].text, amount: -1 };
 
     if (candidates.length === 1) {
@@ -656,7 +663,7 @@ async function applyPaymentDiscount(page: Page) {
         console.log(`[gmarket-purchase] 결제할인 후보: "${opt.text}" → ${amount.toLocaleString()}원`);
         if (
           amount > best.amount ||
-          (amount === best.amount && cardRank(opt.text) < cardRank(best.text))
+          (amount === best.amount && discountCardRank(opt.text) < discountCardRank(best.text))
         ) {
           best = { value: opt.value, text: opt.text, amount };
         }
@@ -676,6 +683,108 @@ async function applyPaymentDiscount(page: Page) {
       e instanceof Error ? e.message : String(e)
     );
   }
+}
+
+/**
+ * 신형 주문서의 커스텀 결제할인 드롭다운(네이티브 select 없음) 처리.
+ * "결제할인을 선택해 주세요" 트리거를 눌러 목록을 펼친 뒤, 제외 대상이 아닌 옵션 중
+ * 할인율(%)이 가장 높은 항목을 클릭한다 (동률이면 KB/국민 → 삼성 순).
+ */
+async function applyPaymentDiscountCustomUI(page: Page) {
+  const trigger = page
+    .locator('button, a, [role="combobox"], [aria-haspopup], [aria-expanded]')
+    .filter({ hasText: /결제할인/ })
+    .first();
+
+  if ((await trigger.count()) === 0) {
+    console.log("[gmarket-purchase] 결제할인 UI 미발견 (select/커스텀 드롭다운 모두 없음) → 스킵");
+    return;
+  }
+
+  // 화면에 보이는 결제할인 옵션 텍스트 수집 (%, 카드/페이/도착보장 문구 포함, 짧은 텍스트)
+  const collectItems = () =>
+    page
+      .evaluate(() => {
+        const seen = new Set<string>();
+        const els = Array.from(
+          document.querySelectorAll('li, [role="option"], button, a, label')
+        ) as HTMLElement[];
+        for (const el of els) {
+          if (el.offsetParent === null) continue;
+          const text = (el.textContent || "").trim();
+          if (!text || text.length > 60) continue;
+          if (!text.includes("%")) continue;
+          if (text.includes("선택해")) continue;
+          if (!/(카드|페이|결제할인|도착보장)/.test(text)) continue;
+          seen.add(text);
+        }
+        return Array.from(seen);
+      })
+      .catch(() => [] as string[]);
+
+  // 목록이 이미 펼쳐져 있으면 그대로, 아니면 트리거 클릭으로 펼친다
+  let items = await collectItems();
+  if (items.length === 0) {
+    await trigger.click().catch(() => {});
+    await page.waitForTimeout(600);
+    items = await collectItems();
+  }
+
+  if (items.length === 0) {
+    const snippet = await trigger
+      .evaluate((el) => (el.closest("div")?.outerHTML || el.outerHTML).slice(0, 800))
+      .catch(() => "");
+    console.log("[gmarket-purchase] 결제할인(커스텀) 옵션 항목 미발견, DOM 스니펫:", snippet);
+    return;
+  }
+
+  const candidates = items.filter((t) => !EXCLUDED_DISCOUNT_RE.test(t));
+  console.log(
+    `[gmarket-purchase] 결제할인(커스텀) 옵션 ${items.length}개 중 후보 ${candidates.length}개:`,
+    candidates
+  );
+
+  if (candidates.length === 0) {
+    // 제외 대상만 있으면 목록을 닫고 진행
+    await trigger.click().catch(() => {});
+    console.log("[gmarket-purchase] 결제할인(커스텀) 후보 없음 (제외 대상만 존재) → 스킵");
+    return;
+  }
+
+  // 할인율(%)이 가장 높은 후보 선택
+  const percentOf = (t: string) => {
+    const m = t.match(/(\d+(?:\.\d+)?)\s*%/);
+    return m ? parseFloat(m[1]) : 0;
+  };
+  const best = candidates
+    .slice()
+    .sort((a, b) => percentOf(b) - percentOf(a) || discountCardRank(a) - discountCardRank(b))[0];
+
+  // 목록에서 best 텍스트와 정확히 일치하는 가장 안쪽 요소 클릭 (트리거 오클릭 방지)
+  const clicked = await page
+    .evaluate((t) => {
+      const els = Array.from(
+        document.querySelectorAll('li, [role="option"], button, a, label')
+      ) as HTMLElement[];
+      const matches = els.filter(
+        (el) => el.offsetParent !== null && (el.textContent || "").trim() === t
+      );
+      const innermost = matches.filter((el) => !matches.some((o) => o !== el && el.contains(o)));
+      const target = innermost[innermost.length - 1];
+      if (target) {
+        target.click();
+        return true;
+      }
+      return false;
+    }, best)
+    .catch(() => false);
+
+  await page.waitForTimeout(900);
+  console.log(
+    clicked
+      ? `[gmarket-purchase] 결제할인(커스텀) 적용: "${best}"`
+      : `[gmarket-purchase] 결제할인(커스텀) 항목 클릭 실패: "${best}"`
+  );
 }
 
 /** 페이지가 닫혔을 때 context에서 활성 페이지를 찾거나 새로 생성 */
