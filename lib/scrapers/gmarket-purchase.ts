@@ -472,8 +472,8 @@ async function processSingleOrder(
     await changeShippingAddress(activePage, order);
   }
 
-  // 7. 결제하기 클릭 + 비밀번호 입력
-  await processPayment(activePage, paymentPin);
+  // 7. 결제하기 클릭 + 비밀번호 입력 (결제 직전 최종 결제금액 한도 검사 포함)
+  await processPayment(activePage, paymentPin, order.maxPaymentPerUnit);
 
   // 8. 주문내역에서 결제 전에는 없던 새 주문번호 + 결제방식 + 원가를 추출
   const orderInfo = await extractOrderInfo(activePage, existingOrderNosBeforePurchase);
@@ -1512,9 +1512,49 @@ async function handleAddressConfirmPopup(page: Page) {
 }
 
 // ═══════════════════════════════════
+// 결제 직전 최종 결제금액 한도 검사
+// 쿠폰 개수 제한 소진 등으로 결제금액이 회당 한도(정산예정÷수량 + 허용적자)를
+// 넘으면 결제하지 않고 실패 처리한다. 금액을 못 읽어도 안전을 위해 결제하지 않는다.
+// ═══════════════════════════════════
+async function assertFinalPaymentWithinLimit(page: Page, maxPaymentPerUnit: number): Promise<void> {
+  let finalAmount: number | null = null;
+
+  // 결제할인 적용 직후 금액이 갱신될 시간을 잠깐 준다
+  await page.waitForTimeout(1000);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const bodyText = await page
+      .evaluate(() => document.body?.innerText || "")
+      .catch(() => "");
+    const match = bodyText.match(/최종\s*결제\s*금액\s*([0-9,]+)\s*원/);
+    if (match) {
+      finalAmount = parseInt(match[1].replace(/,/g, ""), 10);
+      break;
+    }
+    await page.waitForTimeout(1000);
+  }
+
+  if (finalAmount === null || Number.isNaN(finalAmount)) {
+    throw new Error(
+      `최종 결제금액을 확인할 수 없어 결제 전에 구매를 중단했습니다 (회당 한도 ${maxPaymentPerUnit.toLocaleString()}원).`
+    );
+  }
+
+  console.log(
+    `[gmarket-purchase] 최종 결제금액 검사: ${finalAmount.toLocaleString()}원 / 한도 ${maxPaymentPerUnit.toLocaleString()}원`
+  );
+
+  if (finalAmount > maxPaymentPerUnit) {
+    throw new Error(
+      `최종 결제금액 ${finalAmount.toLocaleString()}원이 회당 한도 ${maxPaymentPerUnit.toLocaleString()}원(정산예정÷수량+허용적자)을 초과해 결제 전에 구매를 중단했습니다. 쿠폰 소진 여부를 확인하세요.`
+    );
+  }
+}
+
+// ═══════════════════════════════════
 // 결제 처리 (결제하기 → 키패드 비밀번호 입력)
 // ═══════════════════════════════════
-async function processPayment(page: Page, paymentPin: string) {
+async function processPayment(page: Page, paymentPin: string, maxPaymentPerUnit?: number) {
   // 결제하기 버튼 클릭 전 dimmed 오버레이 제거
   await page.evaluate(() => {
     document.querySelectorAll('.dimmed, [id*="Dimmed"], [class*="dimmed"]').forEach((el) => {
@@ -1533,6 +1573,11 @@ async function processPayment(page: Page, paymentPin: string) {
 
   // 결제할인 드롭다운이 있으면 최대 금액 옵션 선택 (없으면 스킵)
   await applyPaymentDiscount(page);
+
+  // 결제 직전 최종 결제금액 한도 검사 (쿠폰 소진 등으로 비싸게 사는 것 방지)
+  if (maxPaymentPerUnit !== undefined) {
+    await assertFinalPaymentWithinLimit(page, maxPaymentPerUnit);
+  }
 
   // "결제하기" 버튼 클릭
   const payBtn = page.locator('button:has-text("결제하기"), a:has-text("결제하기")').first();

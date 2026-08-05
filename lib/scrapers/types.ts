@@ -42,6 +42,7 @@ export interface PurchaseOrderInfo {
   quantity: number;       // 수량
   productName?: string;   // 상품명 (구매 로그 기록용)
   optionName?: string;    // 옵션명 (옵션선택 드롭다운이 있는 상품용; 미지정 시 첫 번째 옵션 선택)
+  maxPaymentPerUnit?: number; // 회당 결제 한도(원) = 정산예정÷수량 + 허용적자. 미지정 시 최종 결제금액 검사 생략
 }
 
 export interface PurchaseResult {

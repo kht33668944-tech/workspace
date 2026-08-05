@@ -73,6 +73,8 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
   // 설정
   const [paymentPin, setPaymentPin] = useState("");
   const [showPin, setShowPin] = useState(false);
+  // 허용 적자(원): 회당 결제금액이 (정산예정÷수량 + 이 값)을 넘으면 구매 중단. 빈칸이면 0원
+  const [maxDeficit, setMaxDeficit] = useState("");
 
   // 진행 상태
   const [orderStatuses, setOrderStatuses] = useState<OrderStatus[]>([]);
@@ -424,18 +426,27 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
       const group = matchedGroups[gi];
       setCurrentGroupIndex(gi);
 
-      const purchaseOrders: PurchaseOrderInfo[] = group.orders.map((o) => ({
-        orderId: o.id,
-        productUrl: o.purchase_url!,
-        recipientName: o.recipient_name || "",
-        postalCode: o.postal_code || "",
-        address: o.address || "",
-        addressDetail: o.address_detail || "",
-        recipientPhone: o.recipient_phone || "",
-        deliveryMemo: o.delivery_memo || "",
-        quantity: o.quantity || 1,
-        productName: o.product_name || "",
-      }));
+      const allowedDeficit = Math.max(0, parseInt(maxDeficit, 10) || 0);
+      const purchaseOrders: PurchaseOrderInfo[] = group.orders.map((o) => {
+        const qty = Math.max(Number(o.quantity) || 1, 1);
+        const settlement = Number(o.settlement) || 0;
+        return {
+          orderId: o.id,
+          productUrl: o.purchase_url!,
+          recipientName: o.recipient_name || "",
+          postalCode: o.postal_code || "",
+          address: o.address || "",
+          addressDetail: o.address_detail || "",
+          recipientPhone: o.recipient_phone || "",
+          deliveryMemo: o.delivery_memo || "",
+          quantity: o.quantity || 1,
+          productName: o.product_name || "",
+          // 정산예정금액이 있는 주문만 회당 결제 한도 전달 (없으면 검사 생략)
+          ...(settlement > 0 && {
+            maxPaymentPerUnit: Math.floor(settlement / qty) + allowedDeficit,
+          }),
+        };
+      });
 
       // AbortController 생성
       const controller = new AbortController();
@@ -750,6 +761,26 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
                     {matchedGroups.some(g => g.platform === "gmarket") && matchedGroups.some(g => g.platform === "ohouse") && " / "}
                     {matchedGroups.some(g => g.platform === "ohouse") && "네이버페이"}
                     {" "}결제 비밀번호를 입력하세요.
+                  </p>
+                </div>
+              )}
+
+              {/* 허용 적자 (지마켓: 결제 직전 최종 결제금액 한도 검사) */}
+              {totalMatchedOrders > 0 && matchedGroups.some(g => g.platform === "gmarket") && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium text-[var(--text-secondary)]">허용 적자 (원)</h3>
+                  <div className="max-w-48">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={maxDeficit}
+                      onChange={(e) => setMaxDeficit(e.target.value.replace(/\D/g, "").slice(0, 7))}
+                      placeholder="0"
+                      className="w-full px-3 py-2 bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-blue-500/50"
+                    />
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    최종 결제금액이 (정산예정÷수량 + 허용 적자)를 넘으면 결제하지 않고 실패 처리합니다. 비워두면 0원(적자 불허).
                   </p>
                 </div>
               )}
