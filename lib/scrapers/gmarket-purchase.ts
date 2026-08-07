@@ -1516,23 +1516,36 @@ async function handleAddressConfirmPopup(page: Page) {
 // 쿠폰 개수 제한 소진 등으로 결제금액이 회당 한도(정산예정÷수량 + 허용적자)를
 // 넘으면 결제하지 않고 실패 처리한다. 금액을 못 읽어도 안전을 위해 결제하지 않는다.
 // ═══════════════════════════════════
+async function readFinalPaymentAmount(page: Page): Promise<number | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const bodyText = await page
+      .evaluate(() => document.body?.innerText || "")
+      .catch(() => "");
+    const match = bodyText.match(/최종\s*결제\s*금액\s*([0-9,]+)\s*원/);
+    if (match) return parseInt(match[1].replace(/,/g, ""), 10);
+    await page.waitForTimeout(1000);
+  }
+  return null;
+}
+
 async function assertFinalPaymentWithinLimit(page: Page, maxPaymentPerUnit: number): Promise<void> {
   let finalAmount: number | null = null;
 
   // 결제할인 적용 직후 금액이 갱신될 시간을 잠깐 준다
   await page.waitForTimeout(1000);
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const bodyText = await page
-      .evaluate(() => document.body?.innerText || "")
-      .catch(() => "");
-    const match = bodyText.match(/최종\s*결제\s*금액\s*([0-9,]+)\s*원/);
-    if (match) {
-      finalAmount = parseInt(match[1].replace(/,/g, ""), 10);
+  // 금액이 비동기로 갱신되는 레이스 방지: 연속 2회 같은 값이 읽힐 때까지 대기
+  let prev: number | null = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const current = await readFinalPaymentAmount(page);
+    if (current !== null && current === prev) {
+      finalAmount = current;
       break;
     }
-    await page.waitForTimeout(1000);
+    prev = current;
+    await page.waitForTimeout(1200);
   }
+  if (finalAmount === null) finalAmount = prev; // 안정화 실패 시 마지막 읽은 값 사용
 
   if (finalAmount === null || Number.isNaN(finalAmount)) {
     throw new Error(
@@ -1547,6 +1560,51 @@ async function assertFinalPaymentWithinLimit(page: Page, maxPaymentPerUnit: numb
   if (finalAmount > maxPaymentPerUnit) {
     throw new Error(
       `최종 결제금액 ${finalAmount.toLocaleString()}원이 회당 한도 ${maxPaymentPerUnit.toLocaleString()}원(정산예정÷수량+허용적자)을 초과해 결제 전에 구매를 중단했습니다. 쿠폰 소진 여부를 확인하세요.`
+    );
+  }
+}
+
+// ═══════════════════════════════════
+// 2차 한도 검사 — 비밀번호 입력 직전
+// 결제하기 클릭 시점에 지마켓 서버가 쿠폰 소진을 반영해 금액을 올릴 수 있으므로
+// (주문서 표시액은 통과했는데 실제 청구액이 더 큰 케이스), 스마일페이 레이어에
+// 표시된 결제금액과 주문서의 최종 결제금액을 다시 확인한다.
+// 초과 시 PIN을 입력하지 않고 중단하므로 결제는 발생하지 않는다.
+// ═══════════════════════════════════
+async function assertSmilepayAmountWithinLimit(
+  page: Page,
+  frame: Frame,
+  maxPaymentPerUnit: number
+): Promise<void> {
+  // 1) 스마일페이 레이어에 "결제금액 N원" 형태로 표시된 금액
+  let frameAmount: number | null = null;
+  const frameText = await frame
+    .evaluate(() => document.body?.innerText || "")
+    .catch(() => "");
+  const labeled = frameText.match(/(?:최종\s*)?결제\s*금액[^0-9]{0,20}([0-9,]+)\s*원/);
+  if (labeled) {
+    frameAmount = parseInt(labeled[1].replace(/,/g, ""), 10);
+  }
+
+  // 2) 주문서 본문의 최종 결제금액 (결제하기 클릭 후 서버 재계산으로 갱신될 수 있음)
+  const pageAmount = await readFinalPaymentAmount(page);
+
+  if (frameAmount === null && pageAmount === null) {
+    // 1차 검사는 이미 통과한 상태 — 여기서 못 읽었다고 정상 구매까지 막지는 않는다
+    console.warn(
+      `[gmarket-purchase] 2차 한도 검사: 결제금액을 읽지 못해 생략 (레이어 텍스트: "${frameText.replace(/\s+/g, " ").slice(0, 150)}")`
+    );
+    return;
+  }
+
+  const charged = Math.max(frameAmount ?? 0, pageAmount ?? 0);
+  console.log(
+    `[gmarket-purchase] 2차 한도 검사(PIN 입력 전): 레이어 ${frameAmount?.toLocaleString() ?? "?"}원 / 주문서 ${pageAmount?.toLocaleString() ?? "?"}원 / 한도 ${maxPaymentPerUnit.toLocaleString()}원`
+  );
+
+  if (charged > maxPaymentPerUnit) {
+    throw new Error(
+      `결제 직전 확인된 결제금액 ${charged.toLocaleString()}원이 회당 한도 ${maxPaymentPerUnit.toLocaleString()}원(정산예정÷수량+허용적자)을 초과해 비밀번호 입력 전에 구매를 중단했습니다. 쿠폰 소진 여부를 확인하세요.`
     );
   }
 }
@@ -1616,6 +1674,11 @@ async function processPayment(page: Page, paymentPin: string, maxPaymentPerUnit?
     const allFrames = page.frames().map(f => ({ name: f.name(), url: f.url() }));
     console.log("[gmarket-purchase] 전체 프레임 목록:", JSON.stringify(allFrames, null, 2));
     throw new Error("스마일페이 결제 프레임을 찾을 수 없습니다");
+  }
+
+  // 2차 한도 검사 — 결제하기 클릭 시점에 쿠폰 소진이 반영돼 금액이 올랐을 수 있다
+  if (maxPaymentPerUnit !== undefined) {
+    await assertSmilepayAmountWithinLimit(page, smilepayFrame, maxPaymentPerUnit);
   }
 
   // 키패드 버튼 매핑 (OCR)

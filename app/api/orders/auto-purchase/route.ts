@@ -19,6 +19,8 @@ interface AutoPurchaseRequest {
   batchId?: string;
   // 여러 계정(그룹)을 나눠 호출할 때 개별 디스코드 발송을 억제하고, 클라이언트가 마지막에 1회만 발송 (기본 true)
   notify?: boolean;
+  // 회당 결제 한도 계산 시 허용 적자(원). 미전송 시 0 — 서버가 DB 정산예정금액으로 한도를 직접 계산해 주입한다
+  allowedDeficit?: number;
   orders: PurchaseOrderInfo[];
 }
 
@@ -406,7 +408,7 @@ export async function POST(request: NextRequest) {
           if (targetOrders.length > 0) {
             const orderStateQuery = supabase
               .from("orders")
-              .select("id, purchase_order_no, delivery_status, quantity")
+              .select("id, purchase_order_no, delivery_status, quantity, settlement")
               .in("id", targetOrders.map((order) => order.orderId))
               .eq("user_id", userId);
             const { data: currentOrders, error: currentOrdersErr } = await orderStateQuery;
@@ -481,7 +483,27 @@ export async function POST(request: NextRequest) {
               if (lockedRows && lockedRows.length === 1) {
                 lockedOrderIds.add(order.orderId);
                 lockReleaseStatusByOrderId.set(order.orderId, purchaseReviewStatus);
-                lockedOrders.push(order);
+
+                // 회당 결제 한도를 서버에서 직접 계산해 주입 (오래된 클라이언트 번들이
+                // maxPaymentPerUnit 없이 보내도 한도 검사가 누락되지 않도록 하는 안전장치)
+                const allowedDeficit = Math.max(0, Math.floor(Number(body.allowedDeficit) || 0));
+                const currentOrder = currentOrderById.get(order.orderId);
+                const settlement = Number(currentOrder?.settlement) || 0;
+                const qty = Math.max(Number(currentOrder?.quantity) || 1, 1);
+                const serverLimit = settlement > 0 ? Math.floor(settlement / qty) + allowedDeficit : undefined;
+                const clientLimit = typeof order.maxPaymentPerUnit === "number" ? order.maxPaymentPerUnit : undefined;
+                const maxPaymentPerUnit = serverLimit !== undefined && clientLimit !== undefined
+                  ? Math.min(serverLimit, clientLimit)
+                  : serverLimit ?? clientLimit;
+
+                if (maxPaymentPerUnit !== undefined && clientLimit === undefined) {
+                  console.log(`[auto-purchase] 회당 결제 한도 서버 주입 (${order.orderId}): ${maxPaymentPerUnit}원 (정산 ${settlement} ÷ ${qty} + 허용적자 ${allowedDeficit})`);
+                }
+
+                lockedOrders.push({
+                  ...order,
+                  ...(maxPaymentPerUnit !== undefined && { maxPaymentPerUnit }),
+                });
               } else {
                 const reason = "다른 작업이 먼저 주문 상태를 변경해 자동구매를 차단했습니다.";
                 allFailed.push({ orderId: order.orderId, reason });

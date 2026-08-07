@@ -464,6 +464,8 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
             batchId,
             // 개별 그룹 알림 억제 — 마지막에 합산 결과로 1회만 발송
             notify: false,
+            // 서버 측 한도 계산용 (클라이언트 계산 누락 시에도 서버가 한도를 주입)
+            allowedDeficit,
             ...(PIN_REQUIRED_PLATFORMS.has(group.platform) && { paymentPin }),
             orders: purchaseOrders,
           }),
