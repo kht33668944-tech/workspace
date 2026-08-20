@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, RotateCcw, TrendingUp, Tags, ChevronDown, ChevronUp, ChevronRight, PlugZap } from "lucide-react";
+import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, RotateCcw, TrendingUp, Tags, ChevronDown, ChevronUp, ChevronRight, PlugZap, Eraser } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts, type PriceChangeFilter } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
@@ -21,6 +21,7 @@ const EsmPriceImportModal = dynamic(() => import("@/components/workspace/product
 const SmartstorePriceImportModal = dynamic(() => import("@/components/workspace/products/smartstore-price-import-modal"), { ssr: false });
 const CoupangApiModal = dynamic(() => import("@/components/workspace/products/coupang-api-modal"), { ssr: false });
 const BatchDetailModal = dynamic(() => import("@/components/workspace/products/batch-detail-modal"), { ssr: false });
+const RegistrationResetModal = dynamic(() => import("@/components/workspace/products/registration-reset-modal"), { ssr: false });
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
 import { downloadExcelFromBase64, type PlayAutoExportPlatform, PLATFORM_CONFIGS } from "@/lib/excel-export";
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
@@ -120,6 +121,7 @@ export default function ProductsPage() {
   const [esmImportModalOpen, setEsmImportModalOpen] = useState(false);
   const [smartstoreImportModalOpen, setSmartstoreImportModalOpen] = useState(false);
   const [coupangApiModalOpen, setCoupangApiModalOpen] = useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
   const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(initialView.priceChangeFilter);
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
   const [scrapeSoldOutIds, setScrapeSoldOutIds] = useState<string[]>([]);
@@ -137,7 +139,7 @@ export default function ProductsPage() {
   const platformCodeFileRef = useRef<HTMLInputElement>(null);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
-  const { products, allProducts, loading, refetch, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, priceScrapeStatus, refetchPriceChanges } = useProducts({
+  const { products, allProducts, loading, refetch, addProduct, insertProducts, updateProduct, deleteProducts, resetProductFields, undo, startBatchUndo, endBatchUndo, priceChanges, priceScrapeStatus, refetchPriceChanges } = useProducts({
     search: activeSearch,
     columnFilters,
     priceChangeFilter,
@@ -1296,6 +1298,13 @@ export default function ProductsPage() {
                     )}
                   </div>
                   <button
+                    onClick={() => setResetModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 rounded-lg transition-colors"
+                  >
+                    <Eraser className="w-4 h-4" />
+                    등록정보 초기화
+                  </button>
+                  <button
                     onClick={handleDelete}
                     disabled={deleting}
                     className="flex items-center gap-1.5 px-3 py-2 text-sm bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors disabled:opacity-50"
@@ -1740,6 +1749,15 @@ export default function ProductsPage() {
 
       {coupangApiModalOpen && (
         <CoupangApiModal productIds={[...selectedIds]} onClose={() => setCoupangApiModalOpen(false)} />
+      )}
+
+      {/* 등록정보 초기화 모달 */}
+      {resetModalOpen && (
+        <RegistrationResetModal
+          selectedCount={selectedIds.size}
+          onClose={() => setResetModalOpen(false)}
+          onReset={(fields) => resetProductFields([...selectedIds], fields)}
+        />
       )}
 
       {/* 상세페이지 일괄 생성 모달 */}
