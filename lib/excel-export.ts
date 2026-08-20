@@ -357,10 +357,18 @@ export function downloadExcel(buffer: ArrayBuffer, filename: string) {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.style.display = "none";
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+
+  // Chrome can still be reading the blob URL after click().
+  // Revoking/removing it immediately intermittently makes the download fail
+  // with "문제가 발생했습니다" in the downloads bubble, especially in
+  // automated/remote-debugging Chrome profiles.
+  window.setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 60_000);
 }
 
 /** base64 데이터로부터 엑셀 다운로드 */
