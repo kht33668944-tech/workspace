@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Archive, Download, Trash2, Loader2, Clock, FileSpreadsheet, Truck, Package } from "lucide-react";
+import { Archive, Download, Trash2, Loader2, Clock, FileSpreadsheet, Truck, Package, TrendingUp } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { downloadExcelFromBase64 } from "@/lib/excel-export";
 import { readJsonStorage, readUrlParam, rememberWorkspaceHref, replaceUrlParams, writeJsonStorage } from "@/lib/view-state";
 import type { ExcelArchive } from "@/types/database";
 
 type ArchiveMeta = Omit<ExcelArchive, "file_data">;
-type TabType = "playauto_tracking" | "order_export" | "playauto_product";
-const ARCHIVE_TABS: TabType[] = ["playauto_tracking", "order_export", "playauto_product"];
+type TabType = "playauto_tracking" | "order_export" | "playauto_product" | "price_update";
+const ARCHIVE_TABS: TabType[] = ["playauto_tracking", "order_export", "playauto_product", "price_update"];
 const ARCHIVE_VIEW_STORAGE_KEY = "workspace:archive:view";
 
 function isArchiveTab(value: string | null): value is TabType {
@@ -140,14 +140,15 @@ export default function ArchivePage() {
     return Math.max(0, days);
   };
 
-  const { trackingCount, orderCount, productCount } = useMemo(() => {
-    let t = 0, o = 0, p = 0;
+  const { trackingCount, orderCount, productCount, priceUpdateCount } = useMemo(() => {
+    let t = 0, o = 0, p = 0, u = 0;
     for (const a of archives) {
       if (a.file_type === "playauto_tracking") t++;
       else if (a.file_type === "order_export") o++;
       else if (a.file_type === "playauto_product") p++;
+      else if (a.file_type === "price_update") u++;
     }
-    return { trackingCount: t, orderCount: o, productCount: p };
+    return { trackingCount: t, orderCount: o, productCount: p, priceUpdateCount: u };
   }, [archives]);
 
   const retentionLabel = activeTab === "playauto_product" ? "30일 보관" : "7일 보관";
@@ -236,6 +237,22 @@ export default function ArchivePage() {
             </span>
           )}
         </button>
+        <button
+          onClick={() => handleTabChange("price_update")}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
+            activeTab === "price_update"
+              ? "border-emerald-400 text-emerald-400"
+              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" />
+          가격수정
+          {priceUpdateCount > 0 && (
+            <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === "price_update" ? "bg-emerald-500/20 text-emerald-400" : "bg-[var(--bg-hover)] text-[var(--text-muted)]"}`}>
+              {priceUpdateCount}
+            </span>
+          )}
+        </button>
       </div>
       </div>
 
@@ -253,6 +270,8 @@ export default function ArchivePage() {
               ? "운송장 수집 후 자동으로 저장됩니다"
               : activeTab === "playauto_product"
               ? "플레이오토 내보내기 시 자동으로 저장됩니다"
+              : activeTab === "price_update"
+              ? "원가 갱신 후 가격수정 엑셀 다운로드 시 자동으로 저장됩니다"
               : "발주서 엑셀 내보내기 시 자동으로 저장됩니다"}
           </p>
         </div>
@@ -309,8 +328,8 @@ function ArchiveRow({ archive, activeTab, selectedIds, downloading, onToggle, on
   formatDate: (d: string) => string;
   getRemainingDays: (d: string) => number;
 }) {
-  const Icon = activeTab === "order_export" ? FileSpreadsheet : activeTab === "playauto_product" ? Package : Truck;
-  const iconColor = activeTab === "order_export" ? "text-blue-400" : activeTab === "playauto_product" ? "text-violet-400" : "text-purple-400";
+  const Icon = activeTab === "order_export" ? FileSpreadsheet : activeTab === "playauto_product" ? Package : activeTab === "price_update" ? TrendingUp : Truck;
+  const iconColor = activeTab === "order_export" ? "text-blue-400" : activeTab === "playauto_product" ? "text-violet-400" : activeTab === "price_update" ? "text-emerald-400" : "text-purple-400";
   const remaining = getRemainingDays(archive.expires_at);
   const isExpiringSoon = activeTab === "playauto_product" ? remaining <= 5 : remaining <= 2;
 
