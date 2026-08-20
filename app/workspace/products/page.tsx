@@ -24,6 +24,7 @@ const BatchDetailModal = dynamic(() => import("@/components/workspace/products/b
 const RegistrationResetModal = dynamic(() => import("@/components/workspace/products/registration-reset-modal"), { ssr: false });
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
 import { downloadExcelFromBase64, type PlayAutoExportPlatform, PLATFORM_CONFIGS } from "@/lib/excel-export";
+import { exportPriceV2Platform, exportPriceV2All } from "@/lib/price-update-v2-export";
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
 import { readJsonStorage, readUrlParam, rememberWorkspaceHref, replaceUrlParams, writeJsonStorage } from "@/lib/view-state";
 
@@ -135,7 +136,6 @@ export default function ProductsPage() {
   const scrapeLogRef = useRef<HTMLDivElement>(null);
   const scrapeAbortRef = useRef<AbortController | null>(null);
   const [scrapeDropdownOpen, setScrapeDropdownOpen] = useState(false);
-  const [scrapeVersion, setScrapeVersion] = useState<"v1" | "v2" | "v3">("v2");
   const platformCodeFileRef = useRef<HTMLInputElement>(null);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
@@ -336,106 +336,6 @@ export default function ProductsPage() {
     endBatchUndo();
   };
 
-  const runScrapeOnce = async (
-    ids: string[],
-    abortController: AbortController,
-  ): Promise<{
-    changes: Array<{ id: string; name: string; previous: number; price: number }>;
-    botBlocked: Array<{ id: string; name: string }>;
-    soldOut: string[];
-    stopped: boolean;
-    statuses: Map<string, ScrapeStatusKey>;
-  }> => {
-    const changes: Array<{ id: string; name: string; previous: number; price: number }> = [];
-    const botBlocked: Array<{ id: string; name: string }> = [];
-    const soldOut: string[] = [];
-    // 이 라운드에서 처리된 각 상품의 최종 상태 (재시도 시 상위에서 병합)
-    const statuses = new Map<string, ScrapeStatusKey>();
-    let stopped = false;
-    try {
-      const res = await fetch("/api/products/scrape-prices", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session?.access_token}`,
-        },
-        // 재시도 라운드마다 발송하지 않고 마지막에 합산 1회만 발송
-        body: JSON.stringify({ productIds: ids, notify: false }),
-        signal: abortController.signal,
-      });
-      if (!res.ok || !res.body) {
-        pushScrapeLog("최저가 수집 실패 (서버 응답 오류)");
-        return { changes, botBlocked, soldOut, stopped, statuses };
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          const data = line.replace(/^data: /, "").trim();
-          if (!data) continue;
-          try {
-            const event = JSON.parse(data);
-            if (event.type === "progress") {
-              const failReasonText: Record<string, string> = {
-                bot_blocked: "봇 감지로 차단 (재시도 필요)",
-                sold_out: "품절/판매종료",
-                timeout: "페이지 로딩 타임아웃",
-                selector_changed: "가격 추출 실패 (페이지 구조 변경)",
-                network_error: "네트워크 오류",
-              };
-              const priceText = event.bot_blocked
-                ? "봇 감지로 차단 (재시도 필요)"
-                : event.price > 0
-                  ? event.price !== event.previous_price
-                    ? `${event.previous_price.toLocaleString()}→${event.price.toLocaleString()}원`
-                    : `${event.price.toLocaleString()}원 (변동없음)`
-                  : (failReasonText[event.fail_reason] || "실패");
-              pushScrapeLog(`(${event.index}/${event.total}) ${event.name} → ${priceText}`);
-              const statusKey: "updated" | "unchanged" | "bot_blocked" | "failed" | "sold_out" = event.bot_blocked
-                ? "bot_blocked"
-                : event.price > 0
-                  ? event.price !== event.previous_price ? "updated" : "unchanged"
-                  : event.fail_reason === "sold_out" ? "sold_out" : "failed";
-              statuses.set(event.id, statusKey);
-              setScrapeStatus(prev => {
-                const next = new Map(prev);
-                next.set(event.id, statusKey);
-                return next;
-              });
-              if (event.bot_blocked) {
-                botBlocked.push({ id: event.id, name: event.name });
-              } else if (event.price > 0) {
-                changes.push({ id: event.id, name: event.name, previous: event.previous_price, price: event.price });
-              } else if (statusKey === "sold_out") {
-                soldOut.push(event.id);
-              }
-            } else if (event.type === "done") {
-              const blockedText = event.bot_blocked > 0 ? `, ${event.bot_blocked}개 봇감지` : "";
-              const soldOutText = event.sold_out > 0 ? `, ${event.sold_out}개 품절` : "";
-              pushScrapeLog(`완료: ${event.updated}개 변동, ${event.unchanged ?? 0}개 변동없음, ${event.failed}개 실패${soldOutText}${blockedText}`);
-            } else if (event.type === "error") {
-              pushScrapeLog(`오류: ${event.message}`);
-            }
-          } catch {}
-        }
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        stopped = true;
-        pushScrapeLog(`중단됨: ${changes.length}개 수집 완료`);
-      } else {
-        pushScrapeLog("최저가 수집 중 오류 발생");
-      }
-    }
-    return { changes, botBlocked, soldOut, stopped, statuses };
-  };
-
   // 최저가 갱신: 모든 재시도 라운드 종료 후 합산 결과로 디스코드 1회 발송
   const sendPriceScrapeNotify = async (args: {
     finalStatus: Map<string, ScrapeStatusKey>;
@@ -509,85 +409,9 @@ export default function ProductsPage() {
     }
   };
 
-  const handleScrapePrices = async (overrideIds?: string[]) => {
-    const isRetry = !!(overrideIds && overrideIds.length > 0);
-    const ids = isRetry
-      ? overrideIds!
-      : (selectedIds.size > 0 ? [...selectedIds] : products.filter(p => p.purchase_url).map(p => p.id));
-    if (ids.length === 0) return;
-    if (!isRetry && !confirm(`${selectedIds.size > 0 ? `선택한 ${ids.length}개` : `전체 ${ids.length}개`} 상품의 최저가를 갱신하시겠습니까?`)) return;
-
-    const abortController = new AbortController();
-    scrapeAbortRef.current = abortController;
-    setScrapingPrices(true);
-    if (!isRetry) {
-      setScrapeLog(["최저가 수집 준비 중..."]);
-      setScrapeResults([]);
-      setScrapeSoldOutIds([]);
-      setScrapeStatus(new Map());
-      setScrapeTotal(ids.length);
-    } else {
-      pushScrapeLog(`봇감지 실패 ${ids.length}개 다시 시도 중...`);
-    }
-    setScrapeLogCollapsed(false);
-    setBotBlockedItems([]);
-
-    const allChanges: Array<{ id: string; name: string; previous: number; price: number }> = [];
-    const allSoldOut: string[] = [];
-    // 재시도 라운드 간 상품별 최종 상태 병합 (나중 라운드가 이전 결과를 덮어씀)
-    const finalStatus = new Map<string, ScrapeStatusKey>();
-    let remainingBlocked: Array<{ id: string; name: string }> = [];
-    let stopped = false;
-    let retryCount = 0;
-    const MAX_RETRIES = 10;
-
-    try {
-      let currentIds = ids;
-      while (currentIds.length > 0) {
-        if (retryCount > 0) {
-          pushScrapeLog(`봇감지 ${currentIds.length}개 자동 재시도 (${retryCount}/${MAX_RETRIES})...`);
-          await new Promise(r => setTimeout(r, 3000));
-          if (abortController.signal.aborted) { stopped = true; break; }
-        }
-        const result = await runScrapeOnce(currentIds, abortController);
-        allChanges.push(...result.changes);
-        allSoldOut.push(...result.soldOut);
-        for (const [id, st] of result.statuses) finalStatus.set(id, st);
-        remainingBlocked = result.botBlocked;
-        stopped = result.stopped;
-        if (stopped || remainingBlocked.length === 0 || retryCount >= MAX_RETRIES) break;
-        currentIds = remainingBlocked.map(b => b.id);
-        retryCount++;
-      }
-    } finally {
-      scrapeAbortRef.current = null;
-      setScrapingPrices(false);
-      applySoldOutMargins(allChanges.map(c => c.id), allSoldOut);
-      refetchPriceChanges();
-      setScrapeSoldOutIds([...new Set(allSoldOut)]);
-      if (allChanges.length > 0 || allSoldOut.length > 0) {
-        setScrapeResults([...allChanges]);
-        setScrapeResultModalOpen(true);
-        setScrapeLogCollapsed(true);
-      }
-      if (remainingBlocked.length > 0) {
-        setBotBlockedItems(remainingBlocked);
-        pushScrapeLog(`봇감지 ${remainingBlocked.length}개 미완료 (${retryCount}회 재시도 후) - 수동 재시도 가능`);
-      } else if (retryCount > 0 && !stopped) {
-        pushScrapeLog(`봇감지 전체 해소 (${retryCount}회 재시도)`);
-      }
-      if (!stopped && allChanges.length === 0 && remainingBlocked.length === 0) {
-        setTimeout(() => setScrapeLog([]), 3000);
-      }
-      // 모든 재시도 종료 후 합산 결과로 디스코드 1회 발송
-      await sendPriceScrapeNotify({ finalStatus, changes: allChanges, skipped: 0, retryCount, stopped });
-    }
-  };
-
   const runScrapeRemoteOnce = async (
     ids: string[],
     abortController: AbortController,
-    version: "v2" | "v3",
   ): Promise<{
     changes: Array<{ id: string; name: string; previous: number; price: number }>;
     botBlocked: RetryItem[];
@@ -606,7 +430,7 @@ export default function ProductsPage() {
     let skipped = 0;
     let stopped = false;
     try {
-      const res = await fetch(`/api/products/scrape-prices-${version}`, {
+      const res = await fetch("/api/products/scrape-prices-v2", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -696,7 +520,7 @@ export default function ProductsPage() {
     return { changes, botBlocked, failedItems, soldOut, skipped, stopped, statuses };
   };
 
-  const handleScrapePricesRemote = async (version: "v2" | "v3", overrideIds?: string[]) => {
+  const handleScrapePricesRemote = async (overrideIds?: string[]) => {
     const isRetry = !!(overrideIds && overrideIds.length > 0);
     const ids = isRetry
       ? overrideIds!
@@ -704,18 +528,17 @@ export default function ProductsPage() {
         ? [...selectedIds]
         : products.filter(p => p.purchase_url?.includes("gmarket.co.kr")).map(p => p.id));
     if (ids.length === 0) {
-      alert(`지마켓 상품이 없습니다. (${version}는 지마켓부터 지원)`);
+      alert("지마켓 상품이 없습니다. (v2는 지마켓부터 지원)");
       return;
     }
-    const versionLabel = version === "v3" ? "Scrapling v3" : "고속 HTTP v2";
+    const versionLabel = "고속 HTTP v2";
     if (!isRetry && !confirm(`${selectedIds.size > 0 ? `선택한 ${ids.length}개` : `전체 ${ids.length}개`} 상품의 최저가를 ${versionLabel}로 갱신하시겠습니까?`)) return;
 
     const abortController = new AbortController();
     scrapeAbortRef.current = abortController;
     setScrapingPrices(true);
-    setScrapeVersion(version);
     if (!isRetry) {
-      setScrapeLog([`[${version}] ${versionLabel} 최저가 수집 준비 중...`]);
+      setScrapeLog([`[v2] ${versionLabel} 최저가 수집 준비 중...`]);
       setScrapeResults([]);
       setScrapeSoldOutIds([]);
       setScrapeStatus(new Map());
@@ -743,7 +566,7 @@ export default function ProductsPage() {
           await new Promise(r => setTimeout(r, 3000));
           if (abortController.signal.aborted) { stopped = true; break; }
         }
-        const result = await runScrapeRemoteOnce(currentIds, abortController, version);
+        const result = await runScrapeRemoteOnce(currentIds, abortController);
         allChanges.push(...result.changes);
         allSoldOut.push(...result.soldOut);
         for (const [id, st] of result.statuses) finalStatus.set(id, st);
@@ -784,12 +607,9 @@ export default function ProductsPage() {
   };
 
   const handleScrapePricesV2 = async (overrideIds?: string[]) => {
-    await handleScrapePricesRemote("v2", overrideIds);
+    await handleScrapePricesRemote(overrideIds);
   };
 
-  const handleScrapePricesV3 = async (overrideIds?: string[]) => {
-    await handleScrapePricesRemote("v3", overrideIds);
-  };
 
   const handleStopScrape = () => {
     scrapeAbortRef.current?.abort();
@@ -841,7 +661,7 @@ export default function ProductsPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({
           updates: changed.map(r => ({ id: r.id, price: r.price, previous_price: r.previous })),
-          source: scrapeVersion === "v3" ? "scrapling_scrape" : scrapeVersion === "v2" ? "impit_scrape" : "scrape",
+          source: "impit_scrape",
         }),
       });
       const json = await res.json() as { applied?: number; error?: string };
@@ -1035,56 +855,6 @@ export default function ProductsPage() {
     if (file) handlePlatformCodeFile(file);
   };
 
-  const PRICE_V2_LABELS: Record<"coupang" | "esm" | "smartstore", { label: string; rowLabel: string }> = {
-    coupang: { label: "쿠팡 양식", rowLabel: "옵션 행" },
-    esm: { label: "ESM 상품목록", rowLabel: "옥션·지마켓 행" },
-    smartstore: { label: "스마트스토어 일괄수정 엑셀", rowLabel: "스마트스토어 행" },
-  };
-
-  // 단일 플랫폼 가격수정 v2 export — 다운로드를 수행하고 안내 메시지(없으면 null)를 반환
-  const exportPriceV2Platform = async (platform: "coupang" | "esm" | "smartstore", ids: string[]): Promise<string | null> => {
-    const { label, rowLabel } = PRICE_V2_LABELS[platform];
-    const res = await fetch(`/api/${platform}-price-inventory/export`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-      body: JSON.stringify({ productIds: ids }),
-    });
-    const json = await res.json() as {
-      files?: Array<{ excelBase64: string; filename: string; rowCount: number }>;
-      excelBase64?: string;
-      filename?: string;
-      rowCount?: number;
-      fileCount?: number;
-      skippedProductIds?: string[];
-      error?: string;
-    };
-    if (!res.ok) {
-      return `${label}: ${json.error ?? "내보내기 실패"}`;
-    }
-    const files = json.files && json.files.length > 0
-      ? json.files
-      : (json.excelBase64 && json.filename
-        ? [{ excelBase64: json.excelBase64, filename: json.filename, rowCount: json.rowCount ?? 0 }]
-        : []);
-    if (files.length === 0) {
-      return `${label}: ${json.error ?? "생성된 행이 없습니다 (양식 임포트 필요)"}`;
-    }
-    for (let i = 0; i < files.length; i++) {
-      downloadExcelFromBase64(files[i].excelBase64, files[i].filename);
-      // 브라우저가 연속 다운로드를 차단하지 않도록 약간의 지연
-      if (i < files.length - 1) await new Promise(r => setTimeout(r, 250));
-    }
-    const skipped = json.skippedProductIds?.length ?? 0;
-    const fileCountMsg = files.length > 1 ? ` (${files.length}개 파일로 분할 — 양식 한 개당 500행 제한)` : "";
-    if (skipped > 0) {
-      return `${label}: 총 ${json.rowCount}행 생성${fileCountMsg}, ${skipped}개 상품은 ${rowLabel}이 없어 제외됐습니다. ${label}을 다시 임포트하세요.`;
-    }
-    if (files.length > 1) {
-      return `${label}: 총 ${json.rowCount}행${fileCountMsg}`;
-    }
-    return null;
-  };
-
   const handlePriceUpdateV2Export = async (platform: "coupang" | "esm" | "smartstore") => {
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) {
@@ -1094,7 +864,7 @@ export default function ProductsPage() {
     setExportModalOpen(false);
     setPriceUpdateV2Exporting(true);
     try {
-      const msg = await exportPriceV2Platform(platform, ids);
+      const msg = await exportPriceV2Platform(platform, ids, session?.access_token ?? "");
       if (msg) alert(msg);
     } catch (e) {
       alert(e instanceof Error ? e.message : "가격수정 v2 내보내기 중 오류");
@@ -1112,19 +882,8 @@ export default function ProductsPage() {
     }
     setExportModalOpen(false);
     setPriceUpdateV2Exporting(true);
-    const platforms: Array<"coupang" | "esm" | "smartstore"> = ["coupang", "esm", "smartstore"];
-    const msgs: string[] = [];
     try {
-      for (const platform of platforms) {
-        try {
-          const msg = await exportPriceV2Platform(platform, ids);
-          if (msg) msgs.push(msg);
-        } catch (e) {
-          msgs.push(`${PRICE_V2_LABELS[platform].label}: ${e instanceof Error ? e.message : "오류"}`);
-        }
-        // 플랫폼 간 연속 다운로드 충돌 방지
-        await new Promise(r => setTimeout(r, 400));
-      }
+      const msgs = await exportPriceV2All(ids, session?.access_token ?? "");
       if (msgs.length) alert(msgs.join("\n"));
     } finally {
       setPriceUpdateV2Exporting(false);
@@ -1316,7 +1075,7 @@ export default function ProductsPage() {
               )}
               <div className="relative flex">
                 <button
-                  onClick={() => scrapeVersion === "v3" ? handleScrapePricesV3() : scrapeVersion === "v2" ? handleScrapePricesV2() : handleScrapePrices()}
+                  onClick={() => handleScrapePricesV2()}
                   disabled={scrapingPrices}
                   className="flex items-center gap-1.5 px-3 py-2 text-sm bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 rounded-l-lg transition-colors disabled:opacity-50"
                 >
@@ -1334,38 +1093,11 @@ export default function ProductsPage() {
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setScrapeDropdownOpen(false)} />
                     <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl overflow-hidden">
-                      <div className="px-3 py-2 border-b border-[var(--border)]">
-                        <span className="text-xs font-medium text-[var(--text-muted)]">갱신 방식 선택</span>
-                      </div>
-                      <button
-                        onClick={() => { setScrapeDropdownOpen(false); setScrapeVersion("v1"); handleScrapePrices(); }}
-                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-[var(--bg-hover)] transition-colors ${scrapeVersion === "v1" ? "text-cyan-400" : "text-[var(--text-primary)]"}`}
-                      >
-                        <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                        v1 (브라우저)
-                        {scrapeVersion === "v1" && <span className="ml-auto text-xs text-[var(--text-muted)]">현재</span>}
-                      </button>
-                      <button
-                        onClick={() => { setScrapeDropdownOpen(false); setScrapeVersion("v2"); handleScrapePricesV2(); }}
-                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-[var(--bg-hover)] transition-colors ${scrapeVersion === "v2" ? "text-green-400" : "text-[var(--text-primary)]"}`}
-                      >
-                        <span className="w-2 h-2 rounded-full bg-green-400" />
-                        v2 (고속 HTTP)
-                        {scrapeVersion === "v2" && <span className="ml-auto text-xs text-[var(--text-muted)]">현재</span>}
-                      </button>
-                      <button
-                        onClick={() => { setScrapeDropdownOpen(false); setScrapeVersion("v3"); handleScrapePricesV3(); }}
-                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-[var(--bg-hover)] transition-colors ${scrapeVersion === "v3" ? "text-orange-400" : "text-[var(--text-primary)]"}`}
-                      >
-                        <span className="w-2 h-2 rounded-full bg-orange-400" />
-                        v3 (Scrapling 실험)
-                        {scrapeVersion === "v3" && <span className="ml-auto text-xs text-[var(--text-muted)]">현재</span>}
-                      </button>
                       <button
                         onClick={handleResetPriceChanges}
                         disabled={selectedIds.size === 0 || resettingPriceChanges}
                         title={selectedIds.size === 0 ? "상품을 체크한 뒤 사용할 수 있습니다" : "선택 상품의 전일 대비 표시값만 초기화합니다"}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-amber-400 hover:bg-amber-600/10 transition-colors disabled:opacity-45 disabled:cursor-not-allowed border-t border-[var(--border)]"
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-amber-400 hover:bg-amber-600/10 transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
                       >
                         <RotateCcw className={`w-3.5 h-3.5 ${resettingPriceChanges ? "animate-spin" : ""}`} />
                         {resettingPriceChanges ? "초기화 중..." : `전일 대비 초기화${selectedIds.size > 0 ? ` ${selectedIds.size}개` : ""}`}
@@ -1817,7 +1549,7 @@ export default function ProductsPage() {
               {!scrapingPrices && botBlockedItems.length > 0 && (
                 <>
                   <button
-                    onClick={() => scrapeVersion === "v3" ? handleScrapePricesV3(botBlockedItems.map(b => b.id)) : scrapeVersion === "v2" ? handleScrapePricesV2(botBlockedItems.map(b => b.id)) : handleScrapePrices(botBlockedItems.map(b => b.id))}
+                    onClick={() => handleScrapePricesV2(botBlockedItems.map(b => b.id))}
                     className="flex items-center gap-1 px-2.5 py-1 min-h-[32px] text-xs font-medium text-orange-400 bg-orange-500/10 hover:bg-orange-500/20 rounded-lg transition-colors"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />

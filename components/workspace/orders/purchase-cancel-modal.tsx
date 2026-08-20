@@ -84,9 +84,9 @@ export default function PurchaseCancelModal({ count, onClose, onSubmit }: Purcha
               id="purchase-cancel-reason"
               value={reason}
               onChange={(event) => setReason(event.target.value as PurchaseCancelReason)}
-              className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-blue-500/50"
+              className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-blue-500/50 [color-scheme:dark]"
             >
-              {PURCHASE_CANCEL_REASONS.map((item) => <option key={item} value={item}>{item}</option>)}
+              {PURCHASE_CANCEL_REASONS.map((item) => <option key={item} value={item} className="bg-[var(--bg-card)] text-[var(--text-primary)]">{item}</option>)}
             </select>
           </div>
 

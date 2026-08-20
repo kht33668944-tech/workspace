@@ -121,8 +121,8 @@ npm run deploy:check # Railway 배포 상태 확인
 
 ## 자동화 운영 규칙
 
-- `AGENTS.md`는 매번 읽히므로 짧은 원칙과 포인터만 둔다. 세부 클릭 절차, 로그인 절차, 운영 워크플로우는 skill 또는 Obsidian에 둔다.
-- workspace 리셀 자동화 작업은 `workspace-reseller-automation` skill을 우선 사용한다.
+- `AGENTS.md`는 짧은 공용 프로젝트 규칙만 둔다. Hermes 전용 운영 규칙은 `.hermes.md`, 세부 클릭 절차/로그인 절차/운영 워크플로우는 skill 또는 Obsidian에 둔다.
+- workspace 리셀 자동화 작업은 `.hermes.md`의 채널/cron 운영 규칙과 관련 skill을 우선 사용한다.
 - 다시 쓸 수 있는 결정과 절차는 `obsidian-llm-wiki` skill로 `C:\Users\kht33\Documents\Obsidian Vault`에 한국어로 기록한다.
 - Obsidian에는 비밀번호, API 키, 인증 토큰, 세션 값, 복구 코드 같은 비밀정보를 저장하지 않는다.
 - 사용자는 비개발자이므로 답변은 쉬운 말로 설명하고, 코드/명령어 세부사항은 꼭 필요할 때만 짧게 언급한다.

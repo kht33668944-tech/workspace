@@ -71,3 +71,6 @@ scraper-service.log
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 자동화 스크립트 실행 로그
+scripts/logs/
