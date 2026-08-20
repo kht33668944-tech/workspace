@@ -21,7 +21,7 @@ const ALLOWED_EXCEL_EXTENSIONS = new Set(["xlsx", "xls", "csv"]);
 // 판매처별 정산 비율 (판매가 × rate = 정산예정금액)
 const SETTLEMENT_RATES: [string, number][] = [
   ["스마트스토어", 0.93],
-  ["쿠팡", 0.89],
+  ["쿠팡", 0.88],
   ["옥션", 0.85],
   ["지마켓", 0.87],
   ["11번가", 0.92],
