@@ -38,6 +38,7 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
   const [templateName, setTemplateName] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [dailyUsage, setDailyUsage] = useState<{ used: number | null; limit: number; warnAt: number } | null>(null);
 
   const [progress, setProgress] = useState<SendProgress | null>(null);
   const [successCount, setSuccessCount] = useState(0);
@@ -80,6 +81,25 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
   const costPerMessage = messageType === "LMS" ? 50 : 20;
   const estimatedCost = provider === "phone" ? 0 : recipients.length * costPerMessage;
 
+  // KT 일일 한도 판정. 휴대폰 경로에만 적용(SOLAPI는 KT 회선을 쓰지 않음).
+  // 집계 실패(used === null) 시에는 차단하지 않는다 — 서버가 최종 방어선이다.
+  const limitState = useMemo(() => {
+    if (provider !== "phone" || !dailyUsage || dailyUsage.used === null) return null;
+    const { used, limit, warnAt } = dailyUsage;
+    const total = used + recipients.length;
+    return {
+      used,
+      limit,
+      warnAt,
+      total,
+      allowed: Math.max(0, limit - used),
+      exceeded: total > limit,
+      warning: total > warnAt && total <= limit,
+    };
+  }, [provider, dailyUsage, recipients.length]);
+
+  const sendBlocked = limitState?.exceeded ?? false;
+
   const fetchTemplates = useCallback(async () => {
     if (!session?.access_token) return;
     try {
@@ -106,6 +126,20 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
   }, [session?.access_token]);
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+  const fetchDailyUsage = useCallback(async () => {
+    if (!session?.access_token) return;
+    try {
+      const res = await fetch("/api/sms/daily-usage", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) setDailyUsage(await res.json());
+    } catch (e) {
+      console.warn(`[bulk-sms-modal] 사용량 조회 실패: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [session?.access_token]);
+
+  useEffect(() => { fetchDailyUsage(); }, [fetchDailyUsage]);
 
   // 언마운트 시 진행 중 발송 중단 (post-unmount setState 방지)
   useEffect(() => () => { abortRef.current?.abort(); }, []);
@@ -175,6 +209,7 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
 
   const handleSend = async () => {
     if (!session?.access_token || recipients.length === 0 || !templateContent.trim()) return;
+    if (sendBlocked) return;
     const confirmMsg =
       provider === "phone"
         ? `${recipients.length}건의 문자를 휴대폰(무료)으로 발송하시겠습니까?`
@@ -270,6 +305,7 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
       }
       } finally {
         reader.releaseLock();
+        fetchDailyUsage();
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -482,14 +518,50 @@ export default function BulkSmsModal({ orders, onClose }: BulkSmsModalProps) {
                 </div>
               )}
 
+              {/* KT 일일 발송 한도 현황 */}
+              {limitState && (
+                <div
+                  className={`px-3 py-2.5 rounded-lg border text-xs space-y-1 ${
+                    limitState.exceeded
+                      ? "bg-red-600/20 border-red-600/40 text-red-400"
+                      : limitState.warning
+                      ? "bg-orange-600/20 border-orange-600/40 text-orange-400"
+                      : "bg-[var(--bg-hover)] border-[var(--border)] text-[var(--text-muted)]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span>오늘 발송</span>
+                    <span className="font-mono">
+                      {limitState.used} / {limitState.limit}건
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>이번 발송</span>
+                    <span className="font-mono">
+                      {recipients.length}건 → 합계 {limitState.total}건
+                    </span>
+                  </div>
+                  {limitState.exceeded && (
+                    <div className="pt-1 font-medium">
+                      ⚠ {limitState.total - limitState.limit}건 초과. 최대 {limitState.allowed}건까지만 선택 가능합니다.
+                    </div>
+                  )}
+                  {limitState.warning && (
+                    <div className="pt-1">
+                      KT 경고 문자가 올 수 있습니다 (일 {limitState.warnAt}건 초과). 발송은 가능합니다.
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* 발송 버튼 */}
               <button
                 onClick={handleSend}
-                disabled={recipients.length === 0 || !templateContent.trim()}
+                disabled={recipients.length === 0 || !templateContent.trim() || sendBlocked}
                 className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
               >
                 <Send className="w-4 h-4" />
-                발송하기 ({recipients.length}건)
+                {sendBlocked ? "일일 한도 초과로 발송 불가" : `발송하기 (${recipients.length}건)`}
               </button>
             </>
           )}

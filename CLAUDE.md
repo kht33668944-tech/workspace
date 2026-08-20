@@ -91,6 +91,8 @@ npx tsc --noEmit # 타입 체크
 
 **선택 (로컬 개발):** `BROWSER_HEADLESS=false`, `BROWSER_CHANNEL=chrome`, `MAX_BROWSER_INSTANCES=2`
 
+**선택 (단체문자 KT 한도):** `SMS_DAILY_LIMIT=500` (초과 시 발송 차단), `SMS_DAILY_WARN=300` (초과 시 경고 표시). KT는 일 300건 초과 시 경고 문자, 일 500건 도달 시 당일 발송을 차단한다. 차단 상태에서도 게이트웨이는 요청을 정상 접수하고 `sms_logs`에 `success`로 남기지만 실제로는 발송되지 않고 TTL 만료로 소멸하므로, 사전 차단이 필요하다.
+
 ## MCP 규칙
 
 - 코드 작성 → context7 최신 문서 참고

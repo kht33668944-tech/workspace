@@ -5,6 +5,7 @@ import { sendMessages, substituteTemplate } from "@/lib/solapi";
 import { sendGatewayMessage, checkGatewayOnline } from "@/lib/sms-gateway";
 import { formatKoreanDateTime } from "@/lib/date-utils";
 import type { Order } from "@/types/database";
+import { countTodayPhoneSms, SMS_DAILY_LIMIT } from "@/lib/sms-daily-limit";
 
 export const maxDuration = 300;
 
@@ -67,6 +68,29 @@ export async function POST(request: NextRequest) {
 
   if (validOrders.length === 0) {
     return NextResponse.json({ error: "유효한 전화번호가 있는 주문이 없습니다." }, { status: 400 });
+  }
+
+  // ── KT 일일 한도 검사 (휴대폰 경로만) ──
+  // 한도 초과 상태에서 발송하면 게이트웨이는 정상 접수하고 sms_logs에도 success로 남지만
+  // 통신사가 실제 발송을 막아 TTL 만료로 조용히 소멸한다. 그 전에 끊는다.
+  // 클라이언트에도 같은 검사가 있으나, 구번들 탭 우회를 막기 위해 서버에서 강제한다.
+  if (provider === "phone") {
+    const used = await countTodayPhoneSms(serviceSupabase, user.id);
+    if (used !== null && used + validOrders.length > SMS_DAILY_LIMIT) {
+      const allowed = Math.max(0, SMS_DAILY_LIMIT - used);
+      console.warn(
+        `[sms-send] 일일 한도 초과로 발송 거부: 오늘 ${used}건 + 요청 ${validOrders.length}건 > 한도 ${SMS_DAILY_LIMIT}건`
+      );
+      return NextResponse.json(
+        {
+          error: `KT 일일 발송 한도(${SMS_DAILY_LIMIT}건)를 초과합니다. 오늘 ${used}건 발송했고, 지금은 최대 ${allowed}건까지만 가능합니다.`,
+          used,
+          limit: SMS_DAILY_LIMIT,
+          allowed,
+        },
+        { status: 400 }
+      );
+    }
   }
 
   const abortController = new AbortController();
