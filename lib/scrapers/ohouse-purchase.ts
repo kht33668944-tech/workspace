@@ -2,6 +2,7 @@ import { type Page, type BrowserContext } from "playwright";
 import { launchBrowser } from "./browser";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
+import { sanitizeAddressDetail } from "./types";
 import { loadSession, saveSession, loadFileSession, saveFileSession } from "./session-manager";
 import { formatAutomationError } from "./error-messages";
 
@@ -424,12 +425,13 @@ async function changeDeliveryAddress(page: Page, order: PurchaseOrderInfo) {
     await page.waitForTimeout(2000);
 
     // 7. 상세주소 입력 (모달 내부 input[placeholder="상세주소 입력"])
-    if (order.addressDetail) {
+    const ohouseDetail = order.addressDetail ? sanitizeAddressDetail(order.addressDetail) : "";
+    if (ohouseDetail) {
       const detailInput = modal.locator('input[placeholder*="상세주소"]').first();
       if (await detailInput.isVisible({ timeout: 3000 }).catch(() => false)) {
         await detailInput.click({ force: true });
-        await detailInput.fill(order.addressDetail);
-        console.log(`[ohouse-purchase] 상세주소 입력: ${order.addressDetail}`);
+        await detailInput.fill(ohouseDetail);
+        console.log(`[ohouse-purchase] 상세주소 입력: ${ohouseDetail}`);
       }
     }
 

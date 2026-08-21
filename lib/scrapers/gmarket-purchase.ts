@@ -4,6 +4,7 @@ import sharp from "sharp";
 import type TesseractType from "tesseract.js";
 import path from "path";
 import type { PurchaseOrderInfo, PurchaseResult } from "./types";
+import { sanitizeAddressDetail } from "./types";
 import { formatAutomationError } from "./error-messages";
 
 // Next.js(Turbopack)에서 tesseract.js 워커 경로가 C:\ROOT\로 변환되는 문제 해결
@@ -588,8 +589,9 @@ async function applyCheckoutDiscount(page: Page) {
 
 // 결제할인 제외 대상 카드 (미보유/사용 불가 카드)
 const EXCLUDED_DISCOUNT_RE = /첫\s*결제|스마일\s*카드|비씨\s*카드|bc\s*카드|현대\s*카드|하나\s*카드|나라\s*사랑/i;
-// 동점 시 우선순위: KB/국민 카드 → 삼성카드 → 나머지
-const discountCardRank = (text: string) => (/kb|국민/i.test(text) ? 0 : /삼성/.test(text) ? 1 : 2);
+// 동점 시 우선순위: [모든결제수단] (결제수단 무관, 항상 적용 가능) → KB/국민 카드 → 삼성카드 → 나머지
+const discountCardRank = (text: string) =>
+  /모든\s*결제/.test(text) ? -1 : /kb|국민/i.test(text) ? 0 : /삼성/.test(text) ? 1 : 2;
 
 /**
  * 주문서 페이지의 "결제할인" 드롭다운 처리.
@@ -691,10 +693,18 @@ async function applyPaymentDiscount(page: Page) {
  * 할인율(%)이 가장 높은 항목을 클릭한다 (동률이면 KB/국민 → 삼성 순).
  */
 async function applyPaymentDiscountCustomUI(page: Page) {
-  const trigger = page
+  let trigger = page
     .locator('button, a, [role="combobox"], [aria-haspopup], [aria-expanded]')
     .filter({ hasText: /결제할인/ })
     .first();
+
+  if ((await trigger.count()) === 0) {
+    // 아코디언형 신형 UI: 트리거가 div/span으로 렌더링되는 경우 — 가장 안쪽 매칭 요소 사용
+    trigger = page
+      .locator("div, span, p, dt, strong")
+      .filter({ hasText: /결제할인을?\s*선택/ })
+      .last();
+  }
 
   if ((await trigger.count()) === 0) {
     console.log("[gmarket-purchase] 결제할인 UI 미발견 (select/커스텀 드롭다운 모두 없음) → 스킵");
@@ -707,7 +717,7 @@ async function applyPaymentDiscountCustomUI(page: Page) {
       .evaluate(() => {
         const seen = new Set<string>();
         const els = Array.from(
-          document.querySelectorAll('li, [role="option"], button, a, label')
+          document.querySelectorAll('li, [role="option"], button, a, label, div, span, p')
         ) as HTMLElement[];
         for (const el of els) {
           if (el.offsetParent === null) continue;
@@ -715,19 +725,22 @@ async function applyPaymentDiscountCustomUI(page: Page) {
           if (!text || text.length > 60) continue;
           if (!text.includes("%")) continue;
           if (text.includes("선택해")) continue;
-          if (!/(카드|페이|결제할인|도착보장)/.test(text)) continue;
+          if (!/(카드|페이|결제할인|도착보장|모든\s*결제)/.test(text)) continue;
           seen.add(text);
         }
         return Array.from(seen);
       })
       .catch(() => [] as string[]);
 
-  // 목록이 이미 펼쳐져 있으면 그대로, 아니면 트리거 클릭으로 펼친다
+  // 주문서에는 드롭다운과 무관한 카드 프로모션 문구(제외 대상)가 항상 보일 수 있으므로,
+  // "선택 가능한 후보"가 없으면 목록이 접힌 것으로 보고 트리거를 클릭해 펼친 뒤 재수집한다
   let items = await collectItems();
-  if (items.length === 0) {
+  let candidates = items.filter((t) => !EXCLUDED_DISCOUNT_RE.test(t));
+  if (candidates.length === 0) {
     await trigger.click().catch(() => {});
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(800);
     items = await collectItems();
+    candidates = items.filter((t) => !EXCLUDED_DISCOUNT_RE.test(t));
   }
 
   if (items.length === 0) {
@@ -738,7 +751,7 @@ async function applyPaymentDiscountCustomUI(page: Page) {
     return;
   }
 
-  const candidates = items.filter((t) => !EXCLUDED_DISCOUNT_RE.test(t));
+  console.log("[gmarket-purchase] 결제할인(커스텀) 수집 텍스트:", items);
   console.log(
     `[gmarket-purchase] 결제할인(커스텀) 옵션 ${items.length}개 중 후보 ${candidates.length}개:`,
     candidates
@@ -764,7 +777,7 @@ async function applyPaymentDiscountCustomUI(page: Page) {
   const clicked = await page
     .evaluate((t) => {
       const els = Array.from(
-        document.querySelectorAll('li, [role="option"], button, a, label')
+        document.querySelectorAll('li, [role="option"], button, a, label, div, span, p')
       ) as HTMLElement[];
       const matches = els.filter(
         (el) => el.offsetParent !== null && (el.textContent || "").trim() === t
@@ -1289,11 +1302,12 @@ async function changeShippingAddress(page: Page, order: PurchaseOrderInfo) {
     await setLocationBtn.click();
     await page.waitForTimeout(2000);
 
-    // 10. 상세주소 입력
-    if (order.addressDetail) {
+    // 10. 상세주소 입력 (특수문자 포함 시 배송지 저장이 거부되므로 정리 후 입력)
+    const gmarketDetail = order.addressDetail ? sanitizeAddressDetail(order.addressDetail) : "";
+    if (gmarketDetail) {
       const detailInput = shippingFrame.getByRole("textbox", { name: /상세주소/ });
       await detailInput.waitFor({ state: "visible", timeout: 5000 });
-      await detailInput.fill(order.addressDetail);
+      await detailInput.fill(gmarketDetail);
     }
 
     // 11. 배송 요청사항 입력

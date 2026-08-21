@@ -29,6 +29,15 @@ export interface BulkUpdateTrackingRequest {
   }[];
 }
 
+// 상세주소 특수문자 정리: 한글/영문/숫자/공백/하이픈만 남기고 나머지(·, /, 괄호 등)는 공백 치환
+// 일부 마켓 배송지 폼이 특수문자가 포함된 상세주소 저장을 거부한다
+export function sanitizeAddressDetail(detail: string): string {
+  return detail
+    .replace(/[^가-힣a-zA-Z0-9\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // 자동구매 관련 타입
 export interface PurchaseOrderInfo {
   orderId: string;        // DB id

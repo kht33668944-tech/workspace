@@ -9,6 +9,7 @@ async function loadXLSX() {
   await _xlsxPromise;
 }
 import { EXCEL_COLUMN_MAP, LEGACY_EXCEL_COLUMN_MAP } from "./constants";
+import { sanitizeAddressDetail } from "./scrapers/types";
 import type { OrderInsert } from "@/types/database";
 
 const MAX_EXCEL_FILE_SIZE = 25 * 1024 * 1024;
@@ -453,8 +454,8 @@ function splitAddress(fullAddress: string): { base: string; detail: string } {
   const base = match[1].trim();
   const rest = match[2].trim();
 
-  // 괄호 기호만 제거하고 내용은 상세주소에 보존
-  const detail = rest.replace(/[()]/g, "").replace(/\s+/g, " ").trim();
+  // 특수문자(·, /, 괄호 등)는 제거하고 내용은 상세주소에 보존 (마켓 배송지 폼이 특수문자 저장을 거부)
+  const detail = sanitizeAddressDetail(rest);
 
   return { base, detail };
 }
@@ -538,6 +539,9 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
     const { base, detail } = splitAddress(mapped.address);
     mapped.address = base;
     mapped.address_detail = detail || null;
+  } else if (mapped.address_detail && typeof mapped.address_detail === "string") {
+    // 엑셀에 상세주소 컬럼이 별도로 온 경우에도 특수문자 정리
+    mapped.address_detail = sanitizeAddressDetail(mapped.address_detail) || null;
   }
   if (mapped.revenue === undefined) mapped.revenue = 0;
 
