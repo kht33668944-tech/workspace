@@ -14,6 +14,7 @@ import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { formatKoreanDateTime, getKoreanMonthKey } from "@/lib/date-utils";
 import { rememberWorkspaceHref, replaceUrlParams } from "@/lib/view-state";
 import { supabase } from "@/lib/supabase";
+import { exportPriceV2All } from "@/lib/price-update-v2-export";
 import OrderTable from "@/components/workspace/orders/order-table";
 import OrderModal from "@/components/workspace/orders/order-modal";
 import OrderSidePanel, { OrderSidePanelContent } from "@/components/workspace/orders/order-side-panel";
@@ -42,7 +43,12 @@ type ProductCostRow = {
   product_name: string | null;
   purchase_url: string | null;
   lowest_price: number | null;
+  margin_rate: number | null;
 };
+
+// 상품소싱 페이지와 동일한 품절 마진 규칙 (margin_rate 35 = 품절 상태로 취급)
+const COST_REFRESH_SOLDOUT_MARGIN = 35;
+const COST_REFRESH_DEFAULT_MARGIN = 7;
 
 type CostRefreshResult = {
   productId: string;
@@ -149,7 +155,7 @@ async function fetchProductCostRows(userId: string): Promise<ProductCostRow[]> {
   while (true) {
     const { data, error } = await supabase
       .from("products")
-      .select("id, product_name, purchase_url, lowest_price")
+      .select("id, product_name, purchase_url, lowest_price, margin_rate")
       .eq("user_id", userId)
       .range(from, from + PAGE_SIZE - 1);
 
@@ -266,6 +272,7 @@ function OrdersPageInner() {
   const [costRefreshResults, setCostRefreshResults] = useState<CostRefreshResult[]>([]);
   const [costRefreshResultOpen, setCostRefreshResultOpen] = useState(false);
   const [applyingCostRefresh, setApplyingCostRefresh] = useState(false);
+  const [exportingCostExcel, setExportingCostExcel] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const autoMenuRef = useRef<HTMLDivElement>(null);
   const importMenuRef = useRef<HTMLDivElement>(null);
@@ -517,7 +524,8 @@ function OrdersPageInner() {
       });
 
       if (!res.ok || !res.body) {
-        pushCostRefreshLog("원가 수집 실패 (서버 응답 오류)");
+        const errBody = await res.json().catch(() => ({})) as { error?: string };
+        pushCostRefreshLog(`원가 수집 실패 (HTTP ${res.status}${errBody.error ? `: ${errBody.error}` : ""})`);
         return {
           successes,
           botBlocked,
@@ -658,7 +666,7 @@ function OrdersPageInner() {
     results: CostRefreshResult[],
     groups: Map<string, { product: ProductCostRow; orders: Order[] }>,
   ) => {
-    if (results.length === 0) return { productCount: 0, orderCount: 0 };
+    if (results.length === 0) return { productCount: 0, orderCount: 0, exportProductIds: [] as string[] };
 
     const changed = results.filter((r) => r.status === "priced" && r.price !== r.previous);
     for (let i = 0; i < changed.length; i += 500) {
@@ -677,6 +685,39 @@ function OrdersPageInner() {
       const json = await res.json().catch(() => ({})) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? "상품소싱 최저가 적용 실패");
     }
+
+    // 품절 마진 동기화 (상품소싱 최저가 갱신과 동일 규칙)
+    // - 신규 품절(마진 ≠ 35)만 35%로 변경. 이미 품절이던 상품은 변동 없음
+    // - 품절이었다가 정상가로 재수집된 상품은 7%로 복귀
+    const newlySoldOutIds: string[] = [];
+    const restockedIds: string[] = [];
+    for (const r of results) {
+      const margin = groups.get(r.productId)?.product.margin_rate;
+      if (r.status === "sold_out" && margin !== COST_REFRESH_SOLDOUT_MARGIN) newlySoldOutIds.push(r.productId);
+      if (r.status === "priced" && margin === COST_REFRESH_SOLDOUT_MARGIN) restockedIds.push(r.productId);
+    }
+    const marginUpdates = [
+      ...newlySoldOutIds.map((id) => ({ id, margin: COST_REFRESH_SOLDOUT_MARGIN })),
+      ...restockedIds.map((id) => ({ id, margin: COST_REFRESH_DEFAULT_MARGIN })),
+    ];
+    if (marginUpdates.length > 0) {
+      const settled = await Promise.allSettled(
+        marginUpdates.map((u) => supabase.from("products").update({ margin_rate: u.margin }).eq("id", u.id))
+      );
+      for (let i = 0; i < settled.length; i++) {
+        const s = settled[i];
+        if (s.status === "rejected" || s.value.error) {
+          console.error(`[orders] 품절 마진 동기화 실패 (${marginUpdates[i].id}):`, s.status === "rejected" ? String(s.reason) : s.value.error?.message);
+        }
+      }
+    }
+
+    // 가격수정 엑셀 다운로드 대상: 가격 변동 + 신규 품절 + 재입고 복귀
+    const exportProductIds = [...new Set([
+      ...changed.map((r) => r.productId),
+      ...newlySoldOutIds,
+      ...restockedIds,
+    ])];
 
     let updatedOrders = 0;
     startBatchUndo();
@@ -716,7 +757,7 @@ function OrdersPageInner() {
       throw err;
     }
 
-    return { productCount: results.length, orderCount: updatedOrders };
+    return { productCount: results.length, orderCount: updatedOrders, exportProductIds };
   }, [endBatchUndo, session?.access_token, startBatchUndo, updateOrder]);
 
   const handleStopCostRefresh = useCallback(() => {
@@ -877,7 +918,7 @@ function OrdersPageInner() {
     user,
   ]);
 
-  const handleApplyCollectedCosts = useCallback(async () => {
+  const handleApplyCollectedCosts = useCallback(async (withExcel = false) => {
     if (costRefreshResults.length === 0 || applyingCostRefresh) return;
 
     setApplyingCostRefresh(true);
@@ -888,13 +929,36 @@ function OrdersPageInner() {
       showToast(`원가 적용 완료: 발주서 ${applied.orderCount}건 수정`, "success");
       setCostRefreshResultOpen(false);
       setCostRefreshResults([]);
+
+      if (withExcel) {
+        if (applied.exportProductIds.length === 0) {
+          showToast("가격수정 엑셀 대상(변동/신규품절 상품)이 없습니다.", "info");
+        } else {
+          setExportingCostExcel(true);
+          try {
+            pushCostRefreshLog(`가격수정 엑셀 생성 중... (상품 ${applied.exportProductIds.length}개)`);
+            const msgs = await exportPriceV2All(applied.exportProductIds, session?.access_token ?? "", (filename, excelBase64, rowCount) => {
+              // 생성된 가격수정 엑셀을 보관함에 자동 저장 (실패해도 다운로드는 진행)
+              fetch("/api/archives", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+                body: JSON.stringify({ file_name: filename, file_type: "price_update", file_data: excelBase64, order_count: rowCount }),
+              }).catch(() => {});
+            });
+            if (msgs.length) alert(msgs.join("\n"));
+            pushCostRefreshLog("가격수정 엑셀 다운로드 완료");
+          } finally {
+            setExportingCostExcel(false);
+          }
+        }
+      }
     } catch (err) {
       pushCostRefreshLog(`적용 오류: ${err instanceof Error ? err.message : "원가 적용 실패"}`);
       showToast("원가 적용 중 오류가 발생했습니다.", "error");
     } finally {
       setApplyingCostRefresh(false);
     }
-  }, [applyCostRefreshResults, applyingCostRefresh, costRefreshResults, pushCostRefreshLog, refetch, showToast]);
+  }, [applyCostRefreshResults, applyingCostRefresh, costRefreshResults, pushCostRefreshLog, refetch, session?.access_token, showToast]);
 
   const costRefreshPreview = useMemo(() => costRefreshResults.map((result) => {
     const group = costRefreshGroupsRef.current.get(result.productId);
@@ -1629,11 +1693,19 @@ function OrdersPageInner() {
               </button>
               <button
                 type="button"
-                onClick={handleApplyCollectedCosts}
+                onClick={() => handleApplyCollectedCosts()}
                 disabled={applyingCostRefresh}
                 className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
               >
-                {applyingCostRefresh ? "적용 중..." : `적용하기 (${costRefreshChangedOrderCount}건)`}
+                {applyingCostRefresh && !exportingCostExcel ? "적용 중..." : `적용하기 (${costRefreshChangedOrderCount}건)`}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyCollectedCosts(true)}
+                disabled={applyingCostRefresh}
+                className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
+              >
+                {exportingCostExcel ? "엑셀 생성 중..." : "적용 + 엑셀 다운로드"}
               </button>
             </div>
           </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, RotateCcw, TrendingUp, Tags, ChevronDown, ChevronUp, ChevronRight, PlugZap } from "lucide-react";
+import { Plus, Trash2, Settings2, Package, Download, Upload, Images, Play, FileSpreadsheet, LayoutList, RefreshCw, RotateCcw, TrendingUp, Tags, ChevronDown, ChevronUp, ChevronRight, PlugZap, Eraser } from "lucide-react";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { useProducts, type PriceChangeFilter } from "@/hooks/use-products";
 import { useCommissions } from "@/hooks/use-commissions";
@@ -21,8 +21,10 @@ const EsmPriceImportModal = dynamic(() => import("@/components/workspace/product
 const SmartstorePriceImportModal = dynamic(() => import("@/components/workspace/products/smartstore-price-import-modal"), { ssr: false });
 const CoupangApiModal = dynamic(() => import("@/components/workspace/products/coupang-api-modal"), { ssr: false });
 const BatchDetailModal = dynamic(() => import("@/components/workspace/products/batch-detail-modal"), { ssr: false });
+const RegistrationResetModal = dynamic(() => import("@/components/workspace/products/registration-reset-modal"), { ssr: false });
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
 import { downloadExcelFromBase64, type PlayAutoExportPlatform, PLATFORM_CONFIGS } from "@/lib/excel-export";
+import { exportPriceV2Platform, exportPriceV2All } from "@/lib/price-update-v2-export";
 import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
 import { readJsonStorage, readUrlParam, rememberWorkspaceHref, replaceUrlParams, writeJsonStorage } from "@/lib/view-state";
 
@@ -120,6 +122,7 @@ export default function ProductsPage() {
   const [esmImportModalOpen, setEsmImportModalOpen] = useState(false);
   const [smartstoreImportModalOpen, setSmartstoreImportModalOpen] = useState(false);
   const [coupangApiModalOpen, setCoupangApiModalOpen] = useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
   const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(initialView.priceChangeFilter);
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
   const [scrapeSoldOutIds, setScrapeSoldOutIds] = useState<string[]>([]);
@@ -136,7 +139,7 @@ export default function ProductsPage() {
   const platformCodeFileRef = useRef<HTMLInputElement>(null);
 
   const { rates, categories, loading: commissionLoading } = useCommissions();
-  const { products, allProducts, loading, refetch, addProduct, insertProducts, updateProduct, deleteProducts, undo, startBatchUndo, endBatchUndo, priceChanges, priceScrapeStatus, refetchPriceChanges } = useProducts({
+  const { products, allProducts, loading, refetch, addProduct, insertProducts, updateProduct, deleteProducts, resetProductFields, undo, startBatchUndo, endBatchUndo, priceChanges, priceScrapeStatus, refetchPriceChanges } = useProducts({
     search: activeSearch,
     columnFilters,
     priceChangeFilter,
@@ -852,56 +855,6 @@ export default function ProductsPage() {
     if (file) handlePlatformCodeFile(file);
   };
 
-  const PRICE_V2_LABELS: Record<"coupang" | "esm" | "smartstore", { label: string; rowLabel: string }> = {
-    coupang: { label: "쿠팡 양식", rowLabel: "옵션 행" },
-    esm: { label: "ESM 상품목록", rowLabel: "옥션·지마켓 행" },
-    smartstore: { label: "스마트스토어 일괄수정 엑셀", rowLabel: "스마트스토어 행" },
-  };
-
-  // 단일 플랫폼 가격수정 v2 export — 다운로드를 수행하고 안내 메시지(없으면 null)를 반환
-  const exportPriceV2Platform = async (platform: "coupang" | "esm" | "smartstore", ids: string[]): Promise<string | null> => {
-    const { label, rowLabel } = PRICE_V2_LABELS[platform];
-    const res = await fetch(`/api/${platform}-price-inventory/export`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-      body: JSON.stringify({ productIds: ids }),
-    });
-    const json = await res.json() as {
-      files?: Array<{ excelBase64: string; filename: string; rowCount: number }>;
-      excelBase64?: string;
-      filename?: string;
-      rowCount?: number;
-      fileCount?: number;
-      skippedProductIds?: string[];
-      error?: string;
-    };
-    if (!res.ok) {
-      return `${label}: ${json.error ?? "내보내기 실패"}`;
-    }
-    const files = json.files && json.files.length > 0
-      ? json.files
-      : (json.excelBase64 && json.filename
-        ? [{ excelBase64: json.excelBase64, filename: json.filename, rowCount: json.rowCount ?? 0 }]
-        : []);
-    if (files.length === 0) {
-      return `${label}: ${json.error ?? "생성된 행이 없습니다 (양식 임포트 필요)"}`;
-    }
-    for (let i = 0; i < files.length; i++) {
-      downloadExcelFromBase64(files[i].excelBase64, files[i].filename);
-      // 브라우저가 연속 다운로드를 차단하지 않도록 약간의 지연
-      if (i < files.length - 1) await new Promise(r => setTimeout(r, 250));
-    }
-    const skipped = json.skippedProductIds?.length ?? 0;
-    const fileCountMsg = files.length > 1 ? ` (${files.length}개 파일로 분할 — 양식 한 개당 500행 제한)` : "";
-    if (skipped > 0) {
-      return `${label}: 총 ${json.rowCount}행 생성${fileCountMsg}, ${skipped}개 상품은 ${rowLabel}이 없어 제외됐습니다. ${label}을 다시 임포트하세요.`;
-    }
-    if (files.length > 1) {
-      return `${label}: 총 ${json.rowCount}행${fileCountMsg}`;
-    }
-    return null;
-  };
-
   const handlePriceUpdateV2Export = async (platform: "coupang" | "esm" | "smartstore") => {
     const ids = selectedIds.size > 0 ? [...selectedIds] : products.map(p => p.id);
     if (ids.length === 0) {
@@ -911,7 +864,7 @@ export default function ProductsPage() {
     setExportModalOpen(false);
     setPriceUpdateV2Exporting(true);
     try {
-      const msg = await exportPriceV2Platform(platform, ids);
+      const msg = await exportPriceV2Platform(platform, ids, session?.access_token ?? "");
       if (msg) alert(msg);
     } catch (e) {
       alert(e instanceof Error ? e.message : "가격수정 v2 내보내기 중 오류");
@@ -929,19 +882,8 @@ export default function ProductsPage() {
     }
     setExportModalOpen(false);
     setPriceUpdateV2Exporting(true);
-    const platforms: Array<"coupang" | "esm" | "smartstore"> = ["coupang", "esm", "smartstore"];
-    const msgs: string[] = [];
     try {
-      for (const platform of platforms) {
-        try {
-          const msg = await exportPriceV2Platform(platform, ids);
-          if (msg) msgs.push(msg);
-        } catch (e) {
-          msgs.push(`${PRICE_V2_LABELS[platform].label}: ${e instanceof Error ? e.message : "오류"}`);
-        }
-        // 플랫폼 간 연속 다운로드 충돌 방지
-        await new Promise(r => setTimeout(r, 400));
-      }
+      const msgs = await exportPriceV2All(ids, session?.access_token ?? "");
       if (msgs.length) alert(msgs.join("\n"));
     } finally {
       setPriceUpdateV2Exporting(false);
@@ -1114,6 +1056,13 @@ export default function ProductsPage() {
                       </>
                     )}
                   </div>
+                  <button
+                    onClick={() => setResetModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 rounded-lg transition-colors"
+                  >
+                    <Eraser className="w-4 h-4" />
+                    등록정보 초기화
+                  </button>
                   <button
                     onClick={handleDelete}
                     disabled={deleting}
@@ -1532,6 +1481,15 @@ export default function ProductsPage() {
 
       {coupangApiModalOpen && (
         <CoupangApiModal productIds={[...selectedIds]} onClose={() => setCoupangApiModalOpen(false)} />
+      )}
+
+      {/* 등록정보 초기화 모달 */}
+      {resetModalOpen && (
+        <RegistrationResetModal
+          selectedCount={selectedIds.size}
+          onClose={() => setResetModalOpen(false)}
+          onReset={(fields) => resetProductFields([...selectedIds], fields)}
+        />
       )}
 
       {/* 상세페이지 일괄 생성 모달 */}

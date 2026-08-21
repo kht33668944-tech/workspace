@@ -30,8 +30,12 @@ interface UndoGroup {
 const MAX_UNDO = 20;
 const ADDRESS_UPDATE_KEYS = ["postal_code", "address", "address_detail"] as const;
 
-function hasAddressChange(order: Order, updates: OrderUpdate): boolean {
-  return ADDRESS_UPDATE_KEYS.some((key) =>
+function hasFieldChange(
+  order: Order,
+  updates: OrderUpdate,
+  keys: readonly (keyof Order & keyof OrderUpdate)[]
+): boolean {
+  return keys.some((key) =>
     Object.prototype.hasOwnProperty.call(updates, key) &&
     String(order[key] ?? "") !== String(updates[key] ?? "")
   );
@@ -148,6 +152,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const fetchGenRef = useRef(0);
   const prevFetchGenRef = useRef(0);
   const addressBatchConfirmedRef = useRef<boolean | null>(null);
+  const productNameBatchConfirmedRef = useRef<boolean | null>(null);
   const pendingUpdatePromisesRef = useRef<Set<Promise<void>>>(new Set());
 
 
@@ -428,7 +433,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
       }
     }
 
-    if (currentOrder && !skipUndo && hasAddressChange(currentOrder, autoStatusUpdates)) {
+    if (currentOrder && !skipUndo && hasFieldChange(currentOrder, autoStatusUpdates, ADDRESS_UPDATE_KEYS)) {
       let confirmed = true;
       if (batchUndoRef.current) {
         if (addressBatchConfirmedRef.current === null) {
@@ -448,6 +453,32 @@ export function useOrders(options: UseOrdersOptions = {}) {
             `변경: ${describeAddress(nextAddress)}`,
             "",
             "확인하면 DB에 저장되고 자동구매에도 이 주소가 사용됩니다.",
+          ].join("\n")
+        );
+      }
+
+      if (!confirmed) return Promise.resolve();
+    }
+
+    if (currentOrder && !skipUndo && hasFieldChange(currentOrder, autoStatusUpdates, ["product_name"])) {
+      let confirmed = true;
+      if (batchUndoRef.current) {
+        if (productNameBatchConfirmedRef.current === null) {
+          productNameBatchConfirmedRef.current = window.confirm(
+            "상품명을 여러 건 변경합니다.\n잘못된 붙여넣기면 다른 상품으로 바뀔 수 있습니다. 변경하시겠습니까?"
+          );
+        }
+        confirmed = productNameBatchConfirmedRef.current;
+      } else {
+        confirmed = window.confirm(
+          [
+            "상품명을 변경하시겠습니까?",
+            "",
+            `수취인: ${currentOrder.recipient_name || "-"}`,
+            `기존: ${currentOrder.product_name || "(비어 있음)"}`,
+            `변경: ${String(autoStatusUpdates.product_name ?? "") || "(비어 있음)"}`,
+            "",
+            "확인하면 DB에 저장되고 자동구매에도 이 상품명이 사용됩니다.",
           ].join("\n")
         );
       }
@@ -555,6 +586,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const startBatchUndo = useCallback(() => {
     batchUndoRef.current = [];
     addressBatchConfirmedRef.current = null;
+    productNameBatchConfirmedRef.current = null;
   }, []);
 
 
@@ -565,6 +597,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
     }
     batchUndoRef.current = null;
     addressBatchConfirmedRef.current = null;
+    productNameBatchConfirmedRef.current = null;
   }, []);
 
 

@@ -14,6 +14,13 @@ function urlToStoragePath(publicUrl: string): string {
   return idx >= 0 ? publicUrl.slice(idx + marker.length) : publicUrl;
 }
 
+async function removeStorageImages(paths: string[]) {
+  const STORAGE_BATCH = 100;
+  for (let i = 0; i < paths.length; i += STORAGE_BATCH) {
+    await supabase.storage.from("product-images").remove(paths.slice(i, i + STORAGE_BATCH));
+  }
+}
+
 interface UseProductsOptions {
   search?: string;
   categoryFilter?: string | null;
@@ -33,6 +40,20 @@ interface UndoGroup {
 }
 
 const MAX_UNDO = 20;
+
+// 등록정보 초기화 시 지울 항목 선택
+export interface ResetFieldOptions {
+  platformCodes: boolean;      // platform_codes — 판매처별 상품번호
+  sellerCode: boolean;         // seller_code — 플레이오토 판매자관리코드
+  registrationStatus: boolean; // registration_status → "등록전"
+  detailHtml: boolean;         // detail_html — 상세페이지 HTML
+  detailImage: boolean;        // detail_image_url — AI 상세페이지 이미지 (Storage 파일도 삭제)
+  imageUrls: boolean;          // image_urls — 상품 이미지 목록 (Storage 파일도 삭제)
+  thumbnail: boolean;          // thumbnail_url — 썸네일
+  coupangOptions: boolean;     // coupang_options — 쿠팡 옵션 캐시
+  fixedPrices: boolean;        // fixed_price_* — 플랫폼별 고정 판매가
+  priceInventory: boolean;     // 셀러센터 가격수정 캐시 3개 테이블 행 삭제
+}
 
 // detail_html은 payload가 크므로 목록 조회 시 제외. 필요 시 fetchProductDetailHtml로 단건 조회.
 const PRODUCT_LIST_COLUMNS =
@@ -421,12 +442,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     });
 
     // Storage 이미지 삭제
-    if (storagePaths.length > 0) {
-      const STORAGE_BATCH = 100;
-      for (let i = 0; i < storagePaths.length; i += STORAGE_BATCH) {
-        await supabase.storage.from("product-images").remove(storagePaths.slice(i, i + STORAGE_BATCH));
-      }
-    }
+    await removeStorageImages(storagePaths);
 
     // DB 레코드 삭제
     const BATCH_SIZE = 100;
@@ -443,6 +459,87 @@ export function useProducts(options: UseProductsOptions = {}) {
     setProducts((prev) => prev.filter((p) => !idSet.has(p.id)));
     fetchGenRef.current++;
     return { error: null };
+  }, []);
+
+  // 등록정보 초기화 — 체크한 항목만 비운다. detail_html 원본이 로컬에 없어 undo 미지원(호출 전 확인창 필수)
+  const resetProductFields = useCallback(async (ids: string[], fields: ResetFieldOptions) => {
+    const idSet = new Set(ids);
+
+    const payload: ProductUpdate = {};
+    if (fields.platformCodes) payload.platform_codes = null;
+    if (fields.sellerCode) payload.seller_code = null;
+    if (fields.registrationStatus) payload.registration_status = "등록전";
+    if (fields.detailHtml) payload.detail_html = null;
+    if (fields.detailImage) payload.detail_image_url = null;
+    if (fields.imageUrls) payload.image_urls = [];
+    if (fields.thumbnail) payload.thumbnail_url = null;
+    if (fields.coupangOptions) payload.coupang_options = null;
+    if (fields.fixedPrices) {
+      payload.fixed_price_smartstore = null;
+      payload.fixed_price_esm = null;
+      payload.fixed_price_coupang = null;
+    }
+
+    // Storage 파일 삭제 대상 수집 (현재 state 기준)
+    const storagePaths: string[] = [];
+    if (fields.detailImage || fields.imageUrls) {
+      setProducts((prev) => {
+        for (const p of prev) {
+          if (!idSet.has(p.id)) continue;
+          if (fields.imageUrls && p.image_urls?.length) storagePaths.push(...p.image_urls.map(urlToStoragePath));
+          if (fields.detailImage && p.detail_image_url) storagePaths.push(urlToStoragePath(p.detail_image_url));
+        }
+        return prev;
+      });
+    }
+
+    try {
+      await removeStorageImages(storagePaths);
+
+      const BATCH_SIZE = 100;
+      if (Object.keys(payload).length > 0) {
+        for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+          const batch = ids.slice(i, i + BATCH_SIZE);
+          const { error } = await supabase.from("products").update(payload).in("id", batch);
+          if (error) return { error: error.message, deletedInventory: 0 };
+        }
+      }
+
+      // 셀러센터 가격수정 캐시 삭제
+      let deletedInventory = 0;
+      if (fields.priceInventory) {
+        const tables = ["coupang_price_inventory", "smartstore_price_inventory", "esm_price_inventory"] as const;
+        for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+          const batch = ids.slice(i, i + BATCH_SIZE);
+          const results = await Promise.all(
+            tables.map((table) => supabase.from(table).delete({ count: "exact" }).in("product_id", batch))
+          );
+          for (let t = 0; t < tables.length; t++) {
+            const { error, count } = results[t];
+            if (error) return { error: `${tables[t]}: ${error.message}`, deletedInventory };
+            deletedInventory += count ?? 0;
+          }
+        }
+      }
+
+      // 로컬 state 반영 (detail_html은 목록 state에 없으므로 has_detail_html 플래그만 갱신)
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (!idSet.has(p.id)) return p;
+          const merged: Product = { ...p, ...payload };
+          if (fields.detailHtml) {
+            merged.detail_html = null;
+            merged.has_detail_html = false;
+          }
+          return merged;
+        })
+      );
+      fetchGenRef.current++;
+      return { error: null, deletedInventory };
+    } catch (e) {
+      console.error("[use-products] 등록정보 초기화 실패:", e instanceof Error ? e.message : String(e));
+      return { error: e instanceof Error ? e.message : String(e), deletedInventory: 0 };
+    }
   }, []);
 
   const updateProductImages = useCallback(
@@ -462,6 +559,7 @@ export function useProducts(options: UseProductsOptions = {}) {
     updateProduct,
     updateProductImages,
     deleteProducts,
+    resetProductFields,
     undo,
     startBatchUndo,
     endBatchUndo,
