@@ -194,6 +194,31 @@ export async function generatePlayAutoProductExcel(
   const productInfoNotice = userConfig?.productInfoNotice || "상세페이지 참조";
   const rateMap = buildRateMap(commissionRates);
 
+  // item_info(식약처 조사값)를 가공식품(21) 고시 항목 순서로 변환. 대상 아니면 null → 기존 방식 사용
+  const buildItemInfoNotice = (p: Product, playautoCode: string): string[] | null => {
+    const info = p.item_info;
+    if (!info || playautoCode !== "21") return null;
+    // 내부 관리용 [검수필요...] 태그는 마켓에 노출하지 않는다
+    const strip = (v?: string | null) =>
+      (v ?? "").replace(/\s*\[검수필요[^\]]*\]/g, "").replace(/\(\s*\)/g, "").replace(/\s+\)/g, ")").trim();
+    // 플레이오토 규격: 수입신고를 필함의 문구는 Y/N만 허용 (국내산 → N)
+    const 수입문구 = strip(info.수입여부).startsWith("국내산") || !strip(info.수입여부) ? "N" : "Y";
+    return [
+      strip(info.제품명) || p.product_name,
+      strip(info.식품유형) || "상세페이지 참조",
+      strip(info.제조원) || "상세페이지 참조",
+      strip(info.소비기한) || "제품 별도 표시일까지",
+      strip(info.포장단위별용량) || "상세페이지 참조",
+      strip(info.원재료명) || "상세페이지 참조",
+      strip(info.영양성분) || "제품 라벨 표기 참조",
+      // 플레이오토 규격: 유전자변형식품 표시는 Y/N만 허용
+      /^(Y|해당)/.test(strip(info.유전자변형식품)) && !strip(info.유전자변형식품).startsWith("해당없음") ? "Y" : "N",
+      strip(info.소비자안전주의사항) || "상세페이지 참조",
+      수입문구,
+      strip(info.소비자상담번호) || "상세페이지 참조",
+    ];
+  };
+
   // 이 배치에서 사용되는 최대 고시 개수를 계산 (컬럼 수 통일)
   const maxFields = products.reduce((max, p) => {
     const code = categoryMappings[p.category] ?? DEFAULT_SCHEMA.code;
@@ -254,6 +279,11 @@ export async function generatePlayAutoProductExcel(
       모델명: meta.model,
       브랜드: meta.brand,
       제조사: meta.manufacturer,
+      // 쿠팡 GTIN 의무화(2026-06) 대응: 식약처 조사로 확보한 바코드
+      // 쿠팡은 옵션 단위(UID)로 검증하므로 옵션바코드에도 함께 기입
+      바코드: p.item_info?.바코드 ?? "",
+      옵션바코드: p.item_info?.바코드 ?? "",
+      표준상품코드: p.item_info?.바코드 ? `KAN=${p.item_info.바코드}` : "",
       상품분류코드: playautoCode,
     });
 
@@ -276,23 +306,44 @@ export async function generatePlayAutoProductExcel(
         ]
       : [buildRow(config.shopAccount, config.templateCode, config.headerFooterTemplateCode)];
 
-    // 스마트스토어: 단위가격 표시 컬럼 추가
+    // 스마트스토어: 단위가격 표시 컬럼 추가 (v20 양식 — 2026-04 가격표시제)
+    // 표시 여부 Y이면 구성 방식(팩/낱개)·팩 수량·팩당 수량·개당 용량이 필수
     if (platform === "smartstore") {
       const upi = unitPriceInfoList?.[i] ?? { display: "N", displayAmount: 0, displayUnit: 0, totalAmount: 0 };
+      const volMatch = p.product_name.match(/(\d+(?:\.\d+)?)\s*(ml|mL|ML|l|L)(?=\s|$|\d)/);
+      const volMl = volMatch
+        ? parseFloat(volMatch[1]) * (volMatch[2].toLowerCase() === "l" ? 1000 : 1)
+        : 0;
+      const cntMatch = p.product_name.match(/(\d+)\s*(개|팩|캔|병|입)(?=\s|$)/);
+      const cnt = cntMatch ? parseInt(cntMatch[1], 10) : 1;
       rows.forEach((row) => {
         row["단위 가격 표시 여부"] = upi.display;
         row["표시 용량"] = upi.displayAmount;
         row["표시 단위"] = upi.displayUnit;
-        row["총 용량"] = upi.totalAmount;
+        if (upi.display === "Y") {
+          row["구성 방식"] = cnt > 1 ? "팩" : "낱개";
+          row["팩 수량"] = 1;
+          row["팩당 수량"] = cnt;
+          row["팩당 수량 단위"] = "개";
+          row["개당 용량"] = volMl > 0 ? volMl : (upi.totalAmount || 1);
+        } else {
+          row["구성 방식"] = "낱개";
+          row["팩 수량"] = 1;
+          row["팩당 수량"] = 1;
+          row["팩당 수량 단위"] = "개";
+          row["개당 용량"] = volMl > 0 ? volMl : 1;
+        }
       });
     }
 
-    // 이 상품의 고시 항목 채우기 (해당 카테고리 개수만큼 "상세페이지 참조", 나머지 빈칸)
+    // 이 상품의 고시 항목 채우기
+    // 우선순위: item_info(식약처 조사 실값) > 사용자 커스텀(noticeMap) > 기본값("상세페이지 참조")
+    const itemInfoValues = buildItemInfoNotice(p, playautoCode);
     rows.forEach((row) => {
       for (let n = 1; n <= maxFields; n++) {
         const customValues = noticeMap?.[playautoCode];
         row[`상품정보제공고시${n}`] = n <= schema.fields.length
-          ? (customValues?.[n - 1] || productInfoNotice)
+          ? (itemInfoValues?.[n - 1] || customValues?.[n - 1] || productInfoNotice)
           : "";
       }
     });

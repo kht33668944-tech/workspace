@@ -195,11 +195,15 @@ export interface Product {
   fixed_price_coupang: number | null;
   // 쿠팡 가격수정 양식용 옵션 캐시 (한 번 추출 후 재사용)
   coupang_options: { hasOption: boolean; optionName: string; optionValue: string } | null;
+  // 상품정보제공고시 실제 값 (식약처 품목제조보고 조사 결과) — null이면 "상세페이지 참조"로 내보냄
+  item_info: Record<string, string> | null;
+  // 재정비 진행상태: 대기 | 조사완료 | 이미지완료 | 재등록완료
+  rebuild_status: string;
   created_at: string;
   updated_at: string;
 }
 
-export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at" | "platform_codes" | "seller_code" | "has_detail_html" | "fixed_price_smartstore" | "fixed_price_esm" | "fixed_price_coupang" | "coupang_options">;
+export type ProductInsert = Omit<Product, "id" | "created_at" | "updated_at" | "platform_codes" | "seller_code" | "has_detail_html" | "fixed_price_smartstore" | "fixed_price_esm" | "fixed_price_coupang" | "coupang_options" | "item_info" | "rebuild_status">;
 export type ProductUpdate = Partial<Omit<Product, "id" | "user_id" | "created_at" | "updated_at" | "has_detail_html">>;
 
 // ─── 플레이오토 카테고리 매핑 ───

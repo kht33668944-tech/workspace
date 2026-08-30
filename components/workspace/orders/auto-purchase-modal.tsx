@@ -27,6 +27,9 @@ interface OrderStatus {
   status: "pending" | "processing" | "success" | "failed" | "waiting_payment" | "cancelled";
   message?: string;
   purchaseOrderNo?: string;
+  // 수량 2개 이상 주문의 구매 개수. 부분구매 시 "1/3개"처럼 표시한다.
+  purchasedCount?: number;
+  totalQty?: number;
 }
 
 // 발주서의 구매처 -> platform 코드 변환
@@ -278,6 +281,9 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
                         status: event.status as OrderStatus["status"],
                         message: event.message || s.message,
                         purchaseOrderNo: event.purchaseOrderNo || s.purchaseOrderNo,
+                        purchasedCount:
+                          typeof event.purchasedCount === "number" ? event.purchasedCount : s.purchasedCount,
+                        totalQty: typeof event.totalQty === "number" ? event.totalQty : s.totalQty,
                       }
                     : s
                 )
@@ -392,6 +398,8 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
       recipientName: o.recipient_name || "-",
       productName: o.product_name || "-",
       status: "pending",
+      purchasedCount: 0,
+      totalQty: Math.max(o.quantity || 1, 1),
     }));
     setOrderStatuses(initialStatuses);
 
@@ -827,6 +835,24 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
                     {s.status === "failed" && <AlertCircle className="w-4 h-4 text-red-400" />}
                     {s.status === "cancelled" && <Square className="w-4 h-4 text-[var(--text-muted)]" />}
                     <span className="text-[var(--text-tertiary)] w-16 shrink-0">{s.recipientName}</span>
+                    {typeof s.totalQty === "number" && s.totalQty > 1 && (
+                      <span
+                        className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums ${
+                          s.status === "failed" && (s.purchasedCount ?? 0) > 0
+                            ? "bg-yellow-500/15 text-yellow-400"
+                            : s.status === "success"
+                              ? "bg-green-500/15 text-green-400"
+                              : "bg-[var(--bg-active)] text-[var(--text-muted)]"
+                        }`}
+                        title={
+                          s.status === "failed" && (s.purchasedCount ?? 0) > 0
+                            ? `${s.totalQty}개 중 ${s.purchasedCount}개만 구매됨 (부분구매)`
+                            : `${s.totalQty}개 중 ${s.purchasedCount ?? 0}개 구매`
+                        }
+                      >
+                        {s.purchasedCount ?? 0}/{s.totalQty}개
+                      </span>
+                    )}
                     <span className="text-[var(--text-secondary)] truncate flex-1">{s.productName}</span>
                     {s.message && <span className="text-[var(--text-muted)] text-[10px] shrink-0">{s.message}</span>}
                   </div>
@@ -876,6 +902,20 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
                       <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                     )}
                     <span className="text-[var(--text-tertiary)] w-16 shrink-0">{s.recipientName}</span>
+                    {typeof s.totalQty === "number" && s.totalQty > 1 && (
+                      <span
+                        className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums ${
+                          s.status === "failed" && (s.purchasedCount ?? 0) > 0
+                            ? "bg-yellow-500/15 text-yellow-400"
+                            : s.status === "success"
+                              ? "bg-green-500/15 text-green-400"
+                              : "bg-[var(--bg-active)] text-[var(--text-muted)]"
+                        }`}
+                        title={`${s.totalQty}개 중 ${s.purchasedCount ?? 0}개 구매`}
+                      >
+                        {s.purchasedCount ?? 0}/{s.totalQty}개
+                      </span>
+                    )}
                     <span className="text-[var(--text-secondary)] truncate flex-1">{s.productName}</span>
                     <span className={`text-[10px] shrink-0 ${
                       s.status === "success" ? "text-green-400" : s.status === "cancelled" ? "text-yellow-400" : "text-red-400"

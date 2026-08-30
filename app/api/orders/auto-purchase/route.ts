@@ -33,6 +33,9 @@ interface SSEEvent {
   purchaseOrderNo?: string;
   cost?: number;
   paymentMethod?: string;
+  // 수량 2개 이상 주문의 진행/부분구매 개수 (예: 3개 중 1개만 구매됨)
+  purchasedCount?: number;
+  totalQty?: number;
   success?: { orderId: string; purchaseOrderNo: string; cost?: number; paymentMethod?: string }[];
   failed?: { orderId: string; reason: string; purchaseOrderNo?: string; cost?: number; paymentMethod?: string }[];
   successCount?: number;
@@ -168,9 +171,18 @@ export async function POST(request: NextRequest) {
           orderId: string,
           status: "processing" | "success" | "failed" | "waiting_payment",
           message: string,
-          purchaseOrderNo?: string
+          purchaseOrderNo?: string,
+          counts?: { purchased: number; total: number }
         ) => {
-          sendEvent({ type: "progress", orderId, status, message, purchaseOrderNo });
+          sendEvent({
+            type: "progress",
+            orderId,
+            status,
+            message,
+            purchaseOrderNo,
+            purchasedCount: counts?.purchased,
+            totalQty: counts?.total,
+          });
         };
 
         const loadLoggedPurchaseNos = async (orderIds: string[]) => {

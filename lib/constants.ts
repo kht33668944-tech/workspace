@@ -98,6 +98,17 @@ export const REGISTRATION_STATUS_COLORS: Record<string, string> = {
   판매중지: "bg-red-900 text-red-300",
 };
 
+// 상품 재정비(필수정보·상세페이지) 진행 상태
+export const REBUILD_STATUSES = ["대기", "조사완료", "이미지완료", "재등록완료"] as const;
+export type RebuildStatus = typeof REBUILD_STATUSES[number];
+
+export const REBUILD_STATUS_COLORS: Record<string, string> = {
+  대기: "bg-gray-800 text-gray-200",
+  조사완료: "bg-blue-900 text-blue-300",
+  이미지완료: "bg-purple-900 text-purple-300",
+  재등록완료: "bg-green-900 text-green-300",
+};
+
 // 결제방식 목록
 export const PAYMENT_METHODS = [
   "국민",

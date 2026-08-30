@@ -253,17 +253,47 @@ export async function POST(req: NextRequest) {
       exportWarnings.push(...adjusted.warnings);
     }
 
+    // Gemini 카테고리 매칭은 간헐적으로 일부 상품을 빈칸으로 돌려준다(비결정적).
+    // 실패분만 한 번 더 요청하면 대부분 채워지므로, 차단 전에 재시도한다.
+    if (!priceUpdate && availableSsCodes.length > 0) {
+      const retryIdx = smartstoreCategoryCodes
+        .map((code, i) => (!code || String(code).trim() === "" ? i : -1))
+        .filter((i) => i >= 0);
+      if (retryIdx.length > 0) {
+        console.log(`[playauto-export] 카테고리 매칭 실패 ${retryIdx.length}개 → 재시도`);
+        const retried = await suggestSmartStoreCategoryCodes(
+          retryIdx.map((i) => ({
+            product_name: products[i].product_name as string,
+            category: (products[i] as Record<string, unknown>).category as string,
+            source_category: (products[i] as Record<string, unknown>).source_category as string,
+          })),
+          availableSsCodes,
+          { callSource: "smartstore_category_suggest_retry", userId: user.id }
+        );
+        retryIdx.forEach((productIdx, j) => {
+          if (retried[j]) smartstoreCategoryCodes[productIdx] = retried[j];
+        });
+        const stillMissing = retryIdx.filter((i) => !smartstoreCategoryCodes[i]).length;
+        console.log(`[playauto-export] 재시도 결과: ${retryIdx.length - stillMissing}개 복구, ${stillMissing}개 여전히 실패`);
+      }
+    }
+
     if (!priceUpdate) {
       const missingCategoryProducts = products
         .map((p, i) => ({ productName: p.product_name as string, categoryCode: smartstoreCategoryCodes[i] }))
         .filter((p) => !p.categoryCode || String(p.categoryCode).trim() === "");
 
       if (missingCategoryProducts.length > 0) {
-        console.error(`[playauto-export] 카테고리코드 매칭 실패 ${missingCategoryProducts.length}/${products.length}개`);
+        console.error(
+          `[playauto-export] 카테고리코드 매칭 실패 ${missingCategoryProducts.length}/${products.length}개: ` +
+          missingCategoryProducts.map((p) => p.productName).join(", ")
+        );
         return NextResponse.json({
           error:
-            `카테고리코드 매칭에 실패한 상품이 ${missingCategoryProducts.length}개 있습니다. ` +
-            "빈 카테고리코드로 내보내면 플레이오토 등록이 실패하므로 엑셀 생성을 중단했습니다.",
+            `카테고리코드 매칭에 실패한 상품이 ${missingCategoryProducts.length}개 있습니다.\n\n` +
+            missingCategoryProducts.slice(0, 30).map((p) => `· ${p.productName}`).join("\n") +
+            "\n\n빈 카테고리코드로 내보내면 플레이오토 등록이 실패하므로 엑셀 생성을 중단했습니다. " +
+            "해당 상품을 선택에서 제외하거나 카테고리를 확인해 주세요.",
           missingCategories: missingCategoryProducts.slice(0, 30),
         }, { status: 422 });
       }
@@ -280,6 +310,15 @@ export async function POST(req: NextRequest) {
       });
       if (warnings.length > 0) {
         console.warn(`[playauto-export] 쿠팡 필수옵션 누락 ${warnings.length}개 상품 (업로드 시 오류 가능)`);
+      }
+    }
+
+    // 쿠팡 GTIN(바코드) 누락 경고 — 유명 브랜드 상품은 바코드 없이 등록 반려됨 (2026-06 UID 의무화)
+    if (platform === "coupang") {
+      for (const p of products as unknown as Array<{ product_name: string; item_info: Record<string, string> | null }>) {
+        if (p.item_info && !p.item_info.바코드) {
+          warnings.push({ productName: p.product_name, missing: ["바코드(GTIN) 미확보 — 쿠팡 등록 반려 가능"] });
+        }
       }
     }
 

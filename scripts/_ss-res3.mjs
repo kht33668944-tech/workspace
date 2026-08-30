@@ -1,0 +1,13 @@
+import XLSX from "xlsx-js-style";
+const wb = XLSX.readFile(process.argv[2]);
+const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+const ok = rows.filter(r=>String(r["결과"]).trim()==="성공");
+const ng = rows.filter(r=>String(r["결과"]).trim()!=="성공");
+const dist=(list,k)=>{const m=new Map();for(const r of list){const v=String(r[k]??"").trim();m.set(v,(m.get(v)??0)+1);}return [...m].sort((a,b)=>b[1]-a[1]).slice(0,6);};
+console.log("성공", ok.length, "표시용량", JSON.stringify(dist(ok,"표시 용량")), "표시여부", JSON.stringify(dist(ok,"단위 가격 표시 여부")));
+console.log("실패", ng.length, "표시용량", JSON.stringify(dist(ng,"표시 용량")), "표시여부", JSON.stringify(dist(ng,"단위 가격 표시 여부")));
+const big = ok.filter(r=>Number(r["개당 용량"])>=1000);
+console.log("\n성공한 것 중 개당용량>=1000 :", big.length);
+big.slice(0,5).forEach(r=>console.log("  ",r["온라인 상품명"],"개당용량",r["개당 용량"]));
+const maxp = ok.filter(r=>Number(r["팩당 수량"])>=100);
+console.log("성공한 것 중 팩당수량>=100 :", maxp.length, maxp.slice(0,3).map(r=>r["온라인 상품명"]+"="+r["팩당 수량"]).join(", "));

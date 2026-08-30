@@ -16,7 +16,14 @@ const TESSERACT_WORKER_PATH = process.env.TESSERACT_WORKER_PATH || path.resolve(
 const LOGIN_URL = "https://signinssl.gmarket.co.kr/login/login";
 
 interface ProgressCallback {
-  (orderId: string, status: "processing" | "success" | "failed", message: string, purchaseOrderNo?: string): void;
+  (
+    orderId: string,
+    status: "processing" | "success" | "failed",
+    message: string,
+    purchaseOrderNo?: string,
+    // 수량이 2개 이상인 주문의 진행 상황. 부분구매 시 몇 개까지 샀는지 UI에 표시한다.
+    counts?: { purchased: number; total: number }
+  ): void;
 }
 
 interface OrderCompleteCallback {
@@ -150,7 +157,7 @@ export async function purchaseGmarket(
 
           if (totalQty > 1) {
             console.log(`[gmarket-purchase] 주문 ${order.orderId} - ${q}/${totalQty}번째 구매${isBotRetry ? " (봇 확인 후 재시도)" : ""}`);
-            onProgress?.(order.orderId, "processing", `구매 진행 중... (${q - 1}/${totalQty})`);
+            onProgress?.(order.orderId, "processing", `구매 진행 중... (${q - 1}/${totalQty})`, undefined, { purchased: q - 1, total: totalQty });
           }
 
           await onBeforeOrder?.(order);
@@ -196,7 +203,7 @@ export async function purchaseGmarket(
             : totalCost;
         }
         result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod });
-        onProgress?.(order.orderId, "success", `주문번호: ${lastOrderNo}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${lastPaymentMethod ? ` [${lastPaymentMethod}]` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`, lastOrderNo);
+        onProgress?.(order.orderId, "success", `주문번호: ${lastOrderNo}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${lastPaymentMethod ? ` [${lastPaymentMethod}]` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`, lastOrderNo, { purchased: successCount, total: totalQty });
         console.log(`[gmarket-purchase] 주문 성공: ${order.orderId} → ${lastOrderNo} (총 원가: ${finalCost ?? "미확인"}, ${totalQty}개, 카드: ${lastPaymentMethod ?? "미확인"})`);
 
         // 성공 즉시 DB 반영 (취소/예외로 배치가 중단돼도 데이터 유실 방지)
@@ -227,7 +234,7 @@ export async function purchaseGmarket(
             cost: totalCost > 0 ? totalCost : undefined,
             paymentMethod: lastPaymentMethod,
           });
-          onProgress?.(order.orderId, "failed", failMsg);
+          onProgress?.(order.orderId, "failed", failMsg, lastOrderNo || undefined, { purchased: successCount, total: totalQty });
           console.error(`[gmarket-purchase] 주문 실패: ${order.orderId}`, failMsg, err instanceof Error ? err.message : String(err));
         }
 

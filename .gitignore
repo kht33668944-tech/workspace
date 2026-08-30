@@ -74,3 +74,16 @@ next-env.d.ts
 
 # 자동화 스크립트 실행 로그
 scripts/logs/
+
+# 공공데이터 캐시 — 용량이 커서(수십 MB) 커밋하지 않는다.
+# 없으면 스크립트가 알아서 다시 받는다: scripts/mfds-bulk-download.mjs, scripts/ecolife-catalog.mjs
+scripts/output/
+logs/
+
+# DB 스냅샷 백업 — 용량이 커서(20MB+) 커밋하지 않는다. 복구용 로컬 보관.
+backups/
+# Hermes 데스크톱 첨부 캐시
+.hermes/
+# 일회성 임시 산출물
+.tmp_*
+preview-detail.html

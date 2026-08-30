@@ -17,7 +17,13 @@ const KAKAO_PAY_BIRTH = process.env.OHOUSE_KAKAO_BIRTHDAY ?? ""; // 예: 980309
 const PAYMENT_WAIT_MS = 60000;          // 결제 승인 대기 시간 (60초)
 
 interface ProgressCallback {
-  (orderId: string, status: "processing" | "success" | "failed" | "waiting_payment", message: string, purchaseOrderNo?: string): void;
+  (
+    orderId: string,
+    status: "processing" | "success" | "failed" | "waiting_payment",
+    message: string,
+    purchaseOrderNo?: string,
+    counts?: { purchased: number; total: number }
+  ): void;
 }
 // 메인 함수
 // ═══════════════════════════════════

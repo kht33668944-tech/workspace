@@ -9,7 +9,7 @@ import {
   PLATFORM_FIXED_KEY_MAP, isPlatformPriceLocked, getComputedValue,
   type Col, type PriceScrapeStatus,
 } from "./table-utils";
-import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS } from "@/lib/constants";
+import { REGISTRATION_STATUSES, REGISTRATION_STATUS_COLORS, REBUILD_STATUS_COLORS } from "@/lib/constants";
 import { fetchProductDetailHtml } from "@/hooks/use-products";
 
 interface RowProps {
@@ -181,6 +181,12 @@ const MemoRow = memo(function Row({
             document.body
           )}
         </div>
+      </td>
+      {/* 재정비(필수정보·상세페이지) 진행 상태 — 읽기 전용 표시 */}
+      <td className="px-2 py-1.5 border-r border-[var(--border-subtle)] whitespace-nowrap">
+        <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${REBUILD_STATUS_COLORS[product.rebuild_status] || "bg-gray-500/20 text-gray-400"}`}>
+          {product.rebuild_status || "대기"}
+        </span>
       </td>
       {cols.map((col) => {
         const ci = COLUMNS.findIndex(c => c.key === col.key);
