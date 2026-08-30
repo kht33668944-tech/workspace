@@ -87,3 +87,8 @@ backups/
 # 일회성 임시 산출물
 .tmp_*
 preview-detail.html
+
+# 브라우저 로그인 프로필 — 쿠키/세션이 들어있어 절대 커밋 금지 (79MB+)
+.browser-profiles/
+# 일회성 비교 산출물
+scripts/seller-code-diffs.json
