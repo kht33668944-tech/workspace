@@ -5,7 +5,6 @@ import CourierCodeManager from "@/components/workspace/settings/courier-code-man
 import GeminiUsageDashboard from "@/components/workspace/settings/gemini-usage-dashboard";
 import MarketplaceApiManager from "@/components/workspace/settings/marketplace-api-manager";
 import MarketplaceApiLogs from "@/components/workspace/settings/marketplace-api-logs";
-import MarketplaceApiLogs from "@/components/workspace/settings/marketplace-api-logs";
 import DiscordNotificationTester from "@/components/workspace/settings/discord-notification-tester";
 
 export default function SettingsPage() {
