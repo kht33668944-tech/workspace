@@ -98,9 +98,10 @@ export default function MarketplaceCancelModal({ selectedOrders = [], onClose, o
     setRemoteCount(null);
     setError("");
     if (platform === "coupang") {
-      try {
-        setWingUserId(localStorage.getItem("wing_user_id") ?? "");
-      } catch { /* ignore */ }
+      const fromMeta = platformCredentials[0]?.meta?.wingUserId;
+      let stored = "";
+      try { stored = localStorage.getItem("wing_user_id") ?? ""; } catch { /* ignore */ }
+      setWingUserId(typeof fromMeta === "string" && fromMeta ? fromMeta : stored);
     }
   }, [platform, platformCredentials]);
 
@@ -142,6 +143,10 @@ export default function MarketplaceCancelModal({ selectedOrders = [], onClose, o
     try {
       if (platform === "coupang") {
         try { localStorage.setItem("wing_user_id", wingUserId.trim()); } catch { /* ignore */ }
+        const cred = platformCredentials.find((c) => c.id === credentialId);
+        if (cred && cred.meta?.wingUserId !== wingUserId.trim()) {
+          fetch(`/api/marketplace-api/credentials/${credentialId}`, { method: "PUT", headers: headers(), body: JSON.stringify({ meta: { ...(cred.meta ?? {}), wingUserId: wingUserId.trim() } }) }).catch(() => {});
+        }
       }
       const res = await fetch("/api/marketplace-api/orders/cancel/apply", {
         method: "POST",
@@ -217,7 +222,7 @@ export default function MarketplaceCancelModal({ selectedOrders = [], onClose, o
             {platform === "coupang" ? (
               <div>
                 <label className="text-sm text-[var(--text-tertiary)] mb-1.5 block">쿠팡윙 로그인 ID</label>
-                <input value={wingUserId} onChange={(e) => setWingUserId(e.target.value)} placeholder="취소 API 필수값" className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 min-h-[44px] text-sm outline-none" />
+                <input value={wingUserId} onChange={(e) => setWingUserId(e.target.value)} placeholder="윙 로그인 아이디 (예: redgoom)" className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 min-h-[44px] text-sm outline-none" />
               </div>
             ) : (
               <div>
