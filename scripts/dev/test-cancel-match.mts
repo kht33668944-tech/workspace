@@ -41,3 +41,20 @@ const reasons = new Map<string, number>();
 for (const s of preview.skipped) reasons.set(s.reason.replace(/\(.*\)/, ""), (reasons.get(s.reason.replace(/\(.*\)/, "")) ?? 0) + 1);
 console.log("  제외 사유:", Object.fromEntries(reasons));
 for (const s of preview.skipped.slice(0, 4)) console.log("  ✖", statusById.get(s.order.id), s.order.recipient_name, "|", s.order.product_name?.slice(0, 30), "|", s.reason);
+
+// --dry-execute: 매칭 1건에 대해 executeCancels 를 DRY_RUN 으로 실행 (발주서·마켓 변경 없음, 로그만 기록)
+if (process.argv.includes("--dry-execute") && preview.matched[0]) {
+  process.env.MARKETPLACE_API_DRY_RUN = "true";
+  const { executeCancels } = await import("@/lib/marketplace/order-cancel");
+  const { data: cred } = await sb.from("marketplace_api_credentials").select("id,user_id").eq("platform", platform).limit(1).single();
+  const results = await executeCancels({
+    supabase: sb,
+    userId: cred!.user_id,
+    credentialId: cred!.id,
+    platform,
+    matches: [preview.matched[0]],
+    coupang: platform === "coupang" ? { client: new CoupangOpenApiClient({ vendorId: env.COUPANG_VENDOR_ID, accessKey: env.COUPANG_ACCESS_KEY, secretKey: env.COUPANG_SECRET_KEY }), wingUserId: "redgoom" } : undefined,
+    smartstore: platform === "smartstore" ? { client: new NaverCommerceApiClient({ clientId: env.NAVER_COMMERCE_CLIENT_ID, clientSecret: env.NAVER_COMMERCE_CLIENT_SECRET }) } : undefined,
+  });
+  console.log("[test] dry execute:", JSON.stringify(results));
+}
