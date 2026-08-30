@@ -350,6 +350,53 @@ async function applySoldOutMargins(userId, inStockIds, soldOutIds) {
   const soldCount = soldOutIds.length ? await patch(soldOutIds, SOLDOUT_MARGIN) : 0;
   const restoredCount = restoreTargets.length ? await patch(restoreTargets, DEFAULT_MARGIN) : 0;
   if (soldCount || restoredCount) log(`마진 처리: 품절 ${soldCount}건 → ${SOLDOUT_MARGIN}, 재입고 복원 ${restoredCount}건 → ${DEFAULT_MARGIN}`);
+  return { soldCount, restoredIds: restoreTargets };
+}
+
+// ---------- 쿠팡·스마트스토어 API 반영 (변동가 price / 품절 stop / 재입고 resume) ----------
+// 사이트의 "쿠팡 API 반영 / 스토어 API 반영" 버튼과 동일 경로. ESM(지마켓·옥션·11번가)은 API 없음 → 엑셀.
+async function applyToMarketplaces(token, { changedIds, soldOutIds, restoredIds }) {
+  const out = { coupang: null, smartstore: null, skipped: null };
+  if (String(env.AUTO_MARKET_APPLY ?? "true").toLowerCase() === "false") { out.skipped = "AUTO_MARKET_APPLY=false"; return out; }
+  let creds = [];
+  try {
+    const res = await fetch(`${BASE}/api/marketplace-api/credentials`, { headers: { Authorization: `Bearer ${token}` } });
+    creds = res.ok ? await res.json() : [];
+  } catch (e) { out.skipped = `자격증명 조회 실패: ${e instanceof Error ? e.message : String(e)}`; return out; }
+  const jobs = [
+    { action: "price", ids: [...new Set([...changedIds, ...restoredIds])] },
+    { action: "stop", ids: soldOutIds },
+    { action: "resume", ids: restoredIds },
+  ];
+  for (const platform of ["coupang", "smartstore"]) {
+    const cred = creds.find((c) => c.platform === platform);
+    if (!cred) continue;
+    const r = { price: 0, stop: 0, resume: 0, failed: 0, blocked: 0, dry: false, errors: [] };
+    out[platform] = r;
+    for (const job of jobs) {
+      if (job.ids.length === 0) continue;
+      for (let i = 0; i < job.ids.length; i += 200) {
+        const chunk = job.ids.slice(i, i + 200);
+        try {
+          const res = await fetch(`${BASE}/api/marketplace-api/${platform}/apply`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ credentialId: cred.id, productIds: chunk, action: job.action }),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok) { r.errors.push(`${job.action}: ${json.error ?? res.status}`); continue; }
+          r[job.action] += json.successCount ?? 0;
+          r.failed += json.failCount ?? 0;
+          r.blocked += Array.isArray(json.blocked) ? json.blocked.length : 0;
+          if (json.dryRun) r.dry = true;
+          for (const x of (json.results ?? []).filter((x) => x.status === "failed").slice(0, 3)) r.errors.push(`${x.productName}: ${x.message}`);
+        } catch (e) { r.errors.push(`${job.action}: ${e instanceof Error ? e.message : String(e)}`); }
+      }
+    }
+    log(`${platform} API 반영: 가격 ${r.price} · 판매중지 ${r.stop} · 재개 ${r.resume} · 실패 ${r.failed} · 미연동 ${r.blocked}${r.dry ? " [DRY]" : ""}`);
+    for (const e of r.errors.slice(0, 3)) log(`  x ${e}`);
+  }
+  return out;
 }
 
 // ---------- 가격수정 v2 엑셀 자동 저장 (변동 + 품절 상품만, 바탕화면 날짜별 폴더) ----------
@@ -446,12 +493,12 @@ async function main() {
   const unchanged = results.length - changed.length;
 
   const applied = await applyChanges(token, results);
-  await applySoldOutMargins(userId, results.map((r) => r.id), soldOut);
+  const { restoredIds } = await applySoldOutMargins(userId, results.map((r) => r.id), soldOut);
+  const market = await applyToMarketplaces(token, { changedIds: changed.map((r) => r.id), soldOutIds: soldOut, restoredIds });
   const excelFiles = await exportPriceExcel(token, changed.map((r) => r.id), soldOut);
 
   const elapsed = Math.round((Date.now() - started) / 1000);
   const okCount = results.length + soldOut.length;
-  const status = okCount > 0 && remaining.length > 0 ? "partial" : okCount > 0 ? "success" : "failed";
   const summary = `변동 ${applied}건 적용, 변동없음 ${unchanged}건, 품절 ${soldOut.length}건, 미해결 ${remaining.length}건 (${elapsed}초)`;
   const fields = [
     { name: "가격 변동(적용)", value: applied },
@@ -460,9 +507,14 @@ async function main() {
     { name: "재시도 후 미해결", value: remaining.length },
     ...(skipped ? [{ name: "건너뜀(비지마켓)", value: skipped }] : []),
     ...(DO_RESET ? [{ name: "전일대비 초기화", value: `${clearedCount}건 삭제 후 재수집` }] : []),
-    ...(excelFiles.length ? [{ name: "엑셀 저장", value: `바탕화면\\가격수정엑셀 ${excelFiles.length}개 파일` }] : []),
+    ...(excelFiles.length ? [{ name: "엑셀 저장(ESM용)", value: `바탕화면\\가격수정엑셀 ${excelFiles.length}개 파일` }] : []),
   ];
+  const mk = (p) => p ? `가격 ${p.price} · 중지 ${p.stop} · 재개 ${p.resume}${p.failed ? ` · 실패 ${p.failed}` : ""}${p.blocked ? ` · 미연동 ${p.blocked}` : ""}${p.dry ? " [DRY]" : ""}` : "계정 없음";
+  if (market.skipped) fields.push({ name: "마켓 반영", value: `건너뜀 (${market.skipped})` });
+  else { fields.push({ name: "쿠팡 반영", value: mk(market.coupang) }); fields.push({ name: "스토어 반영", value: mk(market.smartstore) }); }
+  const marketFailed = [market.coupang, market.smartstore].some((p) => p && (p.failed > 0 || p.errors.length > 0));
 
+  const status = okCount === 0 ? "failed" : (remaining.length > 0 || marketFailed) ? "partial" : "success";
   await notify(token, { status, summary, fields });
   log(`=== 종료: ${summary} ===`);
   if (status === "failed") process.exitCode = 1;
