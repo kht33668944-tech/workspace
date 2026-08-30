@@ -7,9 +7,9 @@ export const DATA_START_ROW_INDEX = 3; // 0-based, 4번째 행부터 데이터
 
 // 0-based 컬럼 인덱스 (양식 A~S = 0~18)
 export const COL = {
-  vendor_item_id: 0,       // A: 업체상품 ID
+  vendor_item_id: 0,       // A: 업체상품 ID (= sellerProductId. API 의 vendorItemId 가 아님)
   coupang_product_id: 1,   // B: Product ID
-  option_id: 2,            // C: 옵션 ID
+  option_id: 2,            // C: 옵션 ID (= OpenAPI vendorItemId — 가격/재고 API 키)
   product_status: 3,       // D: 상품상태
   barcode: 4,              // E: 바코드
   vendor_item_code: 5,     // F: 업체상품코드

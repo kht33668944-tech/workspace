@@ -182,9 +182,10 @@ export async function buildCoupangPreview(
     }
 
     for (const row of rows) {
-      const vendorItemId = (row.vendor_item_id ?? "").trim();
+      // 쿠팡 엑셀의 "업체상품 ID"(vendor_item_id 컬럼)는 sellerProductId 이고, API 가 요구하는 vendorItemId 는 "옵션 ID"(option_id) 다.
+      const vendorItemId = (row.option_id ?? "").trim();
       if (!vendorItemId) {
-        blocked.push({ productId: id, productName: product.product_name, reason: "vendorItemId가 없어 API 반영이 불가합니다." });
+        blocked.push({ productId: id, productName: product.product_name, reason: "옵션 ID(vendorItemId)가 없어 API 반영이 불가합니다." });
         continue;
       }
       if (seenVendorItemIds.has(vendorItemId)) continue;

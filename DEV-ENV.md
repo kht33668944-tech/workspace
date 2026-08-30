@@ -16,3 +16,5 @@
 - 주문 페이지: "마켓 취소 (API)" — 취소준비 건을 마켓 주문과 대조 후 체크한 건만 판매자 취소
 - 대조 로직 검증: `npx tsx scripts/dev/test-cancel-match.mts coupang|smartstore [days]` (발주서 변경 없음)
 - DB 마이그레이션 `supabase/migrations/20260830_smartstore_api_columns.sql` 을 Supabase SQL 에디터에서 수동 적용해야 스토어 가격/재고 반영·취소 로그가 동작한다
+- **쿠팡 ID 주의**: `coupang_price_inventory.vendor_item_id`(엑셀 "업체상품 ID")는 sellerProductId 이고, OpenAPI 가격/재고 키인 vendorItemId 는 `option_id`(엑셀 "옵션 ID") 컬럼이다. 미리보기/반영은 option_id 를 사용.
+- 실반영 검증(2026-08-30): 쿠팡 28300→28310→28300, 스토어 24800→24810→24800 (가격 외 필드 변경 0) 성공. 스크립트 `scripts/dev/test-live-price.mts`

@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
             .from("coupang_price_inventory")
             .update(updateData)
             .eq("user_id", userData.user.id)
-            .eq("vendor_item_id", item.vendorItemId);
+            .eq("option_id", item.vendorItemId);
         }
       }
 
