@@ -6,7 +6,7 @@ import { decrypt } from "@/lib/crypto";
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import type { ScrapeResult } from "@/lib/scrapers/types";
-import { randomUUID } from "crypto";
+import { applyTrackingToOrders, saveTrackingLogs } from "@/lib/tracking/apply";
 import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
 
 export const maxDuration = 300;
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
       // 성공한 운송장을 발주서(orders)에 즉시 반영
       let appliedCount = 0;
       if (supabase && result.success.length > 0) {
-        const applyResult = await applyTrackingToOrders(supabase, result.success);
+        const applyResult = await applyTrackingToOrders(supabase, result.success.map((s) => ({ purchase_order_no: s.orderNo, courier: s.courier, tracking_no: s.trackingNo })));
         appliedCount = applyResult.successCount;
         if (applyResult.failCount > 0) {
           console.warn("[collect-tracking] 발주서 반영 일부 실패:", applyResult.errors.slice(0, 5));
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
       // 운송장 로그 저장 (백그라운드, 실패 시 콘솔 경고)
       // batchId가 전달되면 여러 계정 수집을 하나의 활동로그 배치로 묶는다
       if (supabase) {
-        saveTrackingLogs(supabase, result, platform, loginId, body.orderNos, body.batchId).catch((e) => {
+        supabase.auth.getUser().then(({ data }) => saveTrackingLogs(supabase, data.user?.id ?? null, result, platform, loginId, body.orderNos, body.batchId)).catch((e) => {
           console.warn("[collect-tracking] 운송장 로그 저장 실패:", e instanceof Error ? e.message : String(e));
         });
       }
@@ -147,91 +147,5 @@ export async function POST(request: NextRequest) {
       { error: `서버 오류: ${err instanceof Error ? err.message : String(err)}` },
       { status: 500 }
     );
-  }
-}
-
-async function applyTrackingToOrders(
-  supabase: SupabaseClient,
-  successItems: ScrapeResult["success"],
-) {
-  let successCount = 0;
-  let failCount = 0;
-  const errors: string[] = [];
-
-  for (const item of successItems) {
-    if (!item.trackingNo) continue;
-
-    const { data, error } = await supabase
-      .from("orders")
-      .update({
-        courier: item.courier,
-        tracking_no: item.trackingNo,
-        delivery_status: "배송완료",
-      })
-      .eq("purchase_order_no", item.orderNo)
-      .select("id");
-
-    if (error) {
-      failCount++;
-      errors.push(`${item.orderNo}: ${error.message}`);
-    } else if (!data || data.length === 0) {
-      failCount++;
-      errors.push(`${item.orderNo}: DB에서 주문번호를 찾을 수 없음`);
-    } else {
-      await supabase
-        .from("orders")
-        .update({ delivered_at: new Date().toISOString() })
-        .eq("purchase_order_no", item.orderNo)
-        .is("delivered_at", null);
-      successCount++;
-    }
-  }
-
-  console.log("[collect-tracking] 발주서 반영:", { successCount, failCount });
-  return { successCount, failCount, errors };
-}
-
-async function saveTrackingLogs(
-  supabase: SupabaseClient,
-  result: ScrapeResult,
-  platform: string,
-  loginId: string,
-  orderNos: string[],
-  sharedBatchId?: string,
-) {
-  const batchId = sharedBatchId ?? randomUUID();
-  const { data: { user: authUser } } = await supabase.auth.getUser();
-  const userId = authUser?.id ?? null;
-
-  // purchase_order_no로 order_id, recipient_name, product_name 조회
-  const { data: orders } = await supabase
-    .from("orders")
-    .select("id, purchase_order_no, recipient_name, product_name")
-    .in("purchase_order_no", orderNos);
-
-  const orderMap = new Map<string, { id: string; recipient_name: string | null; product_name: string | null }>();
-  for (const o of (orders || [])) {
-    if (o.purchase_order_no) orderMap.set(o.purchase_order_no, o);
-  }
-
-  const base = { batch_id: batchId, platform, login_id: loginId, user_id: userId };
-
-  const logs = [
-    ...result.success.map((s) => {
-      const order = orderMap.get(s.orderNo);
-      return { ...base, status: "success", purchase_order_no: s.orderNo, courier: s.courier, tracking_no: s.trackingNo, error_message: null, recipient_name: order?.recipient_name ?? null, product_name: order?.product_name ?? s.itemName ?? null, order_id: order?.id ?? null };
-    }),
-    ...result.failed.map((f) => {
-      const order = orderMap.get(f.orderNo);
-      return { ...base, status: "failed", purchase_order_no: f.orderNo, courier: null, tracking_no: null, error_message: f.reason, recipient_name: order?.recipient_name ?? null, product_name: order?.product_name ?? null, order_id: order?.id ?? null };
-    }),
-    ...result.notFound.map((orderNo) => {
-      const order = orderMap.get(orderNo);
-      return { ...base, status: "not_found", purchase_order_no: orderNo, courier: null, tracking_no: null, error_message: null, recipient_name: order?.recipient_name ?? null, product_name: order?.product_name ?? null, order_id: order?.id ?? null };
-    }),
-  ];
-
-  if (logs.length > 0) {
-    await supabase.from("tracking_logs").insert(logs);
   }
 }

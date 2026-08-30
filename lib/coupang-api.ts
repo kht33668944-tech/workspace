@@ -78,6 +78,43 @@ export interface CoupangReturnRequest {
   reasonCodeText?: string;
 }
 
+export interface CoupangInvoiceDto {
+  shipmentBoxId: number;
+  orderId: number;
+  vendorItemId: number;
+  deliveryCompanyCode: string;
+  invoiceNumber: string;
+  splitShipping?: boolean;
+  preSplitShipped?: boolean;
+  estimatedShippingDate?: string;
+}
+
+export interface CoupangInvoiceResponse {
+  code: string | number;
+  message: string;
+  data?: {
+    responseCode?: number;
+    responseMessage?: string;
+    responseList?: Array<{ shipmentBoxId: number; succeed: boolean; resultCode?: string; resultMessage?: string; retryRequired?: boolean }>;
+  };
+}
+
+export type CoupangExchangeStatus = "RECEIPT" | "PROGRESS" | "SUCCESS" | "REJECT" | "CANCEL";
+
+export interface CoupangExchangeRequest {
+  exchangeId: number;
+  orderId: number;
+  exchangeStatus: CoupangExchangeStatus | string;
+  receiptStatus?: string;
+  createdAt?: string;
+  reasonCode?: string;
+  reasonCodeText?: string;
+  reason?: string;
+  exchangeItemDtoV1s?: Array<{ vendorItemId: number; quantity: number; originalShipmentBoxId?: number; targetShipmentBoxId?: number; vendorItemName?: string }>;
+  returnDeliveryDtos?: Array<{ deliveryCompanyCode?: string; deliveryInvoiceNo?: string }>;
+  deliveryInvoiceGroupDtos?: Array<{ shipmentBoxId?: number; deliveryCompanyCode?: string; invoiceNumber?: string }>;
+}
+
 /** 쿠팡 판매자 취소 중분류 코드 (대분류는 항상 CANERR) */
 export type CoupangMiddleCancelCode = "CCTTER" | "CCPNER" | "CCPRER";
 
@@ -311,6 +348,162 @@ export class CoupangOpenApiClient {
       { vendorId: this.vendorId, receiptId, cancelCount },
     );
   }
+
+  // ───────── 송장 (발송처리) ─────────
+
+  /** 송장 업로드 — 상품준비중(INSTRUCT) 박스만 가능. 응답 responseList 로 박스별 성공 여부 확인 */
+  uploadInvoices(dtos: CoupangInvoiceDto[]) {
+    return this.request<CoupangInvoiceResponse>(
+      "POST",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/orders/invoices`,
+      undefined,
+      { vendorId: this.vendorId, orderSheetInvoiceApplyDtos: dtos.map((d) => ({ splitShipping: false, preSplitShipped: false, ...d })) },
+    );
+  }
+
+  /** 송장 수정 — 이미 업로드한 송장을 다른 택배사/번호로 교체 */
+  updateInvoices(dtos: CoupangInvoiceDto[]) {
+    return this.request<CoupangInvoiceResponse>(
+      "POST",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/orders/updateInvoices`,
+      undefined,
+      { vendorId: this.vendorId, orderSheetInvoiceApplyDtos: dtos.map((d) => ({ splitShipping: false, preSplitShipped: false, ...d })) },
+    );
+  }
+
+  /** 이미출고 처리 — 출고중지요청(RELEASE_STOP_UNCHECKED)을 거절하고 송장을 등록 (= 취소요청 거절) */
+  completeShipment(receiptId: number, deliveryCompanyCode: string, invoiceNumber: string) {
+    return this.request<{ data?: { resultCode?: string; resultMessage?: string } }>(
+      "PATCH",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/returnRequests/${receiptId}/completedShipment`,
+      undefined,
+      { vendorId: this.vendorId, receiptId, deliveryCompanyCode, invoiceNumber },
+    );
+  }
+
+  // ───────── 반품 ─────────
+
+  /** 반품상품 입고 확인 — receiptStatus RETURNS_UNCHECKED 건 */
+  confirmReturnReceipt(receiptId: number) {
+    return this.request(
+      "PATCH",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/returnRequests/${receiptId}/receiveConfirmation`,
+      undefined,
+      { vendorId: this.vendorId, receiptId },
+    );
+  }
+
+  /** 반품요청 승인(환불) — 입고확인(VENDOR_WAREHOUSE_CONFIRM) 후. cancelCount 는 접수 수량과 같아야 함 */
+  approveReturn(receiptId: number, cancelCount: number) {
+    return this.request(
+      "PATCH",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/returnRequests/${receiptId}/approval`,
+      undefined,
+      { vendorId: this.vendorId, receiptId, cancelCount },
+    );
+  }
+
+  // ───────── 교환 ─────────
+
+  /** 교환요청 목록 — createdAt yyyy-MM-ddTHH:mm:ss, 최대 7일 */
+  listExchangeRequests(params: { createdAtFrom: string; createdAtTo: string; status?: CoupangExchangeStatus; orderId?: number; nextToken?: string; maxPerPage?: number }) {
+    return this.request<CoupangListResponse<CoupangExchangeRequest>>(
+      "GET",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/exchangeRequests`,
+      {
+        createdAtFrom: params.createdAtFrom.length === 10 ? `${params.createdAtFrom}T00:00:00` : params.createdAtFrom,
+        createdAtTo: params.createdAtTo.length === 10 ? `${params.createdAtTo}T23:59:59` : params.createdAtTo,
+        status: params.status,
+        orderId: params.orderId,
+        nextToken: params.nextToken || undefined,
+        maxPerPage: params.maxPerPage ?? 50,
+      },
+    );
+  }
+
+  /** 교환요청 상품 입고 확인 */
+  confirmExchangeReceipt(exchangeId: number) {
+    return this.request(
+      "PATCH",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/exchangeRequests/${exchangeId}/receiveConfirmation`,
+      undefined,
+      { vendorId: this.vendorId, exchangeId },
+    );
+  }
+
+  /** 교환요청 거부 — SOLDOUT(품절) | WITHDRAW(고객 철회) */
+  rejectExchange(exchangeId: number, exchangeRejectCode: "SOLDOUT" | "WITHDRAW") {
+    return this.request<{ data?: { resultCode?: string; resultMessage?: string } }>(
+      "PATCH",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/exchangeRequests/${exchangeId}/rejection`,
+      undefined,
+      { vendorId: this.vendorId, exchangeId, exchangeRejectCode },
+    );
+  }
+
+  /** 교환상품(재배송) 송장 업로드 */
+  uploadExchangeInvoice(exchangeId: number, params: { shipmentBoxId: number; goodsDeliveryCode: string; invoiceNumber: string }) {
+    return this.request<{ data?: { resultCode?: string; resultMessage?: string } }>(
+      "POST",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/exchangeRequests/${exchangeId}/invoices`,
+      undefined,
+      { vendorId: this.vendorId, exchangeId, ...params },
+    );
+  }
+
+  // ───────── 정산 ─────────
+
+  /** 매출내역(구매확정 기준 매출 인식) — 최대 31일, 페이지 50건 */
+  listRevenueHistory(params: { recognitionDateFrom: string; recognitionDateTo: string; token?: string; maxPerPage?: number }) {
+    return this.request<CoupangRevenueHistoryResponse>(
+      "GET",
+      `${ORDER_API}/v1/revenue-history`,
+      {
+        vendorId: this.vendorId,
+        recognitionDateFrom: params.recognitionDateFrom,
+        recognitionDateTo: params.recognitionDateTo,
+        token: params.token ?? "",
+        maxPerPage: params.maxPerPage ?? 50,
+      },
+    );
+  }
+}
+
+export interface CoupangRevenueItem {
+  productId?: number;
+  productName?: string;
+  vendorItemId: number;
+  vendorItemName?: string;
+  salePrice?: number;
+  quantity: number;
+  saleAmount?: number;
+  serviceFee?: number;
+  serviceFeeVat?: number;
+  serviceFeeRatio?: number;
+  settlementAmount: number;
+  coupangDiscountCoupon?: number;
+  sellerDiscountCoupon?: number;
+  externalSellerSkuCode?: string;
+}
+
+/** 매출내역 1행 = 주문 1건(saleType별), items 에 옵션별 정산액 */
+export interface CoupangRevenueOrder {
+  orderId: number;
+  saleType: "SALE" | "REFUND" | string;
+  saleDate?: string;
+  recognitionDate?: string;
+  settlementDate?: string;
+  finalSettlementDate?: string;
+  deliveryFee?: { amount?: number; settlementAmount?: number };
+  items: CoupangRevenueItem[];
+}
+
+export interface CoupangRevenueHistoryResponse {
+  code: string | number;
+  message: string;
+  data?: CoupangRevenueOrder[];
+  nextToken?: string;
+  hasNext?: boolean;
 }
 
 export function roundCoupangPrice(price: number) {

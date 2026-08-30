@@ -17,15 +17,17 @@ interface SyncResult {
   confirmFailed: number;
   confirmErrors: string[];
   claims: Claim[];
+  autoApproved?: ApproveRow[];
   errors: string[];
 }
+interface SettlementResult { platform: "coupang" | "smartstore"; from: string; to: string; remoteRows: number; matched: number; updated: number; unchanged: number; unmatched: number; errors: string[] }
 interface ApproveRow { orderId: string; recipientName: string | null; productName: string | null; status: "success" | "failed" | "dry"; message: string }
 
 interface Props {
   onClose: () => void;
   onDone: () => void;
   /** 취소요청 상태인 주문 (승인 대상) */
-  cancelRequests: Array<{ id: string; marketplace: string | null; recipient_name: string | null; product_name: string | null; quantity: number; claim_status?: string | null }>;
+  cancelRequests: Array<{ id: string; marketplace: string | null; recipient_name: string | null; product_name: string | null; quantity: number; claim_status?: string | null; tracking_no?: string | null }>;
 }
 
 const LABEL = { coupang: "쿠팡", smartstore: "스마트스토어" } as const;
@@ -46,6 +48,9 @@ export default function OrderSyncModal({ onClose, onDone, cancelRequests }: Prop
   const [approving, setApproving] = useState(false);
   const [approveResults, setApproveResults] = useState<ApproveRow[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [rejecting, setRejecting] = useState(false);
+  const [settling, setSettling] = useState(false);
+  const [settleResults, setSettleResults] = useState<SettlementResult[]>([]);
 
   const headers = useCallback(() => ({ "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` }), [session?.access_token]);
 
@@ -94,6 +99,47 @@ export default function OrderSyncModal({ onClose, onDone, cancelRequests }: Prop
       setError("승인 중 오류가 발생했습니다.");
     } finally {
       setApproving(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (selected.size === 0) return;
+    const chosen = cancelRequests.filter((o) => selected.has(o.id));
+    const noTracking = chosen.filter((o) => !o.tracking_no?.trim());
+    if (noTracking.length > 0) return setError(`운송장이 없는 ${noTracking.length}건은 거절할 수 없습니다 (거절 = 발송처리). 운송장을 먼저 입력하세요.`);
+    if (!confirm(`취소요청 ${selected.size}건을 거절(발송 강행)합니다. 마켓에 송장이 등록되고 구매자에게 발송으로 표시됩니다. 계속할까요?`)) return;
+    setRejecting(true);
+    setError("");
+    setApproveResults([]);
+    try {
+      const res = await fetch("/api/marketplace-api/orders/claims/reject", { method: "POST", headers: headers(), body: JSON.stringify({ orderIds: [...selected] }) });
+      const data = (await res.json()) as { results?: ApproveRow[]; error?: string };
+      if (!res.ok) return setError(data.error ?? "취소 거절 실패");
+      setApproveResults(data.results ?? []);
+      setSelected(new Set());
+      onDone();
+    } catch {
+      setError("취소 거절 중 오류가 발생했습니다.");
+    } finally {
+      setRejecting(false);
+    }
+  };
+
+  const handleSettlement = async () => {
+    setSettling(true);
+    setError("");
+    setSettleResults([]);
+    try {
+      const res = await fetch("/api/marketplace-api/orders/settlement", { method: "POST", headers: headers(), body: JSON.stringify({ platform: "all", days: 35 }) });
+      const data = (await res.json()) as { results?: SettlementResult[]; error?: string };
+      if (!res.ok) return setError(data.error ?? "정산 반영 실패");
+      setSettleResults(data.results ?? []);
+      onDone();
+      loadRuns();
+    } catch {
+      setError("정산 반영 중 오류가 발생했습니다.");
+    } finally {
+      setSettling(false);
     }
   };
 
@@ -181,12 +227,18 @@ export default function OrderSyncModal({ onClose, onDone, cancelRequests }: Prop
           <section className="space-y-3 border-t border-[var(--border)] pt-4">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-sm font-medium text-[var(--text-primary)]">구매자 취소요청 — 승인 대기 {cancelRequests.length}건</h3>
-              <button onClick={handleApprove} disabled={approving || selected.size === 0} className="flex items-center gap-1.5 px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50">
-                {approving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                선택 {selected.size}건 취소 승인
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={handleReject} disabled={approving || rejecting || selected.size === 0} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-lg disabled:opacity-50" title="운송장이 있는 건만 — 마켓에 송장을 등록해 취소요청을 거절합니다">
+                  {rejecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4 rotate-180" />}
+                  선택 거절(발송)
+                </button>
+                <button onClick={handleApprove} disabled={approving || rejecting || selected.size === 0} className="flex items-center gap-1.5 px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50">
+                  {approving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  선택 {selected.size}건 취소 승인
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-[var(--text-muted)]">승인하면 마켓에서 환불이 진행됩니다. 거절(발송 강행)은 송장을 등록하면 자동 처리되며 다음 단계에서 버튼으로 제공됩니다. 이미 구매(발주)한 건은 소싱처 취소도 함께 확인하세요.</p>
+            <p className="text-xs text-[var(--text-muted)]">승인하면 마켓에서 환불이 진행됩니다. 거절(발송 강행)은 운송장이 입력된 건만 가능하며 마켓에 송장이 등록됩니다. 이미 구매(발주)한 건은 소싱처 취소도 함께 확인하세요. 자동 승인은 설정 페이지에서 켤 수 있습니다.</p>
             {cancelRequests.length === 0 ? (
               <p className="text-sm text-[var(--text-muted)]">승인 대기 중인 취소요청이 없습니다.</p>
             ) : (
@@ -196,7 +248,7 @@ export default function OrderSyncModal({ onClose, onDone, cancelRequests }: Prop
                     <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggle(o.id)} disabled={approving} />
                     <span className="text-[var(--text-muted)] w-20 shrink-0">{o.marketplace}</span>
                     <span className="truncate">{o.recipient_name} · {o.product_name} ×{o.quantity}</span>
-                    {o.claim_status && <span className="text-xs text-[var(--text-muted)] ml-auto shrink-0">{o.claim_status}</span>}
+                    <span className="text-xs text-[var(--text-muted)] ml-auto shrink-0">{o.tracking_no ? `운송장 ${o.tracking_no}` : "운송장 없음"}{o.claim_status ? ` · ${o.claim_status}` : ""}</span>
                   </label>
                 ))}
               </div>
@@ -213,11 +265,39 @@ export default function OrderSyncModal({ onClose, onDone, cancelRequests }: Prop
             )}
           </section>
 
+          {results.some((r) => (r.autoApproved ?? []).length > 0) && (
+            <section className="space-y-2">
+              <h3 className="text-sm font-medium text-green-400">취소요청 자동 승인 {results.reduce((n, r) => n + (r.autoApproved ?? []).length, 0)}건</h3>
+              <div className="max-h-40 overflow-y-auto border border-[var(--border)] rounded-lg divide-y divide-[var(--border)]">
+                {results.flatMap((r) => (r.autoApproved ?? []).map((a) => (
+                  <div key={a.orderId} className="px-3 py-1.5 text-sm">{a.recipientName} · {a.productName} — {a.message}</div>
+                )))}
+              </div>
+            </section>
+          )}
+
+          {/* 정산 반영 */}
+          <section className="space-y-2 border-t border-[var(--border)] pt-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-medium text-[var(--text-primary)]">정산 반영 (최근 35일)</h3>
+              <button onClick={handleSettlement} disabled={settling || running} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-[var(--bg-hover)] rounded-lg disabled:opacity-50">
+                {settling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
+                지금 반영
+              </button>
+            </div>
+            <p className="text-xs text-[var(--text-muted)]">쿠팡 매출내역·스마트스토어 건별 정산 API의 실제 정산액으로 발주서 정산예정을 덮어씁니다(마진 자동 재계산). 매일 자동 수집 때 하루 1회 실행됩니다.</p>
+            {settleResults.length > 0 && (
+              <div className="text-xs text-[var(--text-secondary)] space-y-0.5">
+                {settleResults.map((r) => <div key={r.platform}>{LABEL[r.platform]}: {r.from}~{r.to} · 정산행 {r.remoteRows} · 매칭 {r.matched} · 갱신 {r.updated} · 동일 {r.unchanged} · 미매칭 {r.unmatched}{r.errors.length ? ` · 오류 ${r.errors[0].slice(0, 80)}` : ""}</div>)}
+              </div>
+            )}
+          </section>
+
           {runs.length > 1 && (
             <section className="border-t border-[var(--border)] pt-4">
               <h3 className="text-sm font-medium text-[var(--text-primary)] mb-2">최근 실행</h3>
               <div className="text-xs text-[var(--text-muted)] space-y-0.5">
-                {runs.map((r) => <div key={r.id}>{fmt(r.started_at)} · {r.trigger === "scheduler" ? "자동" : "수동"} · {LABEL[r.platform as keyof typeof LABEL] ?? r.platform} · 조회 {r.remote_count} · 신규 {r.new_orders} · 확인 {r.confirmed} · {r.status}{r.dry_run ? " [DRY]" : ""}{r.error ? ` · ${r.error.slice(0, 80)}` : ""}</div>)}
+                {runs.map((r) => <div key={r.id}>{fmt(r.started_at)} · {r.trigger === "scheduler" ? "자동" : "수동"} · {LABEL[r.platform as keyof typeof LABEL] ?? r.platform} · {r.kind === "shipping" ? `송장 전송 ${r.confirmed}/${r.remote_count} (실패 ${r.confirm_failed})` : r.kind === "settlement" ? `정산 반영 ${r.confirmed}` : `조회 ${r.remote_count} · 신규 ${r.new_orders} · 확인 ${r.confirmed}`} · {r.status}{r.dry_run ? " [DRY]" : ""}{r.error ? ` · ${r.error.slice(0, 80)}` : ""}</div>)}
               </div>
             </section>
           )}

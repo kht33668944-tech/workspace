@@ -5,6 +5,7 @@ import { X, Send, Clock } from "lucide-react";
 import { DELIVERY_STATUSES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
 import { sanitizeText } from "@/lib/sanitize";
 import type { Order, OrderUpdate, ConsultationLog } from "@/types/database";
+import ClaimActions from "@/components/workspace/orders/claim-actions";
 
 function InfoRow({ label, value, highlight }: { label: string; value: string | null | undefined; highlight?: boolean }) {
   if (!value) return null;
@@ -65,6 +66,8 @@ export function OrderSidePanelContent({ order, onUpdate }: OrderSidePanelProps) 
         </div>
         <h2 className="text-sm font-medium text-[var(--text-primary)] truncate" title={order.product_name || ""}>{order.product_name || "상품명 없음"}</h2>
       </div>
+
+      <ClaimActions order={order} />
 
       {/* 배송상태 */}
       <div className="px-5 py-3 border-b border-[var(--border)] shrink-0">

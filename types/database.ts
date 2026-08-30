@@ -44,6 +44,14 @@ export interface Order {
   ship_by_date?: string | null;
   marketplace_synced_at?: string | null;
   canceled_at?: string | null;
+  // 송장 전송·정산 (20260901 마이그레이션)
+  shipped_to_marketplace_at?: string | null;
+  ship_error?: string | null;
+  tracking_exported_at?: string | null;
+  settlement_actual?: number | null;
+  settlement_source?: "estimate" | "api" | "excel" | string | null;
+  settlement_confirmed_at?: string | null;
+  claim_receipt_id?: string | null;
   created_at: string;
   updated_at: string;
   purchase_log_order_nos?: string[];
@@ -269,7 +277,13 @@ export type CoupangPriceInventoryInsert = Omit<CoupangPriceInventory, "id" | "cr
 export type MarketplaceApiPlatform = "coupang" | "smartstore" | "esm";
 export type MarketplaceApiTestStatus = "success" | "failed";
 export type MarketplaceApiLogStatus = "success" | "failed";
-export type MarketplaceApiAction = "test" | "price" | "stock" | "stop" | "resume" | "sync" | "cancel" | "sync-orders" | "confirm" | "claim" | "approve-cancel";
+export type MarketplaceApiAction =
+  | "test" | "price" | "stock" | "stop" | "resume" | "sync" | "cancel"
+  | "sync-orders" | "confirm" | "claim" | "approve-cancel" | "reject-cancel" | "auto-approve-cancel"
+  | "ship" | "ship-fix"
+  | "return-approve" | "return-receive" | "return-complete" | "return-reject"
+  | "exchange-collect" | "exchange-ship" | "exchange-reject"
+  | "settlement";
 
 export interface MarketplaceApiCredential {
   id: string;
@@ -463,4 +477,5 @@ export interface MarketplaceSyncRun {
   claims: Record<string, number>;
   error: string | null;
   detail: Record<string, unknown> | null;
+  kind?: "orders" | "shipping" | "settlement" | string;
 }

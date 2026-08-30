@@ -114,3 +114,32 @@ export function normalizeProductKey(name: string) {
 export function normalizeNameKey(name: string | null | undefined) {
   return (name ?? "").normalize("NFC").replace(/\s+/g, "").replace(/[()（）]/g, "").toLowerCase();
 }
+
+// ───────────────────────── 실행 로그 ─────────────────────────
+
+export interface MarketplaceApiLogInput {
+  user_id: string;
+  platform: string;
+  credential_id?: string | null;
+  action: string;
+  status: "success" | "failed";
+  product_id?: string | null;
+  product_name?: string | null;
+  vendor_item_id?: string | null;
+  target_id?: string | null;
+  previous_value?: string | null;
+  new_value?: string | null;
+  error_message?: string | null;
+  response_payload?: Record<string, unknown> | null;
+}
+
+/** marketplace_api_logs 기록 — 실패해도 호출자를 막지 않는다 */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function logMarketplaceApi(supabase: { from: (t: string) => any }, row: MarketplaceApiLogInput) {
+  try {
+    const { error } = await supabase.from("marketplace_api_logs").insert(row);
+    if (error) console.warn("[marketplace-api] 로그 기록 실패:", error.message);
+  } catch (e) {
+    console.warn("[marketplace-api] 로그 기록 실패:", e instanceof Error ? e.message : String(e));
+  }
+}

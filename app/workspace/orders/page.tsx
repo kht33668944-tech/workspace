@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
-import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban } from "lucide-react";
+import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban, Send } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
 import { useOrders } from "@/hooks/use-orders";
@@ -30,6 +30,7 @@ const SettlementImportModal = dynamic(() => import("@/components/workspace/order
 const BulkSmsModal = dynamic(() => import("@/components/workspace/orders/bulk-sms-modal"), { ssr: false });
 const MarketplaceCancelModal = dynamic(() => import("@/components/workspace/orders/marketplace-cancel-modal"), { ssr: false });
 const OrderSyncModal = dynamic(() => import("@/components/workspace/orders/order-sync-modal"), { ssr: false });
+const MarketplaceShipModal = dynamic(() => import("@/components/workspace/orders/marketplace-ship-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
 import { useAutoPurchaseController, useTrackingCollectController } from "@/context/modal-controllers";
 import { PLATFORM_LABELS } from "@/types/database";
@@ -253,6 +254,7 @@ function OrdersPageInner() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showPurchaseCancelModal, setShowPurchaseCancelModal] = useState(false);
+  const [showMarketplaceShip, setShowMarketplaceShip] = useState(false);
   const [showMarketplaceCancel, setShowMarketplaceCancel] = useState(false);
   const [showOrderSync, setShowOrderSync] = useState(false);
   const [purchaseCredentials, setPurchaseCredentials] = useState<PurchaseCredential[]>([]);
@@ -1462,6 +1464,14 @@ function OrdersPageInner() {
             <Ban className="w-4 h-4" />
             마켓 취소 (API)
           </button>
+          <button
+            onClick={() => setShowMarketplaceShip(true)}
+            title="운송장이 있는 쿠팡·스마트스토어 주문을 공식 API로 발송처리(송장 전송). 선택이 없으면 미전송 전체"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-sky-600/20 text-sky-400 hover:bg-sky-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
+          >
+            <Send className="w-4 h-4" />
+            송장 전송 (API){selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+          </button>
           <div className="relative" ref={autoMenuRef}>
             <button
               onClick={() => setShowAutoMenu(!showAutoMenu)}
@@ -1807,8 +1817,15 @@ function OrdersPageInner() {
       )}
       {showOrderSync && (
         <OrderSyncModal
-          cancelRequests={allOrders.filter((o) => o.delivery_status === "취소요청").map((o) => ({ id: o.id, marketplace: o.marketplace, recipient_name: o.recipient_name, product_name: o.product_name, quantity: o.quantity, claim_status: o.claim_status ?? null }))}
+          cancelRequests={allOrders.filter((o) => o.delivery_status === "취소요청").map((o) => ({ id: o.id, marketplace: o.marketplace, recipient_name: o.recipient_name, product_name: o.product_name, quantity: o.quantity, claim_status: o.claim_status ?? null, tracking_no: o.tracking_no ?? null }))}
           onClose={() => setShowOrderSync(false)}
+          onDone={() => refetch()}
+        />
+      )}
+      {showMarketplaceShip && (
+        <MarketplaceShipModal
+          selectedIds={[...selectedIds]}
+          onClose={() => setShowMarketplaceShip(false)}
           onDone={() => refetch()}
         />
       )}

@@ -348,6 +348,117 @@ export class NaverCommerceApiClient {
   approveCancel(productOrderId: string) {
     return this.request("POST", `/v1/pay-order/seller/product-orders/${productOrderId}/claim/cancel/approve`);
   }
+
+  // ───────── 발송 처리 ─────────
+
+  /**
+   * 발송 처리(송장 등록) — 최대 30건. 취소요청 중인 주문을 발송처리하면 취소요청이 거절(철회)된다.
+   * 응답 data.successProductOrderInfos / failProductOrderInfos
+   */
+  dispatchProductOrders(items: Array<{ productOrderId: string; deliveryCompanyCode: string; trackingNumber: string; dispatchDate?: string }>) {
+    return this.request<NaverProcessResponse>("POST", "/v1/pay-order/seller/product-orders/dispatch", {
+      body: {
+        dispatchProductOrders: items.map((i) => ({
+          productOrderId: i.productOrderId,
+          deliveryMethod: "DELIVERY",
+          deliveryCompanyCode: i.deliveryCompanyCode,
+          trackingNumber: i.trackingNumber,
+          dispatchDate: i.dispatchDate ?? toKstIso(new Date()),
+        })),
+      },
+    });
+  }
+
+  // ───────── 반품 ─────────
+
+  /** 반품 승인 — 수거 완료 후 환불 처리 */
+  approveReturn(productOrderId: string) {
+    return this.request<NaverProcessResponse>("POST", `/v1/pay-order/seller/product-orders/${productOrderId}/claim/return/approve`);
+  }
+
+  /** 반품 거부(철회) */
+  rejectReturn(productOrderId: string, rejectReturnReason: string) {
+    return this.request<NaverProcessResponse>("POST", `/v1/pay-order/seller/product-orders/${productOrderId}/claim/return/reject`, {
+      body: { rejectReturnReason },
+    });
+  }
+
+  // ───────── 교환 ─────────
+
+  /** 교환 수거 완료 */
+  approveCollectedExchange(productOrderId: string) {
+    return this.request<NaverProcessResponse>("POST", `/v1/pay-order/seller/product-orders/${productOrderId}/claim/exchange/collect/approve`);
+  }
+
+  /** 교환 재배송 처리(재배송 송장) */
+  redeliverExchange(productOrderId: string, params: { deliveryCompanyCode: string; trackingNumber: string }) {
+    return this.request<NaverProcessResponse>("POST", `/v1/pay-order/seller/product-orders/${productOrderId}/claim/exchange/dispatch`, {
+      body: { reDeliveryMethod: "DELIVERY", reDeliveryCompany: params.deliveryCompanyCode, reDeliveryTrackingNumber: params.trackingNumber },
+    });
+  }
+
+  /** 교환 거부(철회) */
+  rejectExchange(productOrderId: string, rejectExchangeReason: string) {
+    return this.request<NaverProcessResponse>("POST", `/v1/pay-order/seller/product-orders/${productOrderId}/claim/exchange/reject`, {
+      body: { rejectExchangeReason },
+    });
+  }
+
+  // ───────── 정산 ─────────
+
+  /** 건별 정산 내역 — searchDate 기준(periodType), 페이지 최대 1000 */
+  getSettleByCase(params: { searchDate: string; periodType?: NaverSettlePeriodType; settleDecisionType?: "SETTLED" | "UNSETTLED" | "BEFORE_CANCEL"; productOrderId?: string; orderId?: string; pageNumber?: number; pageSize?: number }) {
+    return this.request<{ elements?: NaverSettleCase[]; pagination?: { page: number; size: number; totalPages: number; totalElements: number } }>(
+      "GET",
+      "/v1/pay-settle/settle/case",
+      {
+        query: {
+          searchDate: params.searchDate,
+          periodType: params.periodType,
+          settleDecisionType: params.settleDecisionType,
+          productOrderId: params.productOrderId,
+          orderId: params.orderId,
+          pageNumber: params.pageNumber ?? 1,
+          pageSize: params.pageSize ?? 1000,
+        },
+      },
+    );
+  }
+}
+
+/** 상품주문 처리 계열 API 공통 응답 (발주확인·발송·클레임) */
+export interface NaverProcessResponse {
+  data?: {
+    successProductOrderIds?: string[];
+    successProductOrderInfos?: Array<{ productOrderId: string }>;
+    failProductOrderInfos?: Array<{ productOrderId: string; code?: string; message?: string }>;
+  };
+}
+
+export type NaverSettlePeriodType =
+  | "SETTLE_CASEBYCASE_SETTLE_SCHEDULE_DATE"
+  | "SETTLE_CASEBYCASE_SETTLE_BASIS_DATE"
+  | "SETTLE_CASEBYCASE_SETTLE_COMPLETE_DATE"
+  | "SETTLE_CASEBYCASE_PAY_DATE"
+  | "SETTLE_CASEBYCASE_TAXRETURN_BASIS_DATE";
+
+export interface NaverSettleCase {
+  settleBasisDate?: string | null;
+  settleExpectDate?: string | null;
+  settleCompleteDate?: string | null;
+  payDate?: string | null;
+  orderId?: string | null;
+  productOrderId?: string | null;
+  productOrderType: string;
+  settleType?: string | null;
+  productId?: string | null;
+  productName?: string | null;
+  purchaserName?: string | null;
+  paySettleAmount: number;
+  totalPayCommissionAmount?: number | null;
+  sellingInterlockCommissionAmount?: number | null;
+  benefitSettleAmount?: number;
+  settleExpectAmount: number;
 }
 
 /** KST ISO 문자열 (네이버 lastChangedFrom 형식) */

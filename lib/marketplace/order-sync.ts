@@ -7,22 +7,23 @@
 //  방향 규칙: 마켓→발주서 는 클레임·배송 상태만, 발주서→마켓 은 발주확인·취소승인·판매자취소만.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CoupangOpenApiClient, CoupangOrderSheet, CoupangReturnRequest } from "@/lib/coupang-api";
+import type { CoupangExchangeRequest, CoupangOpenApiClient, CoupangOrderSheet, CoupangReturnRequest } from "@/lib/coupang-api";
 import type { NaverCommerceApiClient, NaverProductOrderDetail } from "@/lib/naver-commerce-api";
 import { toKstIso } from "@/lib/naver-commerce-api";
 import { getSettlementRate, splitAddress } from "@/lib/excel-parser";
 import { sanitizeAddressDetail } from "@/lib/scrapers/types";
-import { isDryRun, normalizeNameKey, normalizeProductKey, sleep } from "@/lib/marketplace/common";
+import { isDryRun, logMarketplaceApi, normalizeNameKey, normalizeProductKey, sleep } from "@/lib/marketplace/common";
+import { LOCKED_STATUSES, TERMINAL_STATUSES } from "@/lib/constants";
+import { getMarketplaceCourierCode } from "@/lib/marketplace/courier-codes";
+import { getAppSetting } from "@/lib/app-settings";
 import { findCoupangReceipt } from "@/lib/marketplace/order-cancel";
 import type { OrderInsert } from "@/types/database";
 
 export type SyncPlatform = "coupang" | "smartstore";
 
 const MARKET_LABEL: Record<SyncPlatform, string> = { coupang: "쿠팡", smartstore: "스마트스토어" };
-/** 이 상태의 발주서는 클레임 동기화로 건드리지 않는다 */
-const TERMINAL = new Set(["취소완료", "반품완료", "교환완료", "재고부족"]);
-/** 자동구매 락 중 — 상태는 두고 claim_* 만 기록 */
-const LOCKED = new Set(["구매진행중"]);
+const TERMINAL = TERMINAL_STATUSES;
+const LOCKED = LOCKED_STATUSES;
 
 export interface SyncedOrderSummary {
   id?: string;
@@ -57,6 +58,8 @@ export interface SyncResult {
   confirmErrors: string[];
   claims: ClaimChange[];
   claimCounts: Record<string, number>;
+  /** 자동 승인된 취소요청 (설정 auto_approve_cancel) */
+  autoApproved: ApproveResultRow[];
   errors: string[];
   runId: string | null;
 }
@@ -292,6 +295,7 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
     confirmErrors: [],
     claims: [],
     claimCounts: {},
+    autoApproved: [],
     errors: [],
     runId: null,
   };
@@ -381,7 +385,7 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
       revenue: o.revenue,
       marketplaceStatus: o.marketplace_status ?? null,
     }));
-    await supabase.from("marketplace_api_logs").insert({
+    await logMarketplaceApi(supabase, {
       user_id: userId,
       platform,
       credential_id: opts.credentialId,
@@ -412,7 +416,7 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
             }
           }
           if (failed.length > 0) result.confirmErrors.push(`쿠팡 발주확인 실패 ${failed.length}건: ${res.message}`);
-          await supabase.from("marketplace_api_logs").insert({
+          await logMarketplaceApi(supabase, {
             user_id: userId, platform, credential_id: opts.credentialId,
             action: res.dryRun ? "confirm:dry" : "confirm", status: res.ok ? "success" : "failed",
             new_value: `boxes=${batch.length} ok=${okIds.size}`, error_message: res.ok ? null : res.message,
@@ -438,7 +442,7 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
             }
           }
           if (fails.length > 0 || !res.ok) result.confirmErrors.push(`스토어 발주확인 실패 ${res.ok ? fails.length : batch.length}건: ${fails.map((f) => f.message).join("; ") || res.message}`);
-          await supabase.from("marketplace_api_logs").insert({
+          await logMarketplaceApi(supabase, {
             user_id: userId, platform, credential_id: opts.credentialId,
             action: res.dryRun ? "confirm:dry" : "confirm", status: res.ok ? "success" : "failed",
             new_value: `ids=${batch.length} ok=${okIds.size}`, error_message: res.ok ? null : res.message,
@@ -456,6 +460,19 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
       await syncNaverClaims(opts, existing, days, result, dryRun);
     }
     for (const c of result.claims) result.claimCounts[c.to] = (result.claimCounts[c.to] ?? 0) + 1;
+
+    // ── 7. 취소요청 자동 승인 (설정 on 일 때, 운송장·구매 전 건만)
+    const newCancelReq = result.claims.filter((c) => c.to === "취소요청").map((c) => c.orderId);
+    if (newCancelReq.length > 0) {
+      const setting = await getAppSetting<{ enabled?: boolean }>(supabase, userId, "auto_approve_cancel");
+      if (setting?.enabled) {
+        const { data: rows } = await supabase.from("orders").select("id,tracking_no,purchased_at,purchase_order_no,delivery_status").eq("user_id", userId).in("id", newCancelReq);
+        const eligible = (rows ?? []).filter((r) => r.delivery_status === "취소요청" && !r.tracking_no && !r.purchased_at && !r.purchase_order_no).map((r) => r.id);
+        if (eligible.length > 0) {
+          result.autoApproved = await approveCancelRequests({ supabase, userId, credentialId: opts.credentialId, platform, orderIds: eligible, coupang: opts.coupang, smartstore: opts.smartstore, action: "auto-approve-cancel" });
+        }
+      }
+    }
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : String(err));
   }
@@ -472,7 +489,7 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
         confirm_failed: result.confirmFailed,
         claims: result.claimCounts,
         error: result.errors.length > 0 ? result.errors.join(" | ").slice(0, 2000) : null,
-        detail: { skippedExisting: result.skippedExisting, confirmErrors: result.confirmErrors, claims: result.claims.slice(0, 50) },
+        detail: { skippedExisting: result.skippedExisting, confirmErrors: result.confirmErrors, claims: result.claims.slice(0, 50), autoApproved: result.autoApproved },
       })
       .eq("id", result.runId);
   }
@@ -483,7 +500,7 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
 
 type Existing = Awaited<ReturnType<typeof loadExistingOrders>>;
 
-async function applyClaim(
+export async function applyClaim(
   supabase: SupabaseClient,
   userId: string,
   credentialId: string | null,
@@ -495,16 +512,25 @@ async function applyClaim(
   reason: string | undefined,
   result: SyncResult,
   dryRun: boolean,
+  receiptId?: string | number | null,
 ) {
   if (TERMINAL.has(order.delivery_status)) return;
-  if (order.delivery_status === to) return;
+  if (order.delivery_status === to) {
+    // 상태는 같아도 접수번호·세부 단계는 최신으로 (반품 입고확인 등 단계 표시용)
+    if (!dryRun && (receiptId != null || claimStatus)) {
+      await supabase.from("orders").update({ claim_status: claimStatus, claim_receipt_id: receiptId != null ? String(receiptId) : undefined, marketplace_synced_at: new Date().toISOString() }).eq("id", order.id).eq("user_id", userId);
+    }
+    return;
+  }
   // 취소요청이 이미 취소준비(판매자 취소 진행 중)면 상태 유지
   if (to === "취소요청" && order.delivery_status === "취소준비") return;
   const locked = LOCKED.has(order.delivery_status);
   const patch: Record<string, unknown> = { claim_type: claimType, claim_status: claimStatus, marketplace_synced_at: new Date().toISOString() };
+  if (receiptId != null) patch.claim_receipt_id = String(receiptId);
   if (!locked) {
     patch.delivery_status = to;
     if (to === "취소완료") patch.canceled_at = new Date().toISOString();
+    if (to === "반품완료") patch.returned_at = new Date().toISOString();
   }
   if (!dryRun) {
     const { error } = await supabase.from("orders").update(patch).eq("id", order.id).eq("user_id", userId).eq("delivery_status", order.delivery_status);
@@ -514,7 +540,7 @@ async function applyClaim(
     orderId: order.id, bundleNo: order.bundle_no, recipientName: order.recipient_name, productName: order.product_name,
     from: order.delivery_status, to: locked ? `${order.delivery_status}(클레임 기록만)` : to, claimType, claimStatus, reason,
   });
-  await supabase.from("marketplace_api_logs").insert({
+  await logMarketplaceApi(supabase, {
     user_id: userId, platform, credential_id: credentialId, action: dryRun ? "claim:dry" : "claim", status: "success",
     product_name: order.product_name, target_id: order.marketplace_product_order_no ?? order.marketplace_order_no,
     previous_value: order.delivery_status, new_value: locked ? null : to, error_message: null,
@@ -568,7 +594,42 @@ async function syncCoupangClaims(opts: SyncOptions, existing: Existing, days: nu
     else if (r.receiptStatus === "RETURNS_UNCHECKED" || r.receiptStatus === "VENDOR_WAREHOUSE_CONFIRM" || r.receiptStatus === "REQUEST_COUPANG_CHECK") { toStatus = "반품준비"; claimType = "RETURN"; }
     else if (r.receiptStatus === "RETURNS_COMPLETED") { toStatus = "반품완료"; claimType = "RETURN"; }
     if (!toStatus) continue;
-    for (const o of targets) await applyClaim(opts.supabase, opts.userId, opts.credentialId, "coupang", o, toStatus, claimType, r.receiptStatus, reason, result, dryRun);
+    for (const o of targets) await applyClaim(opts.supabase, opts.userId, opts.credentialId, "coupang", o, toStatus, claimType, r.receiptStatus, reason, result, dryRun, r.receiptId);
+  }
+  await syncCoupangExchanges(opts, existing, days, result, dryRun);
+}
+
+/** 쿠팡 교환요청 — 접수/진행 → 교환준비, 완료 → 교환완료. 최대 7일 조회라 하루 단위로 나눈다 */
+async function syncCoupangExchanges(opts: SyncOptions, existing: Existing, days: number, result: SyncResult, dryRun: boolean) {
+  const client = opts.coupang!;
+  const list: CoupangExchangeRequest[] = [];
+  for (let d = days; d >= 0; d--) {
+    const dayFrom = new Date(Date.now() - d * 86400000);
+    let nextToken: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const res = await client.listExchangeRequests({ createdAtFrom: `${ymd(dayFrom)}T00:00:00`, createdAtTo: `${ymd(dayFrom)}T23:59:59`, nextToken, maxPerPage: 50 });
+      if (!res.ok || !res.body || typeof res.body === "string") { result.errors.push(`쿠팡 교환 조회 실패(${ymd(dayFrom)}): ${res.message}`); break; }
+      list.push(...(res.body.data ?? []));
+      nextToken = res.body.nextToken || undefined;
+      await sleep(300);
+      if (!nextToken) break;
+    }
+  }
+  const seen = new Set<number>();
+  for (const x of list) {
+    if (seen.has(x.exchangeId)) continue;
+    seen.add(x.exchangeId);
+    const orders = existing.byOrderNo.get(String(x.orderId)) ?? [];
+    if (orders.length === 0) continue;
+    const itemIds = new Set((x.exchangeItemDtoV1s ?? []).map((i) => String(i.vendorItemId)));
+    const targets = orders.filter((o) => !o.marketplace_product_order_no || itemIds.size === 0 || itemIds.has(o.marketplace_product_order_no.split("-")[1] ?? ""));
+    const st = String(x.exchangeStatus ?? "").toUpperCase();
+    let to: string | null = null;
+    if (st === "RECEIPT" || st === "PROGRESS") to = "교환준비";
+    else if (st === "SUCCESS") to = "교환완료";
+    if (!to) continue; // REJECT/CANCEL 은 발주서 상태 유지
+    const reason = [x.reasonCodeText, x.reason].filter(Boolean).join(" / ");
+    for (const o of targets) await applyClaim(opts.supabase, opts.userId, opts.credentialId, "coupang", o, to, "EXCHANGE", `${st}${x.receiptStatus ? `/${x.receiptStatus}` : ""}`, reason, result, dryRun, x.exchangeId);
   }
 }
 
@@ -596,7 +657,7 @@ async function syncNaverClaims(opts: SyncOptions, existing: Existing, days: numb
     else if (type === "EXCHANGE") toStatus = status === "EXCHANGED" || cs === "EXCHANGE_DONE" ? "교환완료" : "교환준비";
     else if (type === "ADMIN_CANCEL") toStatus = "취소완료";
     if (!toStatus) continue;
-    await applyClaim(opts.supabase, opts.userId, opts.credentialId, "smartstore", o, toStatus, type || "CANCEL", cs || status, reason, result, dryRun);
+    await applyClaim(opts.supabase, opts.userId, opts.credentialId, "smartstore", o, toStatus, type || "CANCEL", cs || status, reason, result, dryRun, claim.claimId ?? null);
   }
 }
 
@@ -610,6 +671,8 @@ export interface ApproveInput {
   orderIds: string[];
   coupang?: CoupangOpenApiClient;
   smartstore?: NaverCommerceApiClient;
+  /** 로그 action (기본 approve-cancel) */
+  action?: "approve-cancel" | "auto-approve-cancel";
 }
 
 export interface ApproveResultRow {
@@ -655,11 +718,69 @@ export async function approveCancelRequests(input: ApproveInput): Promise<Approv
     if (ok && !dryRun) {
       await supabase.from("orders").update({ delivery_status: "취소완료", canceled_at: new Date().toISOString(), claim_status: "APPROVED" }).eq("id", o.id).eq("user_id", userId).eq("delivery_status", "취소요청");
     }
-    await supabase.from("marketplace_api_logs").insert({
-      user_id: userId, platform, credential_id: input.credentialId, action: dryRun ? "approve-cancel:dry" : "approve-cancel", status: ok ? "success" : "failed",
+    await logMarketplaceApi(supabase, {
+      user_id: userId, platform, credential_id: input.credentialId, action: dryRun ? `${input.action ?? "approve-cancel"}:dry` : (input.action ?? "approve-cancel"), status: ok ? "success" : "failed",
       product_name: o.product_name, target_id: o.marketplace_product_order_no ?? o.marketplace_order_no, previous_value: "취소요청", new_value: ok && !dryRun ? "취소완료" : null, error_message: ok ? null : message,
     });
     out.push({ orderId: o.id, recipientName: o.recipient_name, productName: o.product_name, status, message });
+    await sleep(platform === "coupang" ? 400 : 700);
+  }
+  return out;
+}
+
+// ───────────────────────── 취소요청 거절 (발송 강행) ─────────────────────────
+
+/**
+ * 구매자 취소요청 거절 — 운송장이 있어야 한다.
+ *  스토어: 발송처리(dispatch) 가 곧 거절 / 쿠팡: 출고중지요청 접수건을 "이미출고" 처리(송장 등록)
+ *  성공 시 배송완료 + shipped_to_marketplace_at, claim_status REJECTED
+ */
+export async function rejectCancelRequests(input: ApproveInput): Promise<ApproveResultRow[]> {
+  const { supabase, userId, platform } = input;
+  const dryRun = isDryRun();
+  const { data } = await supabase
+    .from("orders")
+    .select("id,recipient_name,product_name,quantity,delivery_status,marketplace_order_no,marketplace_product_order_no,courier,tracking_no")
+    .eq("user_id", userId)
+    .in("id", input.orderIds);
+  type Row = ExistingOrder & { courier: string | null; tracking_no: string | null };
+  const out: ApproveResultRow[] = [];
+  for (const o of (data ?? []) as Row[]) {
+    const base = { orderId: o.id, recipientName: o.recipient_name, productName: o.product_name };
+    if (o.delivery_status !== "취소요청") { out.push({ ...base, status: "failed", message: `취소요청 상태가 아님 (${o.delivery_status})` }); continue; }
+    if (!o.tracking_no?.trim()) { out.push({ ...base, status: "failed", message: "운송장을 먼저 입력하세요 (거절 = 발송처리)" }); continue; }
+    const code = getMarketplaceCourierCode(o.courier, platform);
+    if (!code) { out.push({ ...base, status: "failed", message: `택배사 코드 없음: ${o.courier ?? "(미입력)"}` }); continue; }
+    let ok = false;
+    let message = "";
+    try {
+      if (platform === "smartstore") {
+        if (!o.marketplace_product_order_no) throw new Error("상품주문번호 없음");
+        const res = await input.smartstore!.dispatchProductOrders([{ productOrderId: o.marketplace_product_order_no, deliveryCompanyCode: code, trackingNumber: o.tracking_no.trim() }]);
+        const body = (!res.body || typeof res.body === "string") ? undefined : res.body.data;
+        const fail = body?.failProductOrderInfos?.find((f) => f.productOrderId === o.marketplace_product_order_no);
+        ok = res.ok && !fail; message = res.dryRun ? "DRY RUN" : ok ? "발송처리 (취소요청 거절)" : fail ? `${fail.code ?? ""} ${fail.message ?? ""}`.trim() : res.message;
+        if (res.dryRun) ok = true;
+      } else {
+        if (!o.marketplace_order_no) throw new Error("마켓 주문번호 없음");
+        const receipt = await findCoupangReceipt(input.coupang!, o.marketplace_order_no);
+        if (!receipt) throw new Error("출고중지요청 접수 내역을 찾지 못함");
+        if (receipt.receiptStatus !== "RELEASE_STOP_UNCHECKED" && receipt.receiptStatus !== "RETURNS_UNCHECKED") throw new Error(`거절할 수 없는 접수 상태: ${receipt.receiptStatus}`);
+        const res = await input.coupang!.completeShipment(receipt.receiptId, code, o.tracking_no.trim());
+        const rc = (!res.body || typeof res.body === "string") ? undefined : res.body.data?.resultCode;
+        ok = res.ok && (rc == null || rc === "SUCCESS"); message = res.dryRun ? "DRY RUN" : ok ? "이미출고 처리 (취소요청 거절)" : ((!res.body || typeof res.body === "string") ? res.message : res.body.data?.resultMessage ?? res.message);
+        if (res.dryRun) ok = true;
+      }
+    } catch (err) { ok = false; message = err instanceof Error ? err.message : String(err); }
+    const status: ApproveResultRow["status"] = dryRun ? "dry" : ok ? "success" : "failed";
+    if (ok && !dryRun) {
+      await supabase.from("orders").update({ delivery_status: "배송완료", claim_status: "REJECTED", shipped_to_marketplace_at: new Date().toISOString(), ship_error: null, marketplace_status: platform === "coupang" ? "DEPARTURE" : "DELIVERING" }).eq("id", o.id).eq("user_id", userId).eq("delivery_status", "취소요청");
+    }
+    await logMarketplaceApi(supabase, {
+      user_id: userId, platform, credential_id: input.credentialId, action: dryRun ? "reject-cancel:dry" : "reject-cancel", status: ok ? "success" : "failed",
+      product_name: o.product_name, target_id: o.marketplace_product_order_no ?? o.marketplace_order_no, previous_value: "취소요청", new_value: ok && !dryRun ? "배송완료(거절)" : null, error_message: ok ? null : message,
+    });
+    out.push({ ...base, status, message });
     await sleep(platform === "coupang" ? 400 : 700);
   }
   return out;

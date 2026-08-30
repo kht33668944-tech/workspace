@@ -10,7 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CoupangOpenApiClient, CoupangOrderSheet, CoupangReturnRequest } from "@/lib/coupang-api";
 import type { NaverCommerceApiClient, NaverProductOrderDetail } from "@/lib/naver-commerce-api";
 import { toKstIso } from "@/lib/naver-commerce-api";
-import { isDryRun, normalizeNameKey, normalizeProductKey, sleep } from "@/lib/marketplace/common";
+import { isDryRun, logMarketplaceApi, normalizeNameKey, normalizeProductKey, sleep } from "@/lib/marketplace/common";
 
 export type CancelPlatform = "coupang" | "smartstore";
 
@@ -368,7 +368,7 @@ export async function executeCancels(opts: ExecuteOptions): Promise<CancelResult
         .eq("user_id", userId);
     }
 
-    await supabase.from("marketplace_api_logs").insert({
+    await logMarketplaceApi(supabase, {
       user_id: userId,
       platform,
       credential_id: opts.credentialId,
@@ -379,7 +379,7 @@ export async function executeCancels(opts: ExecuteOptions): Promise<CancelResult
       previous_value: "취소준비",
       new_value: ok && !dry ? "취소완료" : null,
       error_message: ok ? null : message,
-      response_payload: payload && typeof payload === "object" ? payload : { body: payload, bundleNo: order.bundle_no, recipient: order.recipient_name },
+      response_payload: payload && typeof payload === "object" ? (payload as Record<string, unknown>) : { body: payload, bundleNo: order.bundle_no, recipient: order.recipient_name },
     });
 
     if (!dry) await sleep(platform === "coupang" ? 400 : 700);

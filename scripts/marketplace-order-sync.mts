@@ -13,6 +13,7 @@ import { CoupangOpenApiClient } from "@/lib/coupang-api";
 import { NaverCommerceApiClient } from "@/lib/naver-commerce-api";
 import { syncOrders, type SyncPlatform, type SyncResult } from "@/lib/marketplace/order-sync";
 import { notifySyncResults } from "@/lib/marketplace/order-sync-notify";
+import { syncSettlements } from "@/lib/marketplace/settlement-sync";
 
 const argv = process.argv.slice(2);
 const opt = (name: string, def: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : def; };
@@ -57,4 +58,25 @@ for (const platform of platforms) {
   }
 }
 await notifySyncResults(results, "scheduler");
+
+// 정산 반영 — 하루 1회 (오늘 kind=settlement 실행이 없을 때만)
+if (!argv.includes("--skip-settlement") && !process.env.MARKETPLACE_API_DRY_RUN) {
+  const todayKst = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+  const { data: last } = await sb.from("marketplace_sync_runs").select("started_at").eq("user_id", userId).eq("kind", "settlement").order("started_at", { ascending: false }).limit(1).maybeSingle();
+  const lastKst = last?.started_at ? new Date(new Date(last.started_at).getTime() + 9 * 3600000).toISOString().slice(0, 10) : null;
+  if (lastKst !== todayKst) {
+    for (const platform of platforms) {
+      const cred = (creds ?? []).find((c) => c.platform === platform);
+      if (!cred) continue;
+      try {
+        const clients = platform === "coupang"
+          ? { coupang: new CoupangOpenApiClient({ vendorId: cred.account_id, accessKey: decrypt(cred.access_key_encrypted), secretKey: decrypt(cred.secret_key_encrypted) }) }
+          : { smartstore: new NaverCommerceApiClient({ clientId: decrypt(cred.client_id_encrypted), clientSecret: decrypt(cred.client_secret_encrypted) }) };
+        const s = await syncSettlements({ supabase: sb, userId, platform, credentialId: cred.id, days: 35, trigger: "scheduler", ...clients });
+        log(`${platform} 정산: ${s.from}~${s.to} rows=${s.remoteRows} matched=${s.matched} updated=${s.updated} unmatched=${s.unmatched} errors=${s.errors.length}`);
+        for (const e of s.errors.slice(0, 3)) log(`  x ${e}`);
+      } catch (err) { log(`${platform} 정산 예외: ${err instanceof Error ? err.message : String(err)}`); }
+    }
+  }
+}
 log("done");

@@ -27,3 +27,14 @@
 - `.env.local` `SYNC_USER_ID` = 발주서 소유 사용자 UUID (스크립트 전용)
 - 규칙: 마켓→발주서 는 클레임·배송 상태만, 발주서→마켓 은 발주확인·취소승인·판매자취소만. `취소요청`은 사람이 승인 후 `취소완료`. 이미 플토로 들어온 행은 결제일+수취인+상품명으로 중복 제거하고 마켓 번호만 채워 넣는다
 - 플레이오토 전환: 1주일 병행 후 플토의 쿠팡·스마트스토어 주문수집 OFF (ESM은 유지)
+
+## 송장 전송·취소거절·반품/교환·정산·자동승인 (2026-08-31, 2단계)
+- 마이그레이션 `supabase/migrations/20260901_order_shipping_settlement.sql` 수동 적용 필요 (orders 컬럼 7개, marketplace_sync_runs.kind, app_settings)
+- **송장 전송**: 주문 페이지 `송장 전송 (API)` (선택 없으면 미전송 전체, 미리보기→실행). 대상 = 쿠팡·스토어 판매분 중 운송장 있고 `shipped_to_marketplace_at` 비어 있는 행. 클레임 상태·택배사 코드 없음·플토 수집분(마켓번호 없음)은 제외. 운송장을 바꾸면 자동으로 재전송 대상이 된다
+- **자동(3시간)** `OnliveTrackingShip`: `powershell -ExecutionPolicy Bypass -File scripts\register-tracking-ship-task.ps1` (`-Remove` 해제, `-IntervalHours N`). 흐름 = 구매처(지마켓·옥션·오늘의집) 운송장 수집(브라우저) → 쿠팡·스토어 송장 전송 → ESM(지마켓·옥션·11번가 판매분) 플토 운송장 엑셀을 `바탕화면\ESM운송장\`에 저장(`TRACKING_EXPORT_DIR`로 변경). 로그 `logs/tracking-ship.log`. 주문수집 작업과는 `logs/.marketplace.lock`으로 동시 실행 방지
+- 수동 실행/검증: `npx tsx scripts/tracking-and-ship.mts --dry` (`--skip-collect`, `--skip-ship`, `--skip-esm`)
+- 택배사 코드: `lib/marketplace/courier-codes.ts` (CJ대한통운=CJGLS, 롯데=HYUNDAI, 한진=HANJIN, 우체국=EPOST, 로젠=KGB, 경동=KDEXP …). 없는 택배사는 여기 추가
+- **취소요청 거절**: 주문 수집 모달 → 취소요청 목록 → `선택 거절(발송)` — 운송장 필수. 스토어는 발송처리가 곧 거절, 쿠팡은 "이미출고 처리"
+- **반품/교환**: 주문 사이드패널(반품준비/교환준비 상태)에 단계 버튼. 쿠팡 반품 = 입고 확인 → 반품 완료(환불), 거절은 윙에서만. 스토어 반품 = 반품 완료(환불) / 거절(사유). 교환 = 수거 완료 → 재배송 송장 등록 / 거절
+- **정산**: 주문 수집 모달 `정산 반영 (최근 35일)` 또는 자동 수집 때 하루 1회. 쿠팡 revenue-history(orderId+vendorItemId), 스토어 settle/case(productOrderId). `settlement`을 실정산액으로 덮어쓰고 `settlement_source='api'`
+- **취소요청 자동 승인**: 설정 페이지 토글(기본 꺼짐). 운송장 없고 구매(발주) 전인 취소요청만 자동, 나머지는 디스코드 알림 후 사람이 처리

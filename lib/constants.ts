@@ -89,6 +89,13 @@ export const DELIVERY_STATUS_COLORS: Record<string, string> = {
   교환완료: "bg-purple-500/20 text-purple-400",
 };
 
+/** 클레임 동기화·자동 전이가 건드리지 않는 종료 상태 */
+export const TERMINAL_STATUSES = new Set<string>(["취소완료", "반품완료", "교환완료", "재고부족"]);
+/** 자동구매 락 중 — 상태는 두고 claim_* 만 기록 */
+export const LOCKED_STATUSES = new Set<string>(["구매진행중"]);
+/** 운송장이 입력돼도 배송완료로 자동 전환하지 않는 클레임 상태 (송장 전송 대상에서도 제외) */
+export const CLAIM_STATUSES = new Set<string>(["취소요청", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료"]);
+
 // 상품 등록 상태
 export const REGISTRATION_STATUSES = ["등록전", "등록완료", "판매중지"] as const;
 export type RegistrationStatus = typeof REGISTRATION_STATUSES[number];

@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     for (const platform of platforms) {
       const cred = (creds ?? []).find((c) => c.platform === platform);
       if (!cred) {
-        results.push({ platform, dryRun: false, remoteCount: 0, newOrders: [], skippedExisting: 0, confirmed: 0, confirmFailed: 0, confirmErrors: [], claims: [], claimCounts: {}, errors: [`${platform} API 계정이 등록되지 않음`], runId: null });
+        results.push({ platform, dryRun: false, remoteCount: 0, newOrders: [], skippedExisting: 0, confirmed: 0, confirmFailed: 0, confirmErrors: [], claims: [], claimCounts: {}, autoApproved: [], errors: [`${platform} API 계정이 등록되지 않음`], runId: null });
         continue;
       }
       const clients = platform === "coupang"

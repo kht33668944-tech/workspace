@@ -31,6 +31,18 @@ const ACTION_LABEL: Record<string, string> = {
   confirm: "발주확인",
   claim: "클레임반영",
   "approve-cancel": "취소승인",
+  "reject-cancel": "취소거절(발송)",
+  "auto-approve-cancel": "취소 자동승인",
+  ship: "송장전송",
+  "ship-fix": "송장수정",
+  "return-approve": "반품승인",
+  "return-receive": "반품입고확인",
+  "return-complete": "반품완료(환불)",
+  "return-reject": "반품거절",
+  "exchange-collect": "교환수거확인",
+  "exchange-ship": "교환재배송",
+  "exchange-reject": "교환거절",
+  settlement: "정산반영",
 };
 
 function fmt(iso: string) {
