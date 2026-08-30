@@ -1795,6 +1795,13 @@ function OrdersPageInner() {
           onClearSelection={handleClearSelection}
         />
       )}
+      {showMarketplaceCancel && (
+        <MarketplaceCancelModal
+          selectedOrders={allOrders.filter((o) => selectedIds.has(o.id)).map((o) => ({ id: o.id, marketplace: o.marketplace }))}
+          onClose={() => setShowMarketplaceCancel(false)}
+          onDone={() => refetch()}
+        />
+      )}
       {showPurchaseCancelModal && (
         <PurchaseCancelModal
           count={selectedIds.size}

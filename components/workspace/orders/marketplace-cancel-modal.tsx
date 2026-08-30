@@ -37,6 +37,8 @@ interface ResultRow {
 }
 
 interface Props {
+  /** 주문 페이지에서 체크한 주문 (없으면 취소준비 전건) */
+  selectedOrders?: Array<{ id: string; marketplace: string | null }>;
   onClose: () => void;
   onDone: () => void;
 }
@@ -49,9 +51,11 @@ const STATUS_LABEL: Record<string, string> = {
   DELIVERING: "배송중",
 };
 
-export default function MarketplaceCancelModal({ onClose, onDone }: Props) {
+export default function MarketplaceCancelModal({ selectedOrders = [], onClose, onDone }: Props) {
   const { session } = useAuth();
-  const [platform, setPlatform] = useState<Platform>("coupang");
+  const selectedIds = useMemo(() => selectedOrders.map((o) => o.id), [selectedOrders]);
+  const initialPlatform: Platform = selectedOrders.some((o) => (o.marketplace ?? "").includes("스마트스토어")) && !selectedOrders.some((o) => (o.marketplace ?? "").includes("쿠팡")) ? "smartstore" : "coupang";
+  const [platform, setPlatform] = useState<Platform>(initialPlatform);
   const [credentials, setCredentials] = useState<MarketplaceApiCredential[]>([]);
   const [credentialId, setCredentialId] = useState("");
   const [wingUserId, setWingUserId] = useState("");
@@ -109,7 +113,7 @@ export default function MarketplaceCancelModal({ onClose, onDone }: Props) {
       const res = await fetch("/api/marketplace-api/orders/cancel/preview", {
         method: "POST",
         headers: headers(),
-        body: JSON.stringify({ platform, credentialId }),
+        body: JSON.stringify({ platform, credentialId, orderIds: selectedIds.length > 0 ? selectedIds : undefined }),
       });
       const data = (await res.json()) as { matched?: Match[]; skipped?: Skip[]; remoteCount?: number; dryRun?: boolean; error?: string };
       if (!res.ok) return setError(data.error ?? "미리보기 실패");
@@ -178,7 +182,7 @@ export default function MarketplaceCancelModal({ onClose, onDone }: Props) {
               마켓 주문 취소 (API)
               {dryRun && <span className="px-2 py-0.5 text-xs rounded bg-amber-500/20 text-amber-400 flex items-center gap-1"><FlaskConical className="w-3 h-3" />DRY RUN</span>}
             </h2>
-            <p className="text-xs text-[var(--text-muted)] mt-1">발주서의 &quot;취소준비&quot; 건을 마켓 주문과 대조한 뒤, 확인한 건만 판매자 취소합니다. 성공 건은 취소완료로 바뀝니다.</p>
+            <p className="text-xs text-[var(--text-muted)] mt-1">{selectedIds.length > 0 ? `체크한 주문 ${selectedIds.length}건` : "발주서의 취소준비 전건"}을 마켓 주문과 대조한 뒤, 확인한 건만 판매자 취소합니다. 대상은 배송상태가 &quot;취소준비&quot;인 주문만이며, 성공 건은 취소완료로 바뀝니다.</p>
           </div>
           <button onClick={onClose} disabled={applying} className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg disabled:opacity-50">
             <X className="w-5 h-5" />
@@ -289,7 +293,7 @@ export default function MarketplaceCancelModal({ onClose, onDone }: Props) {
           )}
 
           {remoteCount === 0 && matched.length === 0 && skipped.length === 0 && !previewing && (
-            <p className="text-sm text-[var(--text-muted)]">&quot;취소준비&quot; 상태의 {PLATFORM_LABEL[platform]} 주문이 없습니다.</p>
+            <p className="text-sm text-[var(--text-muted)]">대상 주문이 없습니다. (배송상태가 &quot;취소준비&quot;인 {PLATFORM_LABEL[platform]} 주문만 대상)</p>
           )}
         </div>
       </div>

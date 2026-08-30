@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     if (!userData.user) return NextResponse.json({ error: "인증 실패" }, { status: 401 });
     const userId = userData.user.id;
 
-    const orders = await fetchCancelReadyOrders(supabase, userId, body.platform);
+    const { orders } = await fetchCancelReadyOrders(supabase, userId, body.platform, [...orderIds]);
     const coupang = body.platform === "coupang" ? await getCoupangClientFromCredential(supabase, body.credentialId) : null;
     const naver = body.platform === "smartstore" ? await getNaverClientFromCredential(supabase, body.credentialId) : null;
     const remote = coupang ? await collectCoupangOrders(coupang.client) : await collectSmartstoreOrders(naver!.client);

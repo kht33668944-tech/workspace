@@ -81,18 +81,42 @@ function ymd(d: Date) {
 
 // ───────── 1. 발주서 추출 ─────────
 
-export async function fetchCancelReadyOrders(supabase: SupabaseClient, userId: string, platform: CancelPlatform) {
+/**
+ * 취소 대상 발주서 추출.
+ * - orderIds 가 주어지면 그 주문만 대상으로 하고, 취소준비가 아니거나 판매처가 다른 건은 notReady 로 돌려준다.
+ * - orderIds 가 없으면 해당 판매처의 취소준비 전건.
+ */
+export async function fetchCancelReadyOrders(
+  supabase: SupabaseClient,
+  userId: string,
+  platform: CancelPlatform,
+  orderIds?: string[],
+): Promise<{ orders: CancelOrderRow[]; notReady: CancelSkip[] }> {
   const label = platform === "coupang" ? "쿠팡" : "스마트스토어";
-  const { data, error } = await supabase
-    .from("orders")
-    .select("id,bundle_no,order_date,marketplace,recipient_name,marketplace_orderer_name,product_name,quantity,marketplace_order_no,marketplace_product_order_no")
-    .eq("user_id", userId)
-    .eq("delivery_status", "취소준비")
-    .ilike("marketplace", `%${label}%`)
-    .order("order_date", { ascending: false })
-    .limit(500);
+  const cols =
+    "id,bundle_no,order_date,marketplace,recipient_name,marketplace_orderer_name,product_name,quantity,marketplace_order_no,marketplace_product_order_no,delivery_status";
+  let query = supabase.from("orders").select(cols).eq("user_id", userId).order("order_date", { ascending: false }).limit(500);
+  query =
+    orderIds && orderIds.length > 0
+      ? query.in("id", orderIds.slice(0, 500))
+      : query.eq("delivery_status", "취소준비").ilike("marketplace", `%${label}%`);
+  const { data, error } = await query;
   if (error) throw new Error(`발주서 조회 실패: ${error.message}`);
-  return (data ?? []) as CancelOrderRow[];
+
+  const rows = (data ?? []) as (CancelOrderRow & { delivery_status: string })[];
+  const orders: CancelOrderRow[] = [];
+  const notReady: CancelSkip[] = [];
+  for (const row of rows) {
+    const { delivery_status, ...order } = row;
+    if (!(order.marketplace ?? "").includes(label)) {
+      notReady.push({ order, reason: `판매처가 ${label} 아님 (${order.marketplace ?? "-"})` });
+    } else if (delivery_status !== "취소준비") {
+      notReady.push({ order, reason: `취소준비 상태가 아님 (현재: ${delivery_status}) — 먼저 배송상태를 취소준비로 바꾸세요` });
+    } else {
+      orders.push(order);
+    }
+  }
+  return { orders, notReady };
 }
 
 // ───────── 2. 마켓 주문 수집 ─────────
