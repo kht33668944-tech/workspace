@@ -14,6 +14,7 @@ import { NaverCommerceApiClient } from "@/lib/naver-commerce-api";
 import { syncOrders, type SyncPlatform, type SyncResult } from "@/lib/marketplace/order-sync";
 import { notifySyncResults } from "@/lib/marketplace/order-sync-notify";
 import { syncSettlements } from "@/lib/marketplace/settlement-sync";
+import { sendDailySummary } from "@/lib/marketplace/daily-summary";
 
 const argv = process.argv.slice(2);
 const opt = (name: string, def: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : def; };
@@ -76,6 +77,22 @@ if (!argv.includes("--skip-settlement") && !process.env.MARKETPLACE_API_DRY_RUN)
         log(`${platform} 정산: ${s.from}~${s.to} rows=${s.remoteRows} matched=${s.matched} updated=${s.updated} unmatched=${s.unmatched} errors=${s.errors.length}`);
         for (const e of s.errors.slice(0, 3)) log(`  x ${e}`);
       } catch (err) { log(`${platform} 정산 예외: ${err instanceof Error ? err.message : String(err)}`); }
+    }
+  }
+}
+// 하루 요약 — KST 21시 이후 그날 첫 실행에서 1회 (#주문수집-자동화)
+if (!argv.includes("--skip-summary") && !process.env.MARKETPLACE_API_DRY_RUN) {
+  const kstNow = new Date(Date.now() + 9 * 3600000);
+  const todayKst = kstNow.toISOString().slice(0, 10);
+  if (kstNow.getUTCHours() >= 21) {
+    const { data: last } = await sb.from("marketplace_sync_runs").select("started_at").eq("user_id", userId).eq("kind", "daily-summary").order("started_at", { ascending: false }).limit(1).maybeSingle();
+    const lastKst = last?.started_at ? new Date(new Date(last.started_at).getTime() + 9 * 3600000).toISOString().slice(0, 10) : null;
+    if (lastKst !== todayKst) {
+      try {
+        const s = await sendDailySummary(sb, userId);
+        await sb.from("marketplace_sync_runs").insert({ user_id: userId, platform: "all", kind: "daily-summary", trigger: "scheduler", status: "success", finished_at: new Date().toISOString(), detail: s.total });
+        log(`하루 요약 발송: 주문 ${s.total.count}건 순수익 ${Math.round(s.total.settlement - s.total.cost)}`);
+      } catch (err) { log(`하루 요약 실패: ${err instanceof Error ? err.message : String(err)}`); }
     }
   }
 }
