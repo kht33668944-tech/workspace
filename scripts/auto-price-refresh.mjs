@@ -290,7 +290,7 @@ async function applyChanges(token, results) {
   const changed = results.filter((r) => r.price !== r.previous);
   if (changed.length === 0) return 0;
   let applied = 0;
-  const BATCH = 500;
+  const BATCH = 100;
   for (let i = 0; i < changed.length; i += BATCH) {
     const batch = changed.slice(i, i + BATCH);
     const res = await fetch(`${BASE}/api/products/apply-price-updates`, {
@@ -305,7 +305,7 @@ async function applyChanges(token, results) {
     if (!res.ok) throw new Error(`가격 적용 실패: ${json.error ?? res.status}`);
     applied += json.applied ?? 0;
   }
-  log(`가격 적용 완료: ${applied}건`);
+  log(`가격 적용 완료: ${applied}건${applied < changed.length ? ` (변동 ${changed.length}건 중 미적용 ${changed.length - applied}건!)` : ""}`);
   return applied;
 }
 
