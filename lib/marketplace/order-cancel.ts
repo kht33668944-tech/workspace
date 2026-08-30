@@ -11,6 +11,7 @@ import type { CoupangOpenApiClient, CoupangOrderSheet, CoupangReturnRequest } fr
 import type { NaverCommerceApiClient, NaverProductOrderDetail } from "@/lib/naver-commerce-api";
 import { toKstIso } from "@/lib/naver-commerce-api";
 import { isDryRun, logMarketplaceApi, normalizeNameKey, normalizeProductKey, sleep } from "@/lib/marketplace/common";
+import { toKstDateKey } from "@/lib/date-utils";
 
 export type CancelPlatform = "coupang" | "smartstore";
 
@@ -75,10 +76,7 @@ const CANCELLABLE = {
   smartstore: new Set(["PAYED", "DELIVERING"]),
 };
 
-/** 쿠팡 날짜 파라미터는 KST 달력 날짜 — UTC 로 자르면 KST 00~09시에 당일 주문이 조회에서 빠진다 */
-function ymd(d: Date) {
-  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-}
+const ymd = toKstDateKey; // 쿠팡 날짜 파라미터는 KST 달력 날짜
 
 // ───────── 1. 발주서 추출 ─────────
 

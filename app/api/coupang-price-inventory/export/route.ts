@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { toKstDateKey } from "@/lib/date-utils";
 import { calcSettlementPrice, calcPlatformPrice, buildRateMap } from "@/lib/product-calculations";
 import { COL, DATA_START_ROW_INDEX } from "@/lib/coupang-price-inventory";
 import type { Product, CommissionRate, CoupangPriceInventory } from "@/types/database";
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
     // 7. base64 출력
     const buf = await wb.xlsx.writeBuffer();
     const out = Buffer.from(buf).toString("base64");
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const today = toKstDateKey().replace(/-/g, "");
     const filename = `쿠팡_가격수정_v2_${today}.xlsx`;
 
     console.log(`[coupang-price-inventory/export] 완료(exceljs): ${rowsWithPrice.length}행, skipped ${skippedProductIds.length}개 상품`);

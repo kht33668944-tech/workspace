@@ -9,14 +9,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CoupangOpenApiClient } from "@/lib/coupang-api";
 import type { NaverCommerceApiClient, NaverSettleCase } from "@/lib/naver-commerce-api";
 import { logMarketplaceApi, sleep } from "@/lib/marketplace/common";
+import { toKstDateKey } from "@/lib/date-utils";
 import type { SyncPlatform } from "@/lib/marketplace/order-sync";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = SupabaseClient<any, any, any>;
 
 const MARKET_LABEL: Record<SyncPlatform, string> = { coupang: "쿠팡", smartstore: "스마트스토어" };
-// KST 달력 날짜 — 정산·매출 조회 날짜는 마켓(KST) 기준. UTC 로 자르면 KST 00~09시에 하루 밀린다
-const ymd = (d: Date) => new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+const ymd = toKstDateKey; // 정산·매출 조회 날짜는 마켓(KST) 기준
 
 export interface SettlementResult {
   platform: SyncPlatform;

@@ -12,17 +12,12 @@
 //   node scripts/coupang-cancel.mjs                  # 매칭된 전건 접수
 import { chromium } from "playwright";
 import fs from "fs";
+import { wingDateRange } from "./_date.mjs";
 
 const OUT = "./.cancel-shots";
 fs.mkdirSync(OUT, { recursive: true });
 
-// 조회 기간: 오늘 기준 최근 30일 (31일 이상은 쿠팡윙이 빈 결과를 준다)
-function dateRange(days = 30) {
-  const d = (t) => new Date(t + 9 * 3600000).toISOString().slice(0, 10); // KST 날짜 (UTC면 오전 9시 전 실행 시 오늘 건이 조회에서 빠짐)
-  const now = Date.now();
-  return { from: d(now - days * 86400000), to: d(now) };
-}
-const { from, to } = dateRange();
+const { from, to } = wingDateRange();
 const LIST_URL = `https://wing.coupang.com/tenants/sfl-portal/delivery/management?deliverStatus=INSTRUCT&startDate=${from}&endDate=${to}`;
 
 // 반품접수 창 고정 입력값

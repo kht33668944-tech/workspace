@@ -42,3 +42,12 @@ export function getKoreanMonthKey(value: string | Date | null | undefined): stri
   const dateKey = getKoreanDateKey(value);
   return dateKey ? dateKey.slice(0, 7) : null;
 }
+
+/**
+ * KST 달력 날짜 YYYY-MM-DD — 마켓 API 날짜 파라미터·파일명용.
+ * UTC 로 자르면(toISOString().slice(0,10)) KST 00~09시에 당일이 어제로 계산돼
+ * 새벽 주문이 조회에서 빠지고 새벽 생성 파일이 어제 날짜로 간다.
+ */
+export function toKstDateKey(value: Date | number = Date.now()): string {
+  return getKoreanDateKey(value instanceof Date ? value : new Date(value)) ?? "";
+}

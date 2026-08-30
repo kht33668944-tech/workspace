@@ -7,10 +7,11 @@
 //  방향 규칙: 마켓→발주서 는 클레임·배송 상태만, 발주서→마켓 은 발주확인·취소승인·판매자취소만.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CoupangExchangeRequest, CoupangOpenApiClient, CoupangOrderSheet, CoupangReturnRequest } from "@/lib/coupang-api";
+import type { CoupangExchangeRequest, CoupangOpenApiClient, CoupangOrderSheet, CoupangOrderStatus, CoupangReturnRequest } from "@/lib/coupang-api";
 import type { NaverCommerceApiClient, NaverProductOrderDetail } from "@/lib/naver-commerce-api";
 import { toKstIso } from "@/lib/naver-commerce-api";
 import { getSettlementRate, splitAddress } from "@/lib/excel-parser";
+import { toKstDateKey } from "@/lib/date-utils";
 import { sanitizeAddressDetail } from "@/lib/scrapers/types";
 import { isDryRun, logMarketplaceApi, normalizeNameKey, normalizeProductKey, sleep } from "@/lib/marketplace/common";
 import { LOCKED_STATUSES, TERMINAL_STATUSES } from "@/lib/constants";
@@ -75,22 +76,23 @@ export interface SyncOptions {
   smartstore?: NaverCommerceApiClient;
 }
 
-/** 쿠팡·네이버 날짜 파라미터는 KST 달력 날짜 — UTC 로 자르면 KST 00~09시에 당일이 어제로 계산돼 새벽 주문이 조회에서 빠진다 */
-function ymd(d: Date) {
-  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-}
+const ymd = toKstDateKey; // 쿠팡·네이버 날짜 파라미터는 KST 달력 날짜
 /** 쿠팡 시각은 tz 없는 KST 문자열 → +09:00 부여 */
 function kst(s: string | undefined | null) {
   if (!s) return null;
   return /[+Z]/.test(s.slice(10)) ? s : `${s}+09:00`;
 }
 function dateKeyKst(iso: string | null) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  return iso ? toKstDateKey(new Date(iso)) : "";
 }
 
 // ───────────────────────── 매핑 ─────────────────────────
+
+/** 취소되지 않은 유효 주문 아이템 판정 — 발주서 등록·대조 스크립트가 같은 기준을 공유한다 */
+export function isActiveCoupangItem(it: { shippingCount?: number | null; canceled?: boolean; cancelCount?: number | null }): boolean {
+  const qty = it.shippingCount ?? 0;
+  return qty > 0 && !it.canceled && (it.cancelCount ?? 0) < qty;
+}
 
 export function mapCoupangOrderSheet(sheet: CoupangOrderSheet, userId: string): OrderInsert[] {
   const now = new Date().toISOString();
@@ -99,7 +101,7 @@ export function mapCoupangOrderSheet(sheet: CoupangOrderSheet, userId: string): 
   const out: OrderInsert[] = [];
   for (const it of sheet.orderItems ?? []) {
     const qty = it.shippingCount ?? 0;
-    if (qty <= 0 || it.canceled || (it.cancelCount ?? 0) >= qty) continue;
+    if (!isActiveCoupangItem(it)) continue;
     const revenue = Math.max(0, Math.round((it.orderPrice ?? (it.salesPrice ?? 0) * qty) - 0));
     out.push({
       user_id: userId,
@@ -191,11 +193,11 @@ export function mapNaverProductOrder(d: NaverProductOrderDetail, userId: string)
 
 // ───────────────────────── 원격 조회 ─────────────────────────
 
-async function fetchCoupangSheets(client: CoupangOpenApiClient, days: number) {
+export async function fetchCoupangSheets(client: CoupangOpenApiClient, days: number, statuses: CoupangOrderStatus[] = ["ACCEPT", "INSTRUCT"]) {
   const to = new Date();
   const from = new Date(to.getTime() - days * 86400000);
   const sheets: CoupangOrderSheet[] = [];
-  for (const status of ["ACCEPT", "INSTRUCT"] as const) {
+  for (const status of statuses) {
     sheets.push(...(await client.listAllOrderSheets({ createdAtFrom: ymd(from), createdAtTo: ymd(to), status })));
     await sleep(300);
   }
@@ -203,7 +205,7 @@ async function fetchCoupangSheets(client: CoupangOpenApiClient, days: number) {
 }
 
 /** 네이버 결제일시 기준 상품주문 상세 (24h 구간 순회, 페이지 300) — 오래된 주문도 조회 가능 */
-async function searchNaverOrdersByPaidDate(client: NaverCommerceApiClient, days: number, errors: string[]) {
+export async function searchNaverOrdersByPaidDate(client: NaverCommerceApiClient, days: number, errors: string[]) {
   const out: NaverProductOrderDetail[] = [];
   const now = Date.now();
   for (let d = days - 1; d >= 0; d--) {
@@ -216,8 +218,8 @@ async function searchNaverOrdersByPaidDate(client: NaverCommerceApiClient, days:
       const list = Array.isArray(data) ? data : (data?.contents ?? []).map((c) => c.content).filter((c) => !!c?.productOrder);
       out.push(...list);
       const totalPages = Array.isArray(data) ? 1 : (data?.pagination?.totalPages ?? 1);
-      await sleep(600);
       if (page >= totalPages || list.length === 0) break;
+      await sleep(600);
     }
   }
   return out;
@@ -296,7 +298,7 @@ async function loadExistingOrders(supabase: SupabaseClient, userId: string, plat
 }
 
 /** 플레이오토 엑셀로 들어온 행(마켓 번호 없음)과의 중복 방지 키: 결제일(KST) + 수취인 + 상품명 */
-function fuzzyKey(orderDate: string | null, recipient: string | null, product: string | null) {
+export function fuzzyKey(orderDate: string | null, recipient: string | null, product: string | null) {
   return `${dateKeyKst(orderDate)}|${normalizeNameKey(recipient)}|${normalizeProductKey(product ?? "")}`;
 }
 

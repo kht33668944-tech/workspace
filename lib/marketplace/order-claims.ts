@@ -12,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CoupangOpenApiClient } from "@/lib/coupang-api";
 import type { NaverCommerceApiClient } from "@/lib/naver-commerce-api";
 import { isDryRun, logMarketplaceApi, sleep } from "@/lib/marketplace/common";
+import { toKstDateKey } from "@/lib/date-utils";
 import { getMarketplaceCourierCode } from "@/lib/marketplace/courier-codes";
 import { findCoupangReceipt } from "@/lib/marketplace/order-cancel";
 import type { SyncPlatform } from "@/lib/marketplace/order-sync";
@@ -105,7 +106,7 @@ async function resolveCoupangReceiptId(client: CoupangOpenApiClient, o: Row, isR
   if (!hit) throw new Error("교환 접수 내역을 찾지 못함 (주문 수집을 먼저 실행)");
   return hit.exchangeId;
 }
-const to2 = (d: Date) => d.toISOString().slice(0, 10);
+const to2 = toKstDateKey; // 쿠팡 날짜 파라미터는 KST 달력 날짜 (조회 구간에 ±1일 여유 있음)
 
 export async function runClaimAction(input: ClaimActionInput): Promise<ClaimActionRow[]> {
   const { supabase, userId, platform, action } = input;

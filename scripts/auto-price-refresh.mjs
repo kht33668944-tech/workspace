@@ -24,6 +24,7 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { kstYmd } from "./_date.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOG_DIR = path.join(ROOT, "scripts", "logs");
@@ -42,7 +43,7 @@ const MAX_RETRY = 10;
 
 // ---------- 로그 ----------
 mkdirSync(LOG_DIR, { recursive: true });
-const logFile = path.join(LOG_DIR, `auto-price-${new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)}.log`); // KST 날짜 (UTC면 새벽 실행분이 어제 로그로 감)
+const logFile = path.join(LOG_DIR, `auto-price-${kstYmd()}.log`);
 function log(msg) {
   const line = `[${new Date().toLocaleTimeString("ko-KR", { hour12: false })}] [auto-price:${LABEL}] ${msg}`;
   console.log(line);
@@ -412,7 +413,7 @@ async function exportPriceExcel(token, changedIds, soldOutIds) {
   if (ids.length === 0) return [];
 
   const now = new Date();
-  const dateDir = new Date(now.getTime() + 9 * 3600000).toISOString().slice(0, 10); // KST 날짜 폴더
+  const dateDir = kstYmd(now.getTime());
   const timeTag = `${String(now.getHours()).padStart(2, "0")}시${String(now.getMinutes()).padStart(2, "0")}분`;
   const outDir = path.join(env.AUTO_EXPORT_DIR ?? path.join(homedir(), "Desktop", "가격수정엑셀"), dateDir);
   mkdirSync(outDir, { recursive: true });
