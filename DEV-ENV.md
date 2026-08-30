@@ -42,3 +42,8 @@
 ## 디스코드 채널별 알림 (2026-08-31)
 `.env.local`에 채널별 웹훅을 넣으면 알림 종류별로 분리 전송(없으면 `DISCORD_WEBHOOK_URL`로 통합):
 `DISCORD_WEBHOOK_ORDERS`(주문 수집·취소요청·정산) · `DISCORD_WEBHOOK_TRACKING`(운송장 수집·송장 전송·ESM 엑셀) · `DISCORD_WEBHOOK_PURCHASE`(자동구매) · `DISCORD_WEBHOOK_PRICE`(가격/재고 수집) · `DISCORD_WEBHOOK_AI`(AI 상세페이지). 채널은 `notifyAutomationResult({channel})` 또는 제목으로 추론(`inferDiscordChannel`).
+
+## 최저가 자동 갱신 (2026-08-31)
+- `OnliveAutoPrice` 4시간마다(:15): `powershell -ExecutionPolicy Bypass -File scripts\register-auto-price-task.ps1` (`-Remove` 해제). 매 실행마다 당일 전일대비 이력 초기화(`--reset`) 후 전체 상품 최저가 수집·변동가 적용·품절/재입고 마진 복원·엑셀(`바탕화면\가격수정엑셀`)·디스코드(`#가격재고-자동화`)
+- 대상 서버는 `.env.local` `AUTO_BASE_URL`(현재 3001 개발 서버). 로그 `logs/auto-price-task.log`, `scripts/logs/auto-price-YYYY-MM-DD.log`
+- 수동: `node scripts/auto-price-refresh.mjs --label 테스트 --reset --limit 3`
