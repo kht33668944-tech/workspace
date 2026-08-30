@@ -33,10 +33,11 @@ const remote =
 console.log(`[test] 마켓 주문 ${remote.length}건 수집 (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 for (const r of remote.slice(0, 3)) console.log("   remote:", r.status, r.recipientName, "|", r.productName.slice(0, 40), "x", r.quantity);
 
+const statusById = new Map(orders.map((o) => [o.id, o.delivery_status]));
 const preview = matchOrders(platform, orders, remote);
 console.log(`[test] 매칭 ${preview.matched.length} / 제외 ${preview.skipped.length}`);
-for (const m of preview.matched.slice(0, 5)) console.log("  ✔", m.order.delivery_status, m.order.recipient_name, "|", m.order.product_name?.slice(0, 30), "→", m.remote.status, m.remote.orderId);
+for (const m of preview.matched.slice(0, 5)) console.log("  ✔", statusById.get(m.order.id), m.order.recipient_name, "|", m.order.product_name?.slice(0, 30), "→", m.remote.status, m.remote.orderId);
 const reasons = new Map<string, number>();
 for (const s of preview.skipped) reasons.set(s.reason.replace(/\(.*\)/, ""), (reasons.get(s.reason.replace(/\(.*\)/, "")) ?? 0) + 1);
 console.log("  제외 사유:", Object.fromEntries(reasons));
-for (const s of preview.skipped.slice(0, 4)) console.log("  ✖", s.order.delivery_status, s.order.recipient_name, "|", s.order.product_name?.slice(0, 30), "|", s.reason);
+for (const s of preview.skipped.slice(0, 4)) console.log("  ✖", statusById.get(s.order.id), s.order.recipient_name, "|", s.order.product_name?.slice(0, 30), "|", s.reason);
