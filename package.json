@@ -13,7 +13,8 @@
     "deploy:list": "railway deployment list",
     "deploy:check": "railway service status && railway status",
     "coupang:cancel": "node scripts/coupang-cancel-run.mjs",
-    "esm:cancel": "node scripts/esm-cancel-run.mjs"
+    "esm:cancel": "node scripts/esm-cancel-run.mjs",
+    "ss:cancel": "node scripts/ss-cancel-run.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
