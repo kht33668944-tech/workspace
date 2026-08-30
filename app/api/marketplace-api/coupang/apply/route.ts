@@ -61,8 +61,8 @@ export async function POST(request: NextRequest) {
         apiResult = { ok: false, status: 400, body: null, message: "지원하지 않는 작업입니다." };
       }
 
-      const status = apiResult.ok ? "success" : "failed";
-      const message = apiResult.ok ? "반영 완료" : apiResult.message;
+      const status = apiResult.dryRun ? "dry" : apiResult.ok ? "success" : "failed";
+      const message = apiResult.dryRun ? "DRY RUN (실제 전송 안 함)" : apiResult.ok ? "반영 완료" : apiResult.message;
       results.push({
         productId: item.productId,
         productName: item.productName,
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
         newValue: item.newValue,
       });
 
-      if (apiResult.ok) {
+      if (apiResult.ok && !apiResult.dryRun) {
         const updateData: Record<string, unknown> = {};
         if (body.action === "price") updateData.sale_price = newNumber;
         if (body.action === "stock") updateData.stock = newNumber;
@@ -92,11 +92,12 @@ export async function POST(request: NextRequest) {
         user_id: userData.user.id,
         platform: "coupang",
         credential_id: body.credentialId,
-        action: body.action,
-        status,
+        action: dry ? `${body.action}:dry` : body.action,
+        status: apiResult.ok ? "success" : "failed",
         product_id: item.productId,
         product_name: item.productName,
         vendor_item_id: item.vendorItemId,
+        target_id: item.vendorItemId,
         previous_value: item.previousValue,
         new_value: item.newValue,
         error_message: apiResult.ok ? null : message,
@@ -109,6 +110,7 @@ export async function POST(request: NextRequest) {
     const successCount = results.filter((r) => r.status === "success" || r.status === "dry").length;
     const failCount = results.length - successCount;
     return NextResponse.json({
+      dryRun: dry,
       successCount,
       failCount,
       blocked: preview.blocked,
