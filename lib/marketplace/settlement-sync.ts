@@ -134,8 +134,9 @@ export async function syncSettlements(opts: SettlementOptions): Promise<Settleme
 async function collectCoupang(client: CoupangOpenApiClient, from: Date, toIn: Date, amounts: Map<string, { amount: number; date: string | null }>, result: SettlementResult) {
   // 쿠팡은 종료일이 어제 이하여야 한다. 31일 단위로 나눠 조회
   const to = new Date(Math.min(toIn.getTime(), Date.now() - 86400000));
-  for (let start = new Date(from); start < to; start = new Date(start.getTime() + 31 * 86400000)) {
-    const end = new Date(Math.min(start.getTime() + 30 * 86400000, to.getTime()));
+  // 쿠팡: "1개월 미만" 만 허용 → 28일 단위
+  for (let start = new Date(from); start < to; start = new Date(start.getTime() + 28 * 86400000)) {
+    const end = new Date(Math.min(start.getTime() + 27 * 86400000, to.getTime()));
     let token: string | undefined;
     for (let page = 0; page < 400; page++) {
       const res = await client.listRevenueHistory({ recognitionDateFrom: ymd(start), recognitionDateTo: ymd(end), token, maxPerPage: 50 });

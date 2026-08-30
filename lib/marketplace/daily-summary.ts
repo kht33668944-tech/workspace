@@ -98,6 +98,6 @@ export async function buildDailySummary(supabase: AnySupabase, userId: string, d
 
 export async function sendDailySummary(supabase: AnySupabase, userId: string, date = new Date()) {
   const s = await buildDailySummary(supabase, userId, date);
-  await notifyAutomationResult({ channel: "orders", title: s.title, status: s.failed ? "partial" : "success", summary: s.summary });
+  await notifyAutomationResult({ channel: "orders", title: s.title, status: "success", summary: s.summary }); // 요약은 항상 초록 — 오류는 본문 숫자로
   return s;
 }

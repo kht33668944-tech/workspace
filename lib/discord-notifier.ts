@@ -67,7 +67,7 @@ export async function notifyAutomationResult(input: AutomationNotifyInput): Prom
   if (!webhookUrl) return;
 
   const embed = {
-    title: trimForDiscord(`${input.title} ${STATUS_LABEL[input.status]}`, 256),
+    title: trimForDiscord(/[✅⚠️❌📊]/u.test(input.title) ? input.title : `${input.title} ${STATUS_LABEL[input.status]}`, 256),
     description: trimForDiscord(input.summary, 4096),
     color: STATUS_COLOR[input.status],
     fields: input.fields?.slice(0, 10).map((field) => ({
