@@ -82,6 +82,11 @@ function buildQuery(params?: Record<string, string | number | boolean | undefine
 }
 
 const ORDER_API = "/v2/providers/openapi/apis/api";
+
+/** yyyy-MM-dd → yyyy-MM-ddTHH:mm (이미 시각이 있으면 그대로) */
+function toMinuteFormat(date: string, time: string) {
+  return date.includes("T") ? date : `${date}T${time}`;
+}
 const ITEM_API = "/v2/providers/seller_api/apis/api/v1/marketplace";
 
 export class CoupangOpenApiClient {
@@ -243,7 +248,7 @@ export class CoupangOpenApiClient {
     );
   }
 
-  /** 출고중지요청(RU) 목록 — 취소 접수건 */
+  /** 출고중지요청(RU) 목록 — 취소 접수건. timeFrame 검색은 yyyy-MM-ddTHH:mm 형식 필수 */
   listReturnRequests(params: {
     createdAtFrom: string; // yyyy-MM-dd
     createdAtTo: string;
@@ -257,8 +262,8 @@ export class CoupangOpenApiClient {
       `${ORDER_API}/v6/vendors/${this.vendorId}/returnRequests`,
       {
         searchType: "timeFrame",
-        createdAtFrom: params.createdAtFrom,
-        createdAtTo: params.createdAtTo,
+        createdAtFrom: toMinuteFormat(params.createdAtFrom, "00:00"),
+        createdAtTo: toMinuteFormat(params.createdAtTo, "23:59"),
         status: params.status,
         cancelType: params.cancelType,
         nextToken: params.nextToken || undefined,

@@ -7,7 +7,7 @@
 //  5. 성공 건만 orders 를 취소완료로 갱신 + 마켓 주문번호 저장 + 로그
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CoupangOpenApiClient, CoupangOrderSheet } from "@/lib/coupang-api";
+import type { CoupangOpenApiClient, CoupangOrderSheet, CoupangReturnRequest } from "@/lib/coupang-api";
 import type { NaverCommerceApiClient, NaverProductOrderDetail } from "@/lib/naver-commerce-api";
 import { toKstIso } from "@/lib/naver-commerce-api";
 import { isDryRun, normalizeNameKey, normalizeProductKey, sleep } from "@/lib/marketplace/common";
@@ -296,17 +296,29 @@ export async function executeCancels(opts: ExecuteOptions): Promise<CancelResult
         message = res.dryRun ? "DRY RUN" : res.ok ? "취소 접수" : res.message;
         payload = res.body;
 
-        // 상품준비중 건은 출고중지요청이 생성되므로 receiptId 를 찾아 출고중지완료까지 처리
-        if (ok && !res.dryRun && remote.status === "INSTRUCT") {
-          await sleep(1500);
-          const receiptId = await findCoupangReceiptId(opts.coupang.client, remote.orderId);
-          if (receiptId) {
-            const stop = await opts.coupang.client.stopShipment(receiptId, remote.quantity);
-            message = stop.ok ? "취소 접수 + 출고중지완료" : `취소 접수됨, 출고중지완료 실패: ${stop.message}`;
-            ok = stop.ok;
-          } else {
-            message = "취소 접수됨, 출고중지 접수번호를 찾지 못함 — 윙에서 출고중지완료 필요";
-            ok = false;
+        // 쿠팡은 응답 코드가 실제 결과와 어긋나는 경우가 있다 (400 "출고정지 완료 처리 실패"를 돌려주고도
+        // 내부적으로 취소·출고중지·환불까지 끝내 놓음). 응답을 믿지 말고 접수 목록으로 최종 판정한다.
+        if (!res.dryRun) {
+          await sleep(2000);
+          const receipt = await findCoupangReceipt(opts.coupang.client, remote.orderId);
+          if (receipt) {
+            const released = receipt.returnItems?.some((i) => i.releaseStatus === "N");
+            if (receipt.receiptStatus === "RETURNS_COMPLETED" || receipt.returnItems?.every((i) => i.releaseStatus === "S")) {
+              ok = true;
+              message = "취소 완료 (출고중지·환불 처리됨)";
+            } else if (released) {
+              const stop = await opts.coupang.client.stopShipment(receipt.receiptId, receipt.cancelCountSum || remote.quantity);
+              ok = stop.ok;
+              message = stop.ok ? "취소 접수 + 출고중지완료" : `취소 접수됨, 출고중지완료 실패: ${stop.message} — 윙에서 출고중지완료 필요`;
+            } else {
+              ok = true;
+              message = `취소 접수됨 (${receipt.receiptStatus})`;
+            }
+            payload = { cancelResponse: res.body, receipt };
+          } else if (ok) {
+            message = "취소 접수 (즉시 취소)";
+          } else if (remote.status === "INSTRUCT") {
+            message = `${res.message} — 접수 내역 없음, 윙에서 확인 필요`;
           }
         }
       } else {
@@ -376,11 +388,19 @@ export async function executeCancels(opts: ExecuteOptions): Promise<CancelResult
   return results;
 }
 
-async function findCoupangReceiptId(client: CoupangOpenApiClient, orderId: string): Promise<number | null> {
-  const to = new Date();
-  const from = new Date(to.getTime() - 2 * 86400000);
-  const res = await client.listReturnRequests({ createdAtFrom: ymd(from), createdAtTo: ymd(to), status: "RU", cancelType: "CANCEL" });
-  if (!res.ok || !res.body || typeof res.body === "string") return null;
-  const hit = (res.body.data ?? []).find((r) => String(r.orderId) === orderId);
-  return hit?.receiptId ?? null;
+/**
+ * 주문번호로 취소/출고중지 접수 내역 조회.
+ * 상품준비중 취소는 cancelType=RETURN(반품접수) 으로, 결제완료 취소는 CANCEL 로 잡히므로 둘 다 본다.
+ */
+async function findCoupangReceipt(client: CoupangOpenApiClient, orderId: string): Promise<CoupangReturnRequest | null> {
+  const to = new Date(Date.now() + 86400000); // 시차 여유
+  const from = new Date(Date.now() - 2 * 86400000);
+  for (const cancelType of ["RETURN", "CANCEL"] as const) {
+    const res = await client.listReturnRequests({ createdAtFrom: ymd(from), createdAtTo: ymd(to), cancelType, maxPerPage: 50 });
+    if (!res.ok || !res.body || typeof res.body === "string") continue;
+    const hit = (res.body.data ?? []).find((r) => String(r.orderId) === orderId);
+    if (hit) return hit;
+    await sleep(300);
+  }
+  return null;
 }
