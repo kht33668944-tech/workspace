@@ -75,8 +75,9 @@ const CANCELLABLE = {
   smartstore: new Set(["PAYED", "DELIVERING"]),
 };
 
+/** 쿠팡 날짜 파라미터는 KST 달력 날짜 — UTC 로 자르면 KST 00~09시에 당일 주문이 조회에서 빠진다 */
 function ymd(d: Date) {
-  return d.toISOString().slice(0, 10);
+  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 // ───────── 1. 발주서 추출 ─────────

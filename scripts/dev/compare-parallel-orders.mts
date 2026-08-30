@@ -16,7 +16,7 @@ const env = Object.fromEntries(fs.readFileSync(".env.local", "utf8").split(/\r?\
 for (const k of Object.keys(env)) if (!process.env[k]) process.env[k] = env[k];
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const userId = env.SYNC_USER_ID;
-const ymd = (d: Date) => d.toISOString().slice(0, 10);
+const ymd = (d: Date) => new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 10); // KST 달력 날짜 (쿠팡 조회용)
 const dateKeyKst = (iso: string | null) => iso ? new Date(new Date(iso).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : "";
 const norm = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, "").toLowerCase();
 

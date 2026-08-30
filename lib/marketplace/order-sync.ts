@@ -75,8 +75,9 @@ export interface SyncOptions {
   smartstore?: NaverCommerceApiClient;
 }
 
+/** 쿠팡·네이버 날짜 파라미터는 KST 달력 날짜 — UTC 로 자르면 KST 00~09시에 당일이 어제로 계산돼 새벽 주문이 조회에서 빠진다 */
 function ymd(d: Date) {
-  return d.toISOString().slice(0, 10);
+  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 }
 /** 쿠팡 시각은 tz 없는 KST 문자열 → +09:00 부여 */
 function kst(s: string | undefined | null) {
