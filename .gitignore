@@ -97,3 +97,6 @@ scripts/seller-code-diffs.json
 .cancel-shots/
 scripts/_cancel-*.json
 scripts/_stop-complete-results.json
+scripts/_esm-targets.json
+scripts/_esm-matched.json
+scripts/_esm-results.json
