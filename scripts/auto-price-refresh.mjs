@@ -77,7 +77,7 @@ const BASE = (env.AUTO_BASE_URL ?? "http://localhost:3000").replace(/\/+$/, "");
 if (!SUPA || !ANON || !SERVICE) throw new Error("Supabase 환경변수 누락 (.env.local 확인)");
 
 const SOLDOUT_MARGIN = 35;
-const DEFAULT_MARGIN = 7;
+const DEFAULT_MARGIN = 8;
 
 // ---------- 디스코드 직통 (서버가 죽어 알림 API도 못 쓸 때 최후 수단) ----------
 async function discordDirect(message) {

@@ -51,7 +51,7 @@ type ProductCostRow = {
 
 // 상품소싱 페이지와 동일한 품절 마진 규칙 (margin_rate 35 = 품절 상태로 취급)
 const COST_REFRESH_SOLDOUT_MARGIN = 35;
-const COST_REFRESH_DEFAULT_MARGIN = 7;
+const COST_REFRESH_DEFAULT_MARGIN = 8;
 
 type CostRefreshResult = {
   productId: string;

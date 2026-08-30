@@ -316,10 +316,10 @@ export default function ProductsPage() {
     return () => gmarketImport.registerHandler(null);
   });
 
-  // 품절 sentinel 마진(35%) / 재입고 복원 기본 마진(7%)
+  // 품절 sentinel 마진(35%) / 재입고 복원 기본 마진(8%)
   const SOLDOUT_MARGIN = 35;
-  const DEFAULT_MARGIN = 7;
-  // 최저가 갱신 결과에 따라 품절 상품은 마진 35%, 재입고(정상가 재수집) 상품은 7%로 자동 세팅
+  const DEFAULT_MARGIN = 8;
+  // 최저가 갱신 결과에 따라 품절 상품은 마진 35%, 재입고(정상가 재수집) 상품은 8%로 자동 세팅
   const applySoldOutMargins = (inStockIds: string[], soldOutIds: string[]) => {
     const inStock = new Set(inStockIds);
     const sold = new Set(soldOutIds);
