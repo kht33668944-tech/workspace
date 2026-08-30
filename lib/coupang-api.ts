@@ -179,7 +179,7 @@ export class CoupangOpenApiClient {
 
   // ───────── 주문 ─────────
 
-  /** 발주서 목록 (일 단위, 최대 31일). 페이지는 nextToken 으로 순회. */
+  /** 발주서 목록 (v4, 일 단위 yyyy-MM-dd, 최대 31일). v5는 날짜 형식이 달라(yyyy-MM-dd+0X:00) v4 유지. */
   listOrderSheets(params: {
     createdAtFrom: string; // yyyy-MM-dd
     createdAtTo: string;
@@ -189,7 +189,7 @@ export class CoupangOpenApiClient {
   }) {
     return this.request<CoupangListResponse<CoupangOrderSheet>>(
       "GET",
-      `${ORDER_API}/v5/vendors/${this.vendorId}/ordersheets`,
+      `${ORDER_API}/v4/vendors/${this.vendorId}/ordersheets`,
       {
         createdAtFrom: params.createdAtFrom,
         createdAtTo: params.createdAtTo,

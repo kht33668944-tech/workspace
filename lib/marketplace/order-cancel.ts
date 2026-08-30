@@ -132,9 +132,10 @@ export async function collectSmartstoreOrders(client: NaverCommerceApiClient, da
   const ids = new Set<string>();
   const now = Date.now();
   // last-changed-statuses 는 24시간 구간만 허용 → 하루씩 순회 (2RPS 준수)
-  for (let d = days; d >= 0; d--) {
-    const from = new Date(now - d * 86400000);
-    const to = new Date(Math.min(now, from.getTime() + 86400000 - 1));
+  for (let d = days - 1; d >= 0; d--) {
+    // [now-(d+1)일, now-d일) — 항상 과거 구간이고 from < to 를 보장한다
+    const from = new Date(now - (d + 1) * 86400000);
+    const to = new Date(now - d * 86400000 - 1000);
     let moreSequence: string | undefined;
     for (let page = 0; page < 20; page++) {
       const res = await client.getLastChangedOrders({
