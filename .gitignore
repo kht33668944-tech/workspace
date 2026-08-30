@@ -51,7 +51,8 @@ yarn-error.log*
 .codex/
 .codex-tmp/
 .gjc/
-.claude/
+.claude/*
+!.claude/skills/
 .mcp.json
 .mcp.local.json
 supabase/.temp/
