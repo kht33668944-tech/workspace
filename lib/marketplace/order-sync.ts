@@ -356,6 +356,9 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
       toInsert.push(o);
     }
 
+    // ── 2-b. 상품 소싱 정보 보강 (엑셀 임포트와 동일 규칙: 상품명 일치 시 최저가 링크 + 원가=최저가×수량)
+    await enrichOrdersWithProducts(supabase, userId, toInsert);
+
     // ── 3. 등록
     const insertedIds = new Map<string, string>(); // productOrderNo → order id
     if (!dryRun) {
@@ -660,4 +663,48 @@ export async function approveCancelRequests(input: ApproveInput): Promise<Approv
     await sleep(platform === "coupang" ? 400 : 700);
   }
   return out;
+}
+
+// ───────────────────────── 상품 소싱 정보 보강 ─────────────────────────
+
+/** 엑셀 임포트(excel-import.tsx)와 동일한 상품명 정규화 */
+function normalizeProductName(name: string) {
+  return name.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * 상품명이 상품 목록과 일치하면 purchase_url(최저가 링크)과 cost(최저가×수량)를 채운다. 기존 값은 보존.
+ * 반환: { urlMatched, costMatched }
+ */
+export async function enrichOrdersWithProducts(
+  supabase: SupabaseClient,
+  userId: string,
+  orders: Array<{ product_name: string | null; quantity: number; purchase_url: string | null; cost: number }>,
+) {
+  const targets = orders.filter((o) => o.product_name && (!o.purchase_url || !o.cost));
+  if (targets.length === 0) return { urlMatched: 0, costMatched: 0 };
+
+  const products: Array<{ product_name: string; purchase_url: string | null; lowest_price: number | null }> = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("product_name, purchase_url, lowest_price")
+      .eq("user_id", userId)
+      .range(from, from + 999);
+    if (error || !data || data.length === 0) break;
+    products.push(...data);
+    if (data.length < 1000) break;
+  }
+  const map = new Map<string, { url: string | null; price: number | null }>();
+  for (const p of products) if (p.product_name) map.set(normalizeProductName(p.product_name), { url: p.purchase_url, price: p.lowest_price });
+
+  let urlMatched = 0;
+  let costMatched = 0;
+  for (const o of targets) {
+    const m = map.get(normalizeProductName(o.product_name!));
+    if (!m) continue;
+    if (!o.purchase_url && m.url) { o.purchase_url = m.url; urlMatched++; }
+    if ((!o.cost || o.cost === 0) && m.price && m.price > 0) { o.cost = m.price * (o.quantity || 1); costMatched++; }
+  }
+  return { urlMatched, costMatched };
 }
