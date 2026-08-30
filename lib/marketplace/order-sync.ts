@@ -260,11 +260,12 @@ async function loadExistingOrders(supabase: SupabaseClient, userId: string, plat
   }
   const byProductOrderNo = new Map<string, ExistingOrder>();
   const byOrderNo = new Map<string, ExistingOrder[]>();
-  const byFuzzy = new Set<string>();
+  const byFuzzy = new Map<string, ExistingOrder[]>(); // 같은 사람이 같은 상품을 여러 번 주문할 수 있어 개수로 관리
   for (const r of rows) {
     if (r.marketplace_product_order_no) byProductOrderNo.set(r.marketplace_product_order_no, r);
     if (r.marketplace_order_no) byOrderNo.set(r.marketplace_order_no, [...(byOrderNo.get(r.marketplace_order_no) ?? []), r]);
-    byFuzzy.add(fuzzyKey(r.order_date, r.recipient_name, r.product_name));
+    const fk = fuzzyKey(r.order_date, r.recipient_name, r.product_name);
+    byFuzzy.set(fk, [...(byFuzzy.get(fk) ?? []), r]);
   }
   return { rows, byProductOrderNo, byOrderNo, byFuzzy };
 }
@@ -334,10 +335,13 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
       seen.add(pon);
       if (existing.byProductOrderNo.has(pon)) { result.skippedExisting++; continue; }
       const fz = fuzzyKey(o.order_date, o.recipient_name, o.product_name);
-      if (existing.byFuzzy.has(fz)) {
+      const fuzzyPool = existing.byFuzzy.get(fz) ?? [];
+      if (fuzzyPool.length > 0) {
         result.skippedExisting++;
+        // 같은 키의 기존 행 하나를 소비한다 (동일인·동일상품 다건 주문 대응)
+        const plto = fuzzyPool.shift()!;
         // 플토 행에 마켓 번호를 채워 두면 다음부터 정확 매칭·취소 API 에서 바로 쓴다
-        const plto = existing.rows.find((r) => !r.marketplace_product_order_no && fuzzyKey(r.order_date, r.recipient_name, r.product_name) === fz);
+        if (plto.marketplace_product_order_no) continue;
         if (plto && !dryRun) {
           await supabase
             .from("orders")
@@ -517,21 +521,36 @@ async function applyClaim(
 
 async function syncCoupangClaims(opts: SyncOptions, existing: Existing, days: number, result: SyncResult, dryRun: boolean) {
   const client = opts.coupang!;
-  const to = new Date(Date.now() + 86400000);
-  const from = new Date(Date.now() - days * 86400000);
   const receipts: Array<CoupangReturnRequest & { _type: "RETURN" | "CANCEL" }> = [];
+  // 기간이 길면 쿠팡이 504 를 내므로 하루 단위로 나눠 조회한다
   for (const cancelType of ["RETURN", "CANCEL"] as const) {
-    let nextToken: string | undefined;
-    for (let page = 0; page < 20; page++) {
-      const res = await client.listReturnRequests({ createdAtFrom: ymd(from), createdAtTo: ymd(to), cancelType, nextToken, maxPerPage: 50 });
-      if (!res.ok || !res.body || typeof res.body === "string") { result.errors.push(`쿠팡 클레임 조회 실패(${cancelType}): ${res.message}`); break; }
-      receipts.push(...(res.body.data ?? []).map((r) => ({ ...r, _type: cancelType })));
-      nextToken = res.body.nextToken || undefined;
-      await sleep(300);
-      if (!nextToken) break;
+    for (let d = days; d >= 0; d--) {
+      const dayFrom = new Date(Date.now() - d * 86400000);
+      const dayTo = new Date(dayFrom.getTime() + 86400000);
+      let nextToken: string | undefined;
+      for (let page = 0; page < 20; page++) {
+        const res = await client.listReturnRequests({
+          createdAtFrom: `${ymd(dayFrom)}T00:00`,
+          createdAtTo: `${ymd(dayTo)}T00:00`,
+          cancelType,
+          nextToken,
+          maxPerPage: 50,
+        });
+        if (!res.ok || !res.body || typeof res.body === "string") {
+          result.errors.push(`쿠팡 클레임 조회 실패(${cancelType} ${ymd(dayFrom)}): ${res.message}`);
+          break;
+        }
+        receipts.push(...(res.body.data ?? []).map((r) => ({ ...r, _type: cancelType })));
+        nextToken = res.body.nextToken || undefined;
+        await sleep(300);
+        if (!nextToken) break;
+      }
     }
   }
+  const seenReceipt = new Set<number>();
   for (const r of receipts) {
+    if (seenReceipt.has(r.receiptId)) continue;
+    seenReceipt.add(r.receiptId);
     const orders = existing.byOrderNo.get(String(r.orderId)) ?? [];
     if (orders.length === 0) continue;
     const itemIds = new Set((r.returnItems ?? []).map((i) => String(i.vendorItemId)));
