@@ -18,6 +18,7 @@ export async function PUT(
     secret_key?: string;
     client_id?: string;
     client_secret?: string;
+    meta?: Record<string, unknown>;
   };
   try {
     body = await request.json();
@@ -32,6 +33,7 @@ export async function PUT(
   if (body.secret_key) updateData.secret_key_encrypted = encrypt(body.secret_key.trim());
   if (body.client_id) updateData.client_id_encrypted = encrypt(body.client_id.trim());
   if (body.client_secret) updateData.client_secret_encrypted = encrypt(body.client_secret.trim());
+  if (body.meta && typeof body.meta === "object") updateData.meta = body.meta;
 
   const supabase = getSupabaseClient(token);
   const { data, error } = await supabase

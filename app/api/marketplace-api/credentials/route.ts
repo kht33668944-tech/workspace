@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
     secret_key?: string;
     client_id?: string;
     client_secret?: string;
+    meta?: Record<string, unknown>;
   };
   try {
     body = await request.json();
@@ -40,6 +41,11 @@ export async function POST(request: NextRequest) {
   if (body.platform !== "coupang" && body.platform !== "smartstore" && body.platform !== "esm") {
     return NextResponse.json({ error: "지원하지 않는 판매처입니다." }, { status: 400 });
   }
+  if (body.platform === "smartstore" && (!body.client_id?.trim() || !body.client_secret?.trim())) {
+    return NextResponse.json({ error: "스마트스토어 애플리케이션 ID와 시크릿이 필요합니다." }, { status: 400 });
+  }
+  // 스마트스토어는 채널번호를 연결확인 시 자동으로 채우므로 비워둘 수 있다
+  if (body.platform === "smartstore" && !body.account_id?.trim()) body.account_id = "-";
   if (!body.account_id?.trim()) {
     return NextResponse.json({ error: "계정 식별값이 필요합니다." }, { status: 400 });
   }
@@ -62,6 +68,7 @@ export async function POST(request: NextRequest) {
       secret_key_encrypted: body.secret_key ? encrypt(body.secret_key.trim()) : null,
       client_id_encrypted: body.client_id ? encrypt(body.client_id.trim()) : null,
       client_secret_encrypted: body.client_secret ? encrypt(body.client_secret.trim()) : null,
+      meta: body.meta && typeof body.meta === "object" ? body.meta : {},
     })
     .select("*")
     .single();

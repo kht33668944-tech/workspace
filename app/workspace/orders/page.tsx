@@ -28,6 +28,7 @@ import dynamic from "next/dynamic";
 const ExcelImport = dynamic(() => import("@/components/workspace/orders/excel-import"), { ssr: false });
 const SettlementImportModal = dynamic(() => import("@/components/workspace/orders/settlement-import-modal"), { ssr: false });
 const BulkSmsModal = dynamic(() => import("@/components/workspace/orders/bulk-sms-modal"), { ssr: false });
+const MarketplaceCancelModal = dynamic(() => import("@/components/workspace/orders/marketplace-cancel-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
 import { useAutoPurchaseController, useTrackingCollectController } from "@/context/modal-controllers";
 import { PLATFORM_LABELS } from "@/types/database";
@@ -251,6 +252,7 @@ function OrdersPageInner() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showPurchaseCancelModal, setShowPurchaseCancelModal] = useState(false);
+  const [showMarketplaceCancel, setShowMarketplaceCancel] = useState(false);
   const [purchaseCredentials, setPurchaseCredentials] = useState<PurchaseCredential[]>([]);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(saved?.columnFilters ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -1442,6 +1444,14 @@ function OrdersPageInner() {
               구매취소/정리 ({selectedIds.size})
             </button>
           )}
+          <button
+            onClick={() => setShowMarketplaceCancel(true)}
+            title="취소준비 상태의 쿠팡·스마트스토어 주문을 공식 API로 판매자 취소"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
+          >
+            <Ban className="w-4 h-4" />
+            마켓 취소 (API)
+          </button>
           <div className="relative" ref={autoMenuRef}>
             <button
               onClick={() => setShowAutoMenu(!showAutoMenu)}

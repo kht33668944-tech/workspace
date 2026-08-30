@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { buildCoupangPreview, getCoupangClientFromCredential } from "@/lib/marketplace-api-helpers";
+import { isDryRun, sleep } from "@/lib/marketplace/common";
 import type { MarketplaceApiAction } from "@/types/database";
 
 export const maxDuration = 300;
 
 const ACTIONS = new Set(["price", "stock", "stop", "resume"]);
-const BATCH_DELAY_MS = 150;
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// 쿠팡 초당 5건 한도를 플레이오토와 공유하므로 넉넉히 300ms
+const BATCH_DELAY_MS = 300;
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
@@ -36,12 +34,13 @@ export async function POST(request: NextRequest) {
 
     const { client } = await getCoupangClientFromCredential(supabase, body.credentialId);
     const preview = await buildCoupangPreview(supabase, productIds, body.action, body.stockQuantity ?? null);
+    const dry = isDryRun();
 
     const results: Array<{
       productId: string;
       productName: string;
       vendorItemId: string;
-      status: "success" | "failed";
+      status: "success" | "failed" | "dry";
       message: string;
       previousValue: string | null;
       newValue: string | null;
@@ -104,10 +103,10 @@ export async function POST(request: NextRequest) {
         response_payload: typeof apiResult.body === "object" ? apiResult.body : { body: apiResult.body },
       });
 
-      await sleep(BATCH_DELAY_MS);
+      if (!dry) await sleep(BATCH_DELAY_MS);
     }
 
-    const successCount = results.filter((r) => r.status === "success").length;
+    const successCount = results.filter((r) => r.status === "success" || r.status === "dry").length;
     const failCount = results.length - successCount;
     return NextResponse.json({
       successCount,

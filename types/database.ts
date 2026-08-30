@@ -260,7 +260,7 @@ export type CoupangPriceInventoryInsert = Omit<CoupangPriceInventory, "id" | "cr
 export type MarketplaceApiPlatform = "coupang" | "smartstore" | "esm";
 export type MarketplaceApiTestStatus = "success" | "failed";
 export type MarketplaceApiLogStatus = "success" | "failed";
-export type MarketplaceApiAction = "test" | "price" | "stock" | "stop" | "resume";
+export type MarketplaceApiAction = "test" | "price" | "stock" | "stop" | "resume" | "sync" | "cancel";
 
 export interface MarketplaceApiCredential {
   id: string;
@@ -286,6 +286,7 @@ export interface MarketplaceApiLog {
   product_id: string | null;
   product_name: string | null;
   vendor_item_id: string | null;
+  target_id: string | null;
   previous_value: string | null;
   new_value: string | null;
   error_message: string | null;
@@ -327,6 +328,11 @@ export interface SmartstorePriceInventory {
   product_status: string | null;
   sale_price: number | null;
   option_type: string | null;
+  // 커머스API 직접 연동용 (20260830 마이그레이션)
+  origin_product_no: string | null;
+  channel_product_no: string | null;
+  stock: number | null;
+  api_synced_at: string | null;
   // 94컬럼 전체 raw 값을 보존: { "0": "값A", "1": "값B", ..., "93": "값CP" }
   // 내보내기 시 F열만 우리 시스템 가격으로 교체하고 나머지는 그대로 복원.
   raw_row: Record<string, string>;
@@ -334,7 +340,10 @@ export interface SmartstorePriceInventory {
   updated_at: string;
 }
 
-export type SmartstorePriceInventoryInsert = Omit<SmartstorePriceInventory, "id" | "created_at" | "updated_at">;
+export type SmartstorePriceInventoryInsert = Omit<
+  SmartstorePriceInventory,
+  "id" | "created_at" | "updated_at" | "origin_product_no" | "channel_product_no" | "stock" | "api_synced_at"
+> & Partial<Pick<SmartstorePriceInventory, "origin_product_no" | "channel_product_no" | "stock" | "api_synced_at">>;
 
 // ─── 가격 이력 ───
 export interface PriceHistory {
