@@ -179,7 +179,7 @@ async function fetchProductIds(userId) {
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
     const res = await fetch(
-      `${SUPA}/rest/v1/products?select=id&user_id=eq.${userId}&purchase_url=neq.&order=sort_order.asc`,
+      `${SUPA}/rest/v1/products?select=id&user_id=eq.${userId}&purchase_url=neq.&registration_status=neq.${encodeURIComponent("판매종료")}&order=sort_order.asc`,
       { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, Range: `${from}-${from + PAGE - 1}` } },
     );
     if (!res.ok) throw new Error(`상품 조회 실패 (${res.status})`);
@@ -336,7 +336,7 @@ async function applySoldOutMargins(userId, inStockIds, soldOutIds) {
   let restoreTargets = [];
   if (inStockIds.length) {
     const res = await fetch(
-      `${SUPA}/rest/v1/products?select=id&user_id=eq.${userId}&margin_rate=eq.${SOLDOUT_MARGIN}&limit=5000`,
+      `${SUPA}/rest/v1/products?select=id&user_id=eq.${userId}&margin_rate=eq.${SOLDOUT_MARGIN}&registration_status=neq.${encodeURIComponent("판매종료")}&limit=5000`,
       { headers: svcHeaders },
     );
     if (res.ok) {

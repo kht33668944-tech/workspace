@@ -97,13 +97,19 @@ export const LOCKED_STATUSES = new Set<string>(["구매진행중"]);
 export const CLAIM_STATUSES = new Set<string>(["취소요청", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료"]);
 
 // 상품 등록 상태
-export const REGISTRATION_STATUSES = ["등록전", "등록완료", "판매중지"] as const;
+// 판매중지 = 일시(품절 등, 재개는 사람이 등록완료로 변경) / 판매종료 = 영구(상품정보 오류·완전 품절 — 자동화가 절대 건드리지 않음)
+export const REGISTRATION_STATUSES = ["등록전", "등록완료", "판매중지", "판매종료"] as const;
+/** 자동화(최저가 수집·가격 반영·판매재개)에서 완전히 제외하는 등록상태 */
+export const AUTOMATION_EXCLUDED_STATUSES = new Set<string>(["판매종료"]);
+/** 마켓 판매재개(resume)를 자동으로 보내지 않는 등록상태 */
+export const NO_AUTO_RESUME_STATUSES = new Set<string>(["판매중지", "판매종료"]);
 export type RegistrationStatus = typeof REGISTRATION_STATUSES[number];
 
 export const REGISTRATION_STATUS_COLORS: Record<string, string> = {
   등록전: "bg-gray-800 text-gray-200",
   등록완료: "bg-green-900 text-green-300",
   판매중지: "bg-red-900 text-red-300",
+  판매종료: "bg-zinc-800 text-zinc-400 line-through",
 };
 
 // 상품 재정비(필수정보·상세페이지) 진행 상태

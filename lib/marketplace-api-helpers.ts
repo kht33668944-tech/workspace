@@ -1,3 +1,4 @@
+import { AUTOMATION_EXCLUDED_STATUSES, NO_AUTO_RESUME_STATUSES } from "@/lib/constants";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { decrypt } from "@/lib/crypto";
 import { CoupangOpenApiClient, roundCoupangPrice } from "@/lib/coupang-api";
@@ -153,6 +154,14 @@ export async function buildCoupangPreview(
     const product = productMap.get(id);
     if (!product) {
       blocked.push({ productId: id, productName: "(삭제된 상품)", reason: "상품을 찾을 수 없습니다." });
+      continue;
+    }
+    if (AUTOMATION_EXCLUDED_STATUSES.has(product.registration_status)) {
+      blocked.push({ productId: id, productName: product.product_name, reason: "판매종료 상품은 마켓 API 반영에서 제외됩니다." });
+      continue;
+    }
+    if (action === "resume" && NO_AUTO_RESUME_STATUSES.has(product.registration_status)) {
+      blocked.push({ productId: id, productName: product.product_name, reason: `${product.registration_status} 상품은 판매재개하지 않습니다 (등록완료로 바꾼 뒤 수동 재개).` });
       continue;
     }
 
@@ -322,6 +331,14 @@ export async function buildSmartstorePreview(
     const product = productMap.get(id);
     if (!product) {
       blocked.push({ productId: id, productName: "(삭제된 상품)", reason: "상품을 찾을 수 없습니다." });
+      continue;
+    }
+    if (AUTOMATION_EXCLUDED_STATUSES.has(product.registration_status)) {
+      blocked.push({ productId: id, productName: product.product_name, reason: "판매종료 상품은 마켓 API 반영에서 제외됩니다." });
+      continue;
+    }
+    if (action === "resume" && NO_AUTO_RESUME_STATUSES.has(product.registration_status)) {
+      blocked.push({ productId: id, productName: product.product_name, reason: `${product.registration_status} 상품은 판매재개하지 않습니다 (등록완료로 바꾼 뒤 수동 재개).` });
       continue;
     }
     const rows = inventoryByProductId.get(id) ?? [];

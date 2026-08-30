@@ -47,3 +47,8 @@
 - `OnliveAutoPrice` 4시간마다(:15): `powershell -ExecutionPolicy Bypass -File scripts\register-auto-price-task.ps1` (`-Remove` 해제). 매 실행마다 당일 전일대비 이력 초기화(`--reset`) 후 전체 상품 최저가 수집·변동가 적용·품절/재입고 마진 복원·엑셀(`바탕화면\가격수정엑셀`)·디스코드(`#가격재고-자동화`)
 - 대상 서버는 `.env.local` `AUTO_BASE_URL`(현재 3001 개발 서버). 로그 `logs/auto-price-task.log`, `scripts/logs/auto-price-YYYY-MM-DD.log`
 - 수동: `node scripts/auto-price-refresh.mjs --label 테스트 --reset --limit 3`
+
+## 등록상태 '판매종료' (2026-08-31)
+- 판매중지 = 일시(품절 등). 자동화가 최저가 수집·가격 반영은 하지만 **마켓 판매재개는 보내지 않음** → 사람이 등록완료로 바꾼 뒤 재개
+- 판매종료 = 영구(상품정보 오류·완전 품절). 최저가 수집·가격 반영·마진 복원·마켓 API 전부 제외. 2026-08-31 기존 판매중지 37개를 판매종료로 이동
+- 규칙 상수: `lib/constants.ts` `AUTOMATION_EXCLUDED_STATUSES`, `NO_AUTO_RESUME_STATUSES`
