@@ -38,3 +38,7 @@
 - **반품/교환**: 주문 사이드패널(반품준비/교환준비 상태)에 단계 버튼. 쿠팡 반품 = 입고 확인 → 반품 완료(환불), 거절은 윙에서만. 스토어 반품 = 반품 완료(환불) / 거절(사유). 교환 = 수거 완료 → 재배송 송장 등록 / 거절
 - **정산**: 주문 수집 모달 `정산 반영 (최근 35일)` 또는 자동 수집 때 하루 1회. 쿠팡 revenue-history(orderId+vendorItemId), 스토어 settle/case(productOrderId). `settlement`을 실정산액으로 덮어쓰고 `settlement_source='api'`
 - **취소요청 자동 승인**: 설정 페이지 토글(기본 꺼짐). 운송장 없고 구매(발주) 전인 취소요청만 자동, 나머지는 디스코드 알림 후 사람이 처리
+
+## 디스코드 채널별 알림 (2026-08-31)
+`.env.local`에 채널별 웹훅을 넣으면 알림 종류별로 분리 전송(없으면 `DISCORD_WEBHOOK_URL`로 통합):
+`DISCORD_WEBHOOK_ORDERS`(주문 수집·취소요청·정산) · `DISCORD_WEBHOOK_TRACKING`(운송장 수집·송장 전송·ESM 엑셀) · `DISCORD_WEBHOOK_PURCHASE`(자동구매) · `DISCORD_WEBHOOK_PRICE`(가격/재고 수집) · `DISCORD_WEBHOOK_AI`(AI 상세페이지). 채널은 `notifyAutomationResult({channel})` 또는 제목으로 추론(`inferDiscordChannel`).
