@@ -14,7 +14,7 @@ import fs from "fs";
 const OUT = "./.cancel-shots";
 fs.mkdirSync(OUT, { recursive: true });
 const DRY = process.argv.includes("--dry");
-const d = (t) => new Date(t).toISOString().slice(0, 10);
+const d = (t) => new Date(t + 9 * 3600000).toISOString().slice(0, 10); // KST 날짜 (UTC면 오전 9시 전 실행 시 오늘 건이 조회에서 빠짐)
 const URL = `https://wing.coupang.com/tenants/sfl-portal/stop-shipment/list?shipmentStopSearchType=SHIPMENT_STOP_REQUEST&from=${d(Date.now() - 30 * 86400000)}&to=${d(Date.now())}`;
 
 const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");

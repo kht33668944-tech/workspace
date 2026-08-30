@@ -15,7 +15,7 @@ import { formatKoreanDateTime } from "@/lib/date-utils";
 /** 발주서 양식 엑셀 생성 (현재 발주서 테이블과 동일한 양식) */
 export async function generateOrderExcel(orders: Order[]): Promise<{ buffer: ArrayBuffer; filename: string }> {
   await loadXLSX();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); // KST 날짜 (파일명용)
   const data = orders.map((o) => ({
     묶음번호: o.bundle_no,
     주문일시: o.order_date ? formatKoreanDateTime(o.order_date) : null,
@@ -63,7 +63,7 @@ export async function generatePlayAutoTrackingExcel(
   courierCodeMap: Record<string, number> = {}
 ): Promise<{ buffer: ArrayBuffer; filename: string }> {
   await loadXLSX();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); // KST 날짜 (파일명용)
 
   // 운송장이 있는 주문만 필터링
   const trackingOrders = orders.filter((o) => o.tracking_no && o.tracking_no.trim() !== "");
@@ -439,7 +439,7 @@ export async function generatePriceUpdateExcel(
   exportConfigs?: Record<string, { shopAccount: string }>
 ): Promise<{ normal: { buffer: ArrayBuffer; filename: string } | null; single: { buffer: ArrayBuffer; filename: string } | null }> {
   await loadXLSX();
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10).replace(/-/g, ""); // KST 날짜 (파일명용)
   const rateMap = buildRateMap(commissionRates);
 
   // 플랫폼별 계정 키 목록 (exportConfigs 우선, 없으면 PLATFORM_CONFIGS 기본값)

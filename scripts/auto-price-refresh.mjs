@@ -42,7 +42,7 @@ const MAX_RETRY = 10;
 
 // ---------- 로그 ----------
 mkdirSync(LOG_DIR, { recursive: true });
-const logFile = path.join(LOG_DIR, `auto-price-${new Date().toISOString().slice(0, 10)}.log`);
+const logFile = path.join(LOG_DIR, `auto-price-${new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)}.log`); // KST 날짜 (UTC면 새벽 실행분이 어제 로그로 감)
 function log(msg) {
   const line = `[${new Date().toLocaleTimeString("ko-KR", { hour12: false })}] [auto-price:${LABEL}] ${msg}`;
   console.log(line);
@@ -412,7 +412,7 @@ async function exportPriceExcel(token, changedIds, soldOutIds) {
   if (ids.length === 0) return [];
 
   const now = new Date();
-  const dateDir = now.toISOString().slice(0, 10);
+  const dateDir = new Date(now.getTime() + 9 * 3600000).toISOString().slice(0, 10); // KST 날짜 폴더
   const timeTag = `${String(now.getHours()).padStart(2, "0")}시${String(now.getMinutes()).padStart(2, "0")}분`;
   const outDir = path.join(env.AUTO_EXPORT_DIR ?? path.join(homedir(), "Desktop", "가격수정엑셀"), dateDir);
   mkdirSync(outDir, { recursive: true });
