@@ -50,6 +50,24 @@ export async function buildDailySummary(supabase: AnySupabase, userId: string, d
 
   // 오늘 마켓에 전송한 송장 수 (API 로그 기준 — 기준선 일괄 표시와 구분)
   const { count: shipped } = await supabase.from("marketplace_api_logs").select("id", { count: "exact", head: true }).eq("user_id", userId).in("action", ["ship", "ship-fix"]).eq("status", "success").gte("created_at", start).lt("created_at", end);
+  // 오늘 구매(결제)한 카드값 — 카드사별 (구매일 purchased_at 기준, 취소·반품 제외)
+  const { data: buys } = await supabase
+    .from("orders")
+    .select("cost,payment_method,delivery_status")
+    .eq("user_id", userId)
+    .gte("purchased_at", start)
+    .lt("purchased_at", end)
+    .not("purchase_order_no", "is", null)
+    .neq("purchase_order_no", "")
+    .limit(5000);
+  const cards = new Map<string, number>();
+  let cardTotal = 0;
+  for (const b of (buys ?? []) as Array<{ cost: number; payment_method: string | null; delivery_status: string }>) {
+    if (["취소완료", "재고부족", "반품완료", "교환완료"].includes(b.delivery_status)) continue;
+    const name = b.payment_method?.trim() || "미확인";
+    cards.set(name, (cards.get(name) ?? 0) + (b.cost || 0));
+    cardTotal += b.cost || 0;
+  }
   // 오늘 실패한 자동화 로그
   const { count: failedLogs } = await supabase.from("marketplace_api_logs").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("status", "failed").gte("created_at", start).lt("created_at", end);
 
@@ -62,6 +80,11 @@ export async function buildDailySummary(supabase: AnySupabase, userId: string, d
     lines.push(`${m} ${p.count}건 · 매출 ${won(p.revenue)} · 정산예정 ${won(p.settlement)} · 순수익 ${won(p.settlement - p.cost)}${p.costMissing ? ` (원가 미입력 ${p.costMissing})` : ""}`);
   }
   lines.push("");
+  if (cards.size > 0) {
+    const perCard = [...cards.entries()].sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${won(v)}`).join(" · ");
+    lines.push(`💳 오늘 카드값 ${won(cardTotal)}  (${perCard})`);
+    lines.push("");
+  }
   const notes: string[] = [];
   notes.push(`송장 전송 ${shipped ?? 0}건`);
   if (total.costMissing > 0) notes.push(`원가 미입력 ${total.costMissing}건 → 순수익 과대`);
