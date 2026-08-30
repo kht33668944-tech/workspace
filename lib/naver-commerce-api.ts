@@ -330,7 +330,7 @@ export class NaverCommerceApiClient {
 
   /** 발주확인 — placeOrderStatus NOT_YET → OK */
   confirmProductOrders(productOrderIds: string[]) {
-    return this.request<{ data?: { successProductOrderIds?: string[]; failProductOrderInfos?: Array<{ productOrderId: string; code?: string; message?: string }> } }>(
+    return this.request<{ data?: { successProductOrderIds?: string[]; successProductOrderInfos?: Array<{ productOrderId: string }>; failProductOrderInfos?: Array<{ productOrderId: string; code?: string; message?: string }> } }>(
       "POST",
       "/v1/pay-order/seller/product-orders/confirm",
       { body: { productOrderIds } },

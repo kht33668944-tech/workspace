@@ -422,7 +422,8 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
         for (let i = 0; i < ids.length; i += 100) {
           const batch = ids.slice(i, i + 100);
           const res = await opts.smartstore!.confirmProductOrders(batch);
-          const okIds = new Set(res.dryRun ? batch : res.ok && res.body && typeof res.body === "object" ? res.body.data?.successProductOrderIds ?? [] : []);
+          const okBody = res.ok && res.body && typeof res.body === "object" ? res.body.data : undefined;
+          const okIds = new Set(res.dryRun ? batch : [...(okBody?.successProductOrderIds ?? []), ...(okBody?.successProductOrderInfos ?? []).map((x) => x.productOrderId)]);
           const fails = res.ok && res.body && typeof res.body === "object" ? res.body.data?.failProductOrderInfos ?? [] : [];
           for (const pon of batch) {
             if (okIds.has(pon)) {
