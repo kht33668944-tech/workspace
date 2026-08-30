@@ -321,6 +321,15 @@ export class NaverCommerceApiClient {
     );
   }
 
+  /** 조건형 상품주문 상세 조회 — from~to 최대 24시간, 결제일시 기준. 오래된 주문 백필용 (last-changed 는 최근 며칠만 조회됨) */
+  searchProductOrders(params: { from: string; to?: string; rangeType?: "PAYED_DATETIME" | "ORDERED_DATETIME" | "DISPATCHED_DATETIME" | "PURCHASE_DECIDED_DATETIME"; page?: number; pageSize?: number }) {
+    return this.request<{ data?: { contents?: Array<{ productOrderId: string; content: NaverProductOrderDetail }>; pagination?: { page?: number; size?: number; totalPages?: number; totalElements?: number } } | NaverProductOrderDetail[] }>(
+      "GET",
+      "/v1/pay-order/seller/product-orders",
+      { query: { from: params.from, to: params.to, rangeType: params.rangeType ?? "PAYED_DATETIME", page: params.page ?? 1, pageSize: params.pageSize ?? 300, quantityClaimCompatibility: "true" } },
+    );
+  }
+
   queryProductOrders(productOrderIds: string[]) {
     return this.request<{ data?: NaverProductOrderDetail[] }>("POST", "/v1/pay-order/seller/product-orders/query", {
       write: false,

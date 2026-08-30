@@ -201,6 +201,27 @@ async function fetchCoupangSheets(client: CoupangOpenApiClient, days: number) {
   return sheets;
 }
 
+/** 네이버 결제일시 기준 상품주문 상세 (24h 구간 순회, 페이지 300) — 오래된 주문도 조회 가능 */
+async function searchNaverOrdersByPaidDate(client: NaverCommerceApiClient, days: number, errors: string[]) {
+  const out: NaverProductOrderDetail[] = [];
+  const now = Date.now();
+  for (let d = days - 1; d >= 0; d--) {
+    const from = new Date(now - (d + 1) * 86400000);
+    const to = new Date(now - d * 86400000 - 1000);
+    for (let page = 1; page < 30; page++) {
+      const res = await client.searchProductOrders({ from: toKstIso(from), to: toKstIso(to), page, pageSize: 300 });
+      if (!res.ok || !res.body || typeof res.body === "string") { errors.push(`네이버 주문 조회 실패(${ymd(from)}): ${res.message}`); break; }
+      const data = res.body.data;
+      const list = Array.isArray(data) ? data : (data?.contents ?? []).map((c) => c.content).filter((c) => !!c?.productOrder);
+      out.push(...list);
+      const totalPages = Array.isArray(data) ? 1 : (data?.pagination?.totalPages ?? 1);
+      await sleep(600);
+      if (page >= totalPages || list.length === 0) break;
+    }
+  }
+  return out;
+}
+
 /** 네이버 변경 상품주문 ID 수집 (24h 구간 순회) */
 async function fetchNaverChangedIds(client: NaverCommerceApiClient, days: number, type: "PAYED" | "CLAIM_REQUESTED" | "CLAIM_COMPLETED") {
   const ids = new Set<string>();
@@ -784,6 +805,71 @@ export async function rejectCancelRequests(input: ApproveInput): Promise<Approve
     await sleep(platform === "coupang" ? 400 : 700);
   }
   return out;
+}
+
+// ───────────────────────── 마켓번호 백필 (플토 엑셀로 들어온 옛 행) ─────────────────────────
+
+export interface BackfillResult {
+  platform: SyncPlatform;
+  remoteCount: number;
+  alreadyLinked: number;
+  filled: number;
+  notFound: number;
+  errors: string[];
+}
+
+/**
+ * 최근 N일 마켓 주문(모든 상태)을 조회해, 마켓번호가 없는 발주서 행에 결제일+수취인+상품명 매칭으로
+ * marketplace_order_no / marketplace_product_order_no 를 채운다. 신규 등록·마켓 쓰기 없음.
+ * (정산 API·클레임·송장 전송이 마켓번호로 매칭하므로 API 전환 전 주문에 한 번 실행)
+ */
+export async function backfillMarketplaceNumbers(opts: SyncOptions): Promise<BackfillResult> {
+  const { supabase, userId, platform } = opts;
+  const days = Math.min(opts.days ?? 35, 90);
+  const result: BackfillResult = { platform, remoteCount: 0, alreadyLinked: 0, filled: 0, notFound: 0, errors: [] };
+  const existing = await loadExistingOrders(supabase, userId, platform, days);
+  let candidates: OrderInsert[] = [];
+  if (platform === "coupang") {
+    const client = opts.coupang!;
+    const to = new Date(Date.now() + 86400000);
+    for (let end = to; end.getTime() > to.getTime() - days * 86400000; end = new Date(end.getTime() - 31 * 86400000)) {
+      const start = new Date(Math.max(end.getTime() - 30 * 86400000, to.getTime() - days * 86400000));
+      for (const status of ["ACCEPT", "INSTRUCT", "DEPARTURE", "DELIVERING", "FINAL_DELIVERY", "NONE_TRACKING"] as const) {
+        try {
+          const sheets = await client.listAllOrderSheets({ createdAtFrom: ymd(start), createdAtTo: ymd(end), status });
+          candidates.push(...sheets.flatMap((sh) => mapCoupangOrderSheet(sh, userId)));
+        } catch (err) { result.errors.push(err instanceof Error ? err.message : String(err)); }
+        await sleep(300);
+      }
+    }
+  } else {
+    const client = opts.smartstore!;
+    const details = await searchNaverOrdersByPaidDate(client, days, result.errors);
+    candidates = details.map((d) => mapNaverProductOrder(d, userId)).filter((o): o is OrderInsert => !!o);
+  }
+  result.remoteCount = candidates.length;
+  const seen = new Set<string>();
+  for (const o of candidates) {
+    const pon = o.marketplace_product_order_no ?? "";
+    if (!pon || seen.has(pon)) continue;
+    seen.add(pon);
+    if (existing.byProductOrderNo.has(pon)) { result.alreadyLinked++; continue; }
+    const pool = (existing.byFuzzy.get(fuzzyKey(o.order_date, o.recipient_name, o.product_name)) ?? []).filter((r) => !r.marketplace_product_order_no);
+    const plto = pool.shift();
+    if (!plto) { result.notFound++; continue; }
+    const { error } = await supabase
+      .from("orders")
+      .update({ marketplace_order_no: o.marketplace_order_no, marketplace_product_order_no: pon, marketplace_status: o.marketplace_status, marketplace_synced_at: new Date().toISOString() })
+      .eq("id", plto.id)
+      .eq("user_id", userId)
+      .is("marketplace_product_order_no", null);
+    if (error) { result.errors.push(`갱신 실패(${plto.id}): ${error.message}`); continue; }
+    plto.marketplace_product_order_no = pon;
+    existing.byProductOrderNo.set(pon, plto);
+    result.filled++;
+  }
+  await logMarketplaceApi(supabase, { user_id: userId, platform, credential_id: opts.credentialId, action: "backfill", status: result.errors.length ? "failed" : "success", new_value: `remote=${result.remoteCount} linked=${result.alreadyLinked} filled=${result.filled} notFound=${result.notFound}`, error_message: result.errors[0] ?? null });
+  return result;
 }
 
 // ───────────────────────── 상품 소싱 정보 보강 ─────────────────────────
