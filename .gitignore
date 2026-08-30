@@ -92,3 +92,8 @@ preview-detail.html
 .browser-profiles/
 # 일회성 비교 산출물
 scripts/seller-code-diffs.json
+
+# 쿠팡 취소 접수 스크린샷/중간산출물
+.cancel-shots/
+scripts/_cancel-*.json
+scripts/_stop-complete-results.json
