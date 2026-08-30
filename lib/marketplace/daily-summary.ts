@@ -48,8 +48,8 @@ export async function buildDailySummary(supabase: AnySupabase, userId: string, d
   }
   const total = [...per.values()].reduce((a, p) => ({ count: a.count + p.count, revenue: a.revenue + p.revenue, settlement: a.settlement + p.settlement, cost: a.cost + p.cost, costMissing: a.costMissing + p.costMissing }), { count: 0, revenue: 0, settlement: 0, cost: 0, costMissing: 0 });
 
-  // 오늘 마켓에 전송한 송장 수 (주문일 무관)
-  const { count: shipped } = await supabase.from("orders").select("id", { count: "exact", head: true }).eq("user_id", userId).gte("shipped_to_marketplace_at", start).lt("shipped_to_marketplace_at", end);
+  // 오늘 마켓에 전송한 송장 수 (API 로그 기준 — 기준선 일괄 표시와 구분)
+  const { count: shipped } = await supabase.from("marketplace_api_logs").select("id", { count: "exact", head: true }).eq("user_id", userId).in("action", ["ship", "ship-fix"]).eq("status", "success").gte("created_at", start).lt("created_at", end);
   // 오늘 실패한 자동화 로그
   const { count: failedLogs } = await supabase.from("marketplace_api_logs").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("status", "failed").gte("created_at", start).lt("created_at", end);
 
