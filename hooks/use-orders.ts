@@ -491,7 +491,7 @@ export function useOrders(options: UseOrdersOptions = {}) {
 
       // 운송장번호 입력 → 배송완료 (취소/반품/교환 상태가 아닐 때만)
       if (hasText(autoStatusUpdates.tracking_no) && autoStatusUpdates.tracking_no !== currentOrder.tracking_no) {
-        const noAutoChange = ["취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료"];
+        const noAutoChange = ["취소요청", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료"];
         if (!noAutoChange.includes(merged.delivery_status)) {
           autoStatusUpdates.delivery_status = "배송완료";
         }

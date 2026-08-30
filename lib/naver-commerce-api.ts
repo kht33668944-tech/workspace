@@ -114,14 +114,23 @@ export interface NaverProductOrderDetail {
     placeOrderStatus?: string;
     claimType?: string;
     claimStatus?: string;
-    shippingAddress?: { name?: string; tel1?: string; baseAddress?: string; detailedAddress?: string };
+    shippingAddress?: { name?: string; tel1?: string; tel2?: string; zipCode?: string; baseAddress?: string; detailedAddress?: string };
     productId?: string;
+    totalProductAmount?: number;
+    productDiscountAmount?: number;
+    sellerBurdenStoreDiscountAmount?: number;
+    deliveryFeeAmount?: number;
+    expectedSettlementAmount?: number;
+    placeOrderDate?: string;
+    shippingDueDate?: string;
+    shippingMemo?: string;
+    expectedDeliveryCompany?: string;
     channelProductNo?: number;
     optionCode?: string;
     sellerProductCode?: string;
   };
-  order: { orderId: string; ordererName?: string; orderDate?: string; paymentDate?: string };
-  currentClaim?: { claimType?: string; claimStatus?: string; cancelReason?: string; requestQuantity?: number };
+  order: { orderId: string; ordererName?: string; ordererTel?: string; orderDate?: string; paymentDate?: string; paymentMeans?: string };
+  currentClaim?: { claimType?: string; claimStatus?: string; cancelReason?: string; cancelDetailedReason?: string; returnReason?: string; exchangeReason?: string; requestQuantity?: number; requestDate?: string; claimId?: string };
 }
 
 /** 판매자 취소 사유 코드 (판매자 귀책) */
@@ -317,6 +326,15 @@ export class NaverCommerceApiClient {
       write: false,
       body: { productOrderIds },
     });
+  }
+
+  /** 발주확인 — placeOrderStatus NOT_YET → OK */
+  confirmProductOrders(productOrderIds: string[]) {
+    return this.request<{ data?: { successProductOrderIds?: string[]; failProductOrderInfos?: Array<{ productOrderId: string; code?: string; message?: string }> } }>(
+      "POST",
+      "/v1/pay-order/seller/product-orders/confirm",
+      { body: { productOrderIds } },
+    );
   }
 
   /** 판매자 취소 요청 — 발주확인 여부와 무관하게 즉시 환불 진행(approve 불필요) */

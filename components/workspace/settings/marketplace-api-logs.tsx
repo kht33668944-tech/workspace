@@ -27,6 +27,10 @@ const ACTION_LABEL: Record<string, string> = {
   stop: "판매중지",
   resume: "판매재개",
   cancel: "주문취소",
+  "sync-orders": "주문수집",
+  confirm: "발주확인",
+  claim: "클레임반영",
+  "approve-cancel": "취소승인",
 };
 
 function fmt(iso: string) {

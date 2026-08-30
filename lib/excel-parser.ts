@@ -20,7 +20,7 @@ const MAX_EXCEL_CELLS = 1_000_000;
 const ALLOWED_EXCEL_EXTENSIONS = new Set(["xlsx", "xls", "csv"]);
 
 // 판매처별 정산 비율 (판매가 × rate = 정산예정금액)
-const SETTLEMENT_RATES: [string, number][] = [
+export const SETTLEMENT_RATES: [string, number][] = [
   ["스마트스토어", 0.93],
   ["쿠팡", 0.88],
   ["옥션", 0.85],
@@ -439,7 +439,7 @@ export async function parseExcelSheet(file: File, sheetIndex: number): Promise<O
 
 // 주소를 기본주소/상세주소로 분리
 // 규칙: 도로명/지번 + 번지까지 = 기본주소, 나머지(괄호 내용 포함) = 상세주소
-function splitAddress(fullAddress: string): { base: string; detail: string } {
+export function splitAddress(fullAddress: string): { base: string; detail: string } {
   const trimmed = fullAddress.trim();
 
   // 도로명주소: ~대로/~번길/~로/~길 + 번지[-번지]
@@ -756,4 +756,11 @@ export async function exportOrdersToCSV(orders: Record<string, unknown>[], filen
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "발주서");
   XLSX.writeFile(wb, filename);
+}
+
+/** 판매처명으로 정산 비율(추정) — 마켓 API 수집 시 정산예정금액 계산에 사용 */
+export function getSettlementRate(marketplace: string | null | undefined): number {
+  const name = (marketplace ?? "").toLowerCase();
+  for (const [key, rate] of SETTLEMENT_RATES) if (name.includes(key.toLowerCase())) return rate;
+  return 0.9;
 }

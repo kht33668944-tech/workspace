@@ -392,7 +392,7 @@ export async function executeCancels(opts: ExecuteOptions): Promise<CancelResult
  * 주문번호로 취소/출고중지 접수 내역 조회.
  * 상품준비중 취소는 cancelType=RETURN(반품접수) 으로, 결제완료 취소는 CANCEL 로 잡히므로 둘 다 본다.
  */
-async function findCoupangReceipt(client: CoupangOpenApiClient, orderId: string): Promise<CoupangReturnRequest | null> {
+export async function findCoupangReceipt(client: CoupangOpenApiClient, orderId: string): Promise<CoupangReturnRequest | null> {
   const to = new Date(Date.now() + 86400000); // 시차 여유
   const from = new Date(Date.now() - 2 * 86400000);
   for (const cancelType of ["RETURN", "CANCEL"] as const) {

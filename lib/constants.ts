@@ -67,7 +67,7 @@ export const COURIERS = [
 
 // 배송상태 목록 및 색상
 export const DELIVERY_STATUSES = [
-  "결제전", "구매진행중", "구매확인필요", "재고부족", "부분구매", "배송준비", "배송완료", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료",
+  "결제전", "구매진행중", "구매확인필요", "재고부족", "부분구매", "배송준비", "배송완료", "취소요청", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료",
 ] as const;
 
 export type DeliveryStatus = typeof DELIVERY_STATUSES[number];
@@ -80,6 +80,7 @@ export const DELIVERY_STATUS_COLORS: Record<string, string> = {
   부분구매: "bg-yellow-500/20 text-yellow-400",
   배송준비: "bg-blue-500/20 text-blue-400",
   배송완료: "bg-green-500/20 text-green-400",
+  취소요청: "bg-amber-500/20 text-amber-300",
   취소준비: "bg-red-500/20 text-red-400",
   취소완료: "bg-red-500/20 text-red-400",
   반품준비: "bg-orange-500/20 text-orange-400",

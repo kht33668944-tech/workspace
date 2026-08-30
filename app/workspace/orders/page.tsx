@@ -29,6 +29,7 @@ const ExcelImport = dynamic(() => import("@/components/workspace/orders/excel-im
 const SettlementImportModal = dynamic(() => import("@/components/workspace/orders/settlement-import-modal"), { ssr: false });
 const BulkSmsModal = dynamic(() => import("@/components/workspace/orders/bulk-sms-modal"), { ssr: false });
 const MarketplaceCancelModal = dynamic(() => import("@/components/workspace/orders/marketplace-cancel-modal"), { ssr: false });
+const OrderSyncModal = dynamic(() => import("@/components/workspace/orders/order-sync-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
 import { useAutoPurchaseController, useTrackingCollectController } from "@/context/modal-controllers";
 import { PLATFORM_LABELS } from "@/types/database";
@@ -253,6 +254,7 @@ function OrdersPageInner() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showPurchaseCancelModal, setShowPurchaseCancelModal] = useState(false);
   const [showMarketplaceCancel, setShowMarketplaceCancel] = useState(false);
+  const [showOrderSync, setShowOrderSync] = useState(false);
   const [purchaseCredentials, setPurchaseCredentials] = useState<PurchaseCredential[]>([]);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(saved?.columnFilters ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -1445,6 +1447,14 @@ function OrdersPageInner() {
             </button>
           )}
           <button
+            onClick={() => setShowOrderSync(true)}
+            title="쿠팡·스마트스토어 새 주문을 API로 가져와 발주서에 등록하고 발주확인합니다"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
+          >
+            <Download className="w-4 h-4" />
+            주문 수집 (API){allOrders.filter((o) => o.delivery_status === "취소요청").length > 0 ? ` · 취소요청 ${allOrders.filter((o) => o.delivery_status === "취소요청").length}` : ""}
+          </button>
+          <button
             onClick={() => setShowMarketplaceCancel(true)}
             title="취소준비 상태의 쿠팡·스마트스토어 주문을 공식 API로 판매자 취소"
             className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
@@ -1793,6 +1803,13 @@ function OrdersPageInner() {
           count={selectedIds.size}
           onChangeStatus={handleBulkStatusChange}
           onClearSelection={handleClearSelection}
+        />
+      )}
+      {showOrderSync && (
+        <OrderSyncModal
+          cancelRequests={allOrders.filter((o) => o.delivery_status === "취소요청").map((o) => ({ id: o.id, marketplace: o.marketplace, recipient_name: o.recipient_name, product_name: o.product_name, quantity: o.quantity, claim_status: o.claim_status ?? null }))}
+          onClose={() => setShowOrderSync(false)}
+          onDone={() => refetch()}
         />
       )}
       {showMarketplaceCancel && (

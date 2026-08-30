@@ -35,6 +35,15 @@ export interface Order {
   consultation_logs: ConsultationLog[];
   order_month: string | null; // generated: YYYY-MM
   memo: string | null;
+  // 마켓 API 동기화 (20260831 마이그레이션)
+  source?: string | null;
+  marketplace_status?: string | null;
+  claim_type?: string | null;
+  claim_status?: string | null;
+  confirmed_at?: string | null;
+  ship_by_date?: string | null;
+  marketplace_synced_at?: string | null;
+  canceled_at?: string | null;
   created_at: string;
   updated_at: string;
   purchase_log_order_nos?: string[];
@@ -260,7 +269,7 @@ export type CoupangPriceInventoryInsert = Omit<CoupangPriceInventory, "id" | "cr
 export type MarketplaceApiPlatform = "coupang" | "smartstore" | "esm";
 export type MarketplaceApiTestStatus = "success" | "failed";
 export type MarketplaceApiLogStatus = "success" | "failed";
-export type MarketplaceApiAction = "test" | "price" | "stock" | "stop" | "resume" | "sync" | "cancel";
+export type MarketplaceApiAction = "test" | "price" | "stock" | "stop" | "resume" | "sync" | "cancel" | "sync-orders" | "confirm" | "claim" | "approve-cancel";
 
 export interface MarketplaceApiCredential {
   id: string;
@@ -436,4 +445,22 @@ export interface SmsLog {
   message_id: string | null;
   provider: "solapi" | "phone" | null;
   created_at: string;
+}
+
+export interface MarketplaceSyncRun {
+  id: string;
+  user_id: string;
+  platform: string;
+  trigger: string;
+  dry_run: boolean;
+  started_at: string;
+  finished_at: string | null;
+  status: "running" | "success" | "partial" | "failed";
+  remote_count: number;
+  new_orders: number;
+  confirmed: number;
+  confirm_failed: number;
+  claims: Record<string, number>;
+  error: string | null;
+  detail: Record<string, unknown> | null;
 }

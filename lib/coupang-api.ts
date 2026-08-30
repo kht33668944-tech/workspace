@@ -28,6 +28,16 @@ export interface CoupangOrderItem {
   sequenceNo?: number;
   cancelCount?: number;
   holdCountForCancel?: number;
+  salesPrice?: number;
+  orderPrice?: number;
+  discountPrice?: number;
+  sellerProductId?: number;
+  sellerProductName?: string;
+  sellerProductItemName?: string;
+  externalVendorSkuCode?: string;
+  confirmDate?: string | null;
+  estimatedShippingDate?: string;
+  canceled?: boolean;
 }
 
 export interface CoupangOrderSheet {
@@ -36,9 +46,14 @@ export interface CoupangOrderSheet {
   status: CoupangOrderStatus | string;
   orderedAt: string;
   paidAt?: string;
-  orderer: { name: string; email?: string; safeNumber?: string };
-  receiver: { name: string; safeNumber?: string; addr1?: string; addr2?: string; postCode?: string };
+  orderer: { name: string; email?: string; safeNumber?: string; ordererNumber?: string | null };
+  receiver: { name: string; safeNumber?: string; receiverNumber?: string | null; addr1?: string; addr2?: string; postCode?: string };
   orderItems: CoupangOrderItem[];
+  shippingPrice?: number;
+  remotePrice?: number;
+  parcelPrintMessage?: string;
+  deliveryCompanyName?: string;
+  invoiceNumber?: string;
 }
 
 export interface CoupangListResponse<T> {
@@ -54,8 +69,13 @@ export interface CoupangReturnRequest {
   receiptType: string;
   receiptStatus: string;
   cancelCountSum: number;
-  returnItems: Array<{ vendorItemId: number; cancelCount: number; releaseStatus: string }>;
+  returnItems: Array<{ vendorItemId: number; cancelCount: number; releaseStatus: string; sellerProductName?: string; vendorItemName?: string }>;
   createdAt?: string;
+  cancelReason?: string;
+  cancelReasonCategory1?: string;
+  cancelReasonCategory2?: string;
+  reasonCode?: string;
+  reasonCodeText?: string;
 }
 
 /** 쿠팡 판매자 취소 중분류 코드 (대분류는 항상 CANERR) */
@@ -219,6 +239,16 @@ export class CoupangOpenApiClient {
       if (!nextToken) break;
     }
     return all;
+  }
+
+  /** 발주확인(상품준비중 처리) — 결제완료(ACCEPT) 박스만 가능 */
+  acknowledgeOrderSheets(shipmentBoxIds: number[]) {
+    return this.request<{ code: string | number; message: string; data?: { responseCode?: number; responseMessage?: string; responseList?: Array<{ shipmentBoxId: number; succeed: boolean; resultCode?: string; resultMessage?: string }> } }>(
+      "PATCH",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/ordersheets/acknowledgement`,
+      undefined,
+      { vendorId: this.vendorId, shipmentBoxIds },
+    );
   }
 
   /**
