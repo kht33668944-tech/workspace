@@ -584,7 +584,7 @@ function OrdersPageInner() {
               const priceText = event.bot_blocked
                 ? "봇 감지"
                 : event.fail_reason === "sold_out"
-                  ? "품절/판매종료 → 원가 0원·재고부족 예정"
+                  ? "품절/판매종료 → 원가 0원·발송불가 예정"
                   : event.price > 0
                     ? event.price !== event.previous_price
                       ? `${event.previous_price.toLocaleString()}→${event.price.toLocaleString()}원`
@@ -755,8 +755,9 @@ function OrdersPageInner() {
             updates.purchase_url = group.product.purchase_url;
           }
           if (purchaseSource) updates.purchase_source = purchaseSource;
-          if (result.status === "sold_out" && order.delivery_status !== "재고부족") {
-            updates.delivery_status = "재고부족";
+          if (result.status === "sold_out" && order.delivery_status !== "발송불가") {
+            updates.delivery_status = "발송불가";
+            if (!order.memo) updates.memo = "품절 자동감지 (원가갱신)"; // 발송불가 사유 기록
           }
           if (Object.keys(updates).length === 0) continue;
           updatedOrders++;
@@ -1022,7 +1023,7 @@ function OrdersPageInner() {
         settlement: order.settlement || 0,
         nextCost,
       });
-      const statusChanged = result.status === "sold_out" && order.delivery_status !== "재고부족";
+      const statusChanged = result.status === "sold_out" && order.delivery_status !== "발송불가";
       return {
         id: order.id,
         recipient: order.recipient_name || "-",
@@ -1760,7 +1761,7 @@ function OrdersPageInner() {
                     <div className="min-w-0 truncate">
                       <span className="font-medium text-[var(--text-primary)]">{order.productName}</span>
                       <span className="text-[var(--text-muted)]"> · {order.recipient} · 수량 {order.quantity}</span>
-                      {order.status === "sold_out" ? <span className="text-amber-400"> · 품절 → 재고부족</span> : !productChanged && <span className="text-[var(--text-muted)]"> · 상품소싱 변동없음</span>}
+                      {order.status === "sold_out" ? <span className="text-amber-400"> · 품절 → 발송불가</span> : !productChanged && <span className="text-[var(--text-muted)]"> · 상품소싱 변동없음</span>}
                       {order.purchaseSource && <span className="text-emerald-400"> · 구매처 → {order.purchaseSource}</span>}
                     </div>
                     <div className="shrink-0 tabular-nums text-right">

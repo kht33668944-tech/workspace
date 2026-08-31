@@ -244,7 +244,7 @@ function localDateFromIso(value: string | null): string | null {
 function isActivePurchase(order: { purchase_order_no: string | null; delivery_status: string | null }): boolean {
   const purchaseOrderNo = order.purchase_order_no?.trim();
   if (!purchaseOrderNo) return false;
-  return !["취소완료", "재고부족", "반품완료", "교환완료"].includes(order.delivery_status ?? "");
+  return !["취소완료", "발송불가", "반품완료", "교환완료"].includes(order.delivery_status ?? "");
 }
 
 async function fetchMonthlyProfit(uid: string, month: string): Promise<{
@@ -426,12 +426,12 @@ export function useDashboard() {
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
             .eq("delivery_status", "취소준비"),
-          // 5. 재고부족
+          // 5. 발송불가
           supabase
             .from("orders")
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
-            .eq("delivery_status", "재고부족"),
+            .eq("delivery_status", "발송불가"),
           // 6. 최근 구매 로그 150건 (배치 집계용, 15배치 보장)
           supabase
             .from("purchase_logs")

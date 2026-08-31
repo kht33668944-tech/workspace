@@ -44,7 +44,7 @@ async function getDailyCardPurchases(supabase: SupabaseClient, userId: string, d
     .lt("purchased_at", end)
     .not("purchase_order_no", "is", null)
     .neq("purchase_order_no", "")
-    .not("delivery_status", "in", "(취소완료,재고부족,반품완료,교환완료)");
+    .not("delivery_status", "in", "(취소완료,발송불가,반품완료,교환완료)");
 
   if (error) throw error;
 

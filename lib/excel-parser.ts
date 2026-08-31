@@ -571,6 +571,7 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
   if (mapped.courier === undefined) mapped.courier = null;
   if (mapped.tracking_no === undefined) mapped.tracking_no = null;
   if (mapped.delivery_status === undefined) mapped.delivery_status = "결제전";
+  if (mapped.delivery_status === "재고부족") mapped.delivery_status = "발송불가"; // 구 명칭 엑셀 호환
   if (mapped.consultation_logs === undefined) mapped.consultation_logs = [];
   if (mapped.memo === undefined) mapped.memo = null;
 

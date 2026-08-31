@@ -19,8 +19,15 @@ function joinCounts(pairs: Array<[string, number]>) {
   return pairs.filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(" · ");
 }
 
+/** 발송불가 상태로 발송기한이 임박한 주문 (알림 경고용) */
+export interface ShipDeadlineWarning {
+  recipientName: string | null;
+  productName: string | null;
+  shipByDate: string; // YYYY-MM-DD
+}
+
 /** 주문 수집 결과 (#주문수집-자동화) */
-export async function notifySyncResults(results: SyncResult[], trigger: "manual" | "scheduler") {
+export async function notifySyncResults(results: SyncResult[], trigger: "manual" | "scheduler", extras?: { shipDeadline?: ShipDeadlineWarning[] }) {
   const newTotal = results.reduce((n, r) => n + r.newOrders.length, 0);
   const errors = results.flatMap((r) => [...r.errors, ...r.confirmErrors]);
   const autoOk = results.flatMap((r) => (r.autoApproved ?? []).filter((a) => a.status !== "failed"));
@@ -28,15 +35,20 @@ export async function notifySyncResults(results: SyncResult[], trigger: "manual"
   const cancelReq = results.flatMap((r) => r.claims.filter((c) => c.to === "취소요청" && !autoIds.has(c.orderId)));
   const otherClaims = results.flatMap((r) => r.claims.filter((c) => c.to !== "취소요청"));
   const confirmFailed = results.reduce((n, r) => n + r.confirmFailed, 0);
-  if (newTotal === 0 && cancelReq.length === 0 && otherClaims.length === 0 && errors.length === 0 && autoOk.length === 0) return;
+  const shipDeadline = extras?.shipDeadline ?? [];
+  if (newTotal === 0 && cancelReq.length === 0 && otherClaims.length === 0 && errors.length === 0 && autoOk.length === 0 && shipDeadline.length === 0) return;
 
-  const todo = cancelReq.length + (confirmFailed > 0 ? 1 : 0);
+  const todo = cancelReq.length + shipDeadline.length + (confirmFailed > 0 ? 1 : 0);
   const failed = errors.length > 0 && newTotal === 0 && cancelReq.length === 0;
   const lines: string[] = [];
 
   if (cancelReq.length > 0) {
     lines.push(`👉 취소요청 ${cancelReq.length}건 → 사이트 '주문 수집' 모달에서 승인/거절`);
     for (const c of cancelReq.slice(0, 6)) lines.push(`   • ${c.recipientName ?? "-"} · ${c.productName ?? "-"}${c.reason ? ` (${c.reason})` : ""}`);
+  }
+  if (shipDeadline.length > 0) {
+    lines.push(`👉 발송불가 ${shipDeadline.length}건 발송기한 임박 — 취소준비로 보내거나 발송하세요`);
+    for (const w of shipDeadline.slice(0, 6)) lines.push(`   • ${w.recipientName ?? "-"} · ${w.productName ?? "-"} (기한 ${w.shipByDate})`);
   }
   if (confirmFailed > 0) lines.push(`👉 발주확인 실패 ${confirmFailed}건 — 다음 회차에 재시도, 계속되면 마켓 센터 확인`);
   if (errors.length > 0) {

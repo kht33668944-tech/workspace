@@ -7,7 +7,7 @@ import { notifyAutomationResult } from "@/lib/discord-notifier";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = SupabaseClient<any, any, any>;
 
-const CANCELED = new Set(["취소완료", "재고부족", "취소요청", "취소준비"]);
+const CANCELED = new Set(["취소완료", "발송불가", "취소요청", "취소준비"]);
 const MARKET_ORDER = ["쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
 
 function kstDayRange(date = new Date()) {
@@ -63,7 +63,7 @@ export async function buildDailySummary(supabase: AnySupabase, userId: string, d
   const cards = new Map<string, number>();
   let cardTotal = 0;
   for (const b of (buys ?? []) as Array<{ cost: number; payment_method: string | null; delivery_status: string }>) {
-    if (["취소완료", "재고부족", "반품완료", "교환완료"].includes(b.delivery_status)) continue;
+    if (["취소완료", "발송불가", "반품완료", "교환완료"].includes(b.delivery_status)) continue;
     const name = b.payment_method?.trim() || "미확인";
     cards.set(name, (cards.get(name) ?? 0) + (b.cost || 0));
     cardTotal += b.cost || 0;

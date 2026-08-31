@@ -74,13 +74,13 @@ export default function TodoFlow({
             filter={{ delivery_status: ["결제전"] }}
           />
           <Step
-            label="재고부족"
+            label="발송불가"
             count={outOfStockCount}
             sub="재고 확인 필요"
             countColor={outOfStockCount > 0 ? "text-amber-400" : undefined}
             borderColor={outOfStockCount > 0 ? "border-amber-500/30 hover:border-amber-500/60" : "border-[var(--border)] hover:border-amber-400/50"}
             loading={loading}
-            filter={{ delivery_status: ["재고부족"] }}
+            filter={{ delivery_status: ["발송불가"] }}
           />
         </div>
         <Arrow />

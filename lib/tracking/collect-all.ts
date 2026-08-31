@@ -50,7 +50,7 @@ export async function collectTrackingForUser(supabase: AnySupabase, userId: stri
     .limit(2000);
   if (error) throw new Error(`발주서 조회 실패: ${error.message}`);
   type Row = { id: string; purchase_source: string | null; purchase_id: string | null; purchase_order_no: string; delivery_status: string };
-  const pending = ((pendingRows ?? []) as Row[]).filter((o) => !["취소완료", "재고부족", "반품완료", "교환완료"].includes(o.delivery_status));
+  const pending = ((pendingRows ?? []) as Row[]).filter((o) => !["취소완료", "발송불가", "반품완료", "교환완료"].includes(o.delivery_status));
 
   const { data: creds } = await supabase.from("purchase_credentials").select("id,platform,login_id,login_pw_encrypted").eq("user_id", userId).in("platform", ["gmarket", "auction", "ohouse"]);
   const result: CollectAllResult = { pending: pending.length, unmatched: 0, groups: [], appliedOrderIds: [] };
