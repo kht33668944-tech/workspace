@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
-import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban, Send } from "lucide-react";
+import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban, Send, Globe } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
 import { useOrders } from "@/hooks/use-orders";
@@ -266,6 +266,7 @@ function OrdersPageInner() {
   const trackingCollect = useTrackingCollectController();
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showAutoMenu, setShowAutoMenu] = useState(false);
+  const [showApiMenu, setShowApiMenu] = useState(false);
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
   const [refreshingCosts, setRefreshingCosts] = useState(false);
   const [costRefreshLog, setCostRefreshLog] = useState<string[]>([]);
@@ -281,6 +282,7 @@ function OrdersPageInner() {
   const [exportingCostExcel, setExportingCostExcel] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const autoMenuRef = useRef<HTMLDivElement>(null);
+  const apiMenuRef = useRef<HTMLDivElement>(null);
   const importMenuRef = useRef<HTMLDivElement>(null);
   const urlTab = searchParams.get("tab") as OrdersTab | null;
   const activeBatchId = searchParams.get("batch");
@@ -349,13 +351,16 @@ function OrdersPageInner() {
       if (autoMenuRef.current && !autoMenuRef.current.contains(e.target as Node)) {
         setShowAutoMenu(false);
       }
+      if (apiMenuRef.current && !apiMenuRef.current.contains(e.target as Node)) {
+        setShowApiMenu(false);
+      }
       if (importMenuRef.current && !importMenuRef.current.contains(e.target as Node)) {
         setShowImportMenu(false);
       }
     };
-    if (showExportMenu || showAutoMenu || showImportMenu) document.addEventListener("mousedown", handleClick);
+    if (showExportMenu || showAutoMenu || showApiMenu || showImportMenu) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [showExportMenu, showAutoMenu, showImportMenu]);
+  }, [showExportMenu, showAutoMenu, showApiMenu, showImportMenu]);
 
   const handleSearchClear = () => {
     setSearch("");
@@ -1448,30 +1453,49 @@ function OrdersPageInner() {
               구매취소/정리 ({selectedIds.size})
             </button>
           )}
-          <button
-            onClick={() => setShowOrderSync(true)}
-            title="쿠팡·스마트스토어 새 주문을 API로 가져와 발주서에 등록하고 발주확인합니다"
-            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
-          >
-            <Download className="w-4 h-4" />
-            주문 수집 (API){allOrders.filter((o) => o.delivery_status === "취소요청").length > 0 ? ` · 취소요청 ${allOrders.filter((o) => o.delivery_status === "취소요청").length}` : ""}
-          </button>
-          <button
-            onClick={() => setShowMarketplaceCancel(true)}
-            title="취소준비 상태의 쿠팡·스마트스토어 주문을 공식 API로 판매자 취소"
-            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
-          >
-            <Ban className="w-4 h-4" />
-            마켓 취소 (API)
-          </button>
-          <button
-            onClick={() => setShowMarketplaceShip(true)}
-            title="운송장이 있는 쿠팡·스마트스토어 주문을 공식 API로 발송처리(송장 전송). 선택이 없으면 미전송 전체"
-            className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-sky-600/20 text-sky-400 hover:bg-sky-600/30 text-sm rounded-lg transition-colors whitespace-nowrap"
-          >
-            <Send className="w-4 h-4" />
-            송장 전송 (API){selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
-          </button>
+          <div className="relative" ref={apiMenuRef}>
+            <button
+              onClick={() => setShowApiMenu(!showApiMenu)}
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-blue-600 text-white border border-blue-700 hover:bg-blue-700 text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Globe className="w-4 h-4" />
+              <span className="hidden sm:inline">마켓 API</span>
+              {allOrders.filter((o) => o.delivery_status === "취소요청").length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-xs leading-none">
+                  {allOrders.filter((o) => o.delivery_status === "취소요청").length}
+                </span>
+              )}
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+            {showApiMenu && (
+              <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl py-1 min-w-44">
+                <button
+                  onClick={() => { setShowApiMenu(false); setShowOrderSync(true); }}
+                  title="쿠팡·스마트스토어 새 주문을 API로 가져와 발주서에 등록하고 발주확인합니다"
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Download className="w-4 h-4 text-blue-400" />
+                  주문 수집{allOrders.filter((o) => o.delivery_status === "취소요청").length > 0 ? ` · 취소요청 ${allOrders.filter((o) => o.delivery_status === "취소요청").length}` : ""}
+                </button>
+                <button
+                  onClick={() => { setShowApiMenu(false); setShowMarketplaceCancel(true); }}
+                  title="취소준비 상태의 쿠팡·스마트스토어 주문을 공식 API로 판매자 취소"
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Ban className="w-4 h-4 text-rose-400" />
+                  마켓 취소
+                </button>
+                <button
+                  onClick={() => { setShowApiMenu(false); setShowMarketplaceShip(true); }}
+                  title="운송장이 있는 쿠팡·스마트스토어 주문을 공식 API로 발송처리(송장 전송). 선택이 없으면 미전송 전체"
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Send className="w-4 h-4 text-sky-400" />
+                  송장 전송{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+                </button>
+              </div>
+            )}
+          </div>
           <div className="relative" ref={autoMenuRef}>
             <button
               onClick={() => setShowAutoMenu(!showAutoMenu)}
