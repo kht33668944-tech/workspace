@@ -6,7 +6,7 @@ import { Loader2, Clock, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { MarketplaceSyncRun } from "@/types/database";
 import { KIND_TO_KEY, AUTOMATIONS, type RunKind, type AutomationDef } from "@/lib/automation-schedule";
-import { formatLogTime } from "@/lib/log-format";
+import { formatLogTime, timeAgo } from "@/lib/log-format";
 
 interface PriceRound { round: number; collected: number; soldOut: number; retry: number }
 
@@ -119,7 +119,7 @@ export default function RunningNowCard({ runningRuns, staleRuns, nextRun, onRefe
       {staleRuns.map((run) => (
         <div key={run.id} className="flex items-center gap-2 mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          <span className="flex-1">{runLabel(run)}이(가) {formatLogTime(run.started_at)}에 시작한 뒤 응답이 없습니다 (프로세스 중단 의심)</span>
+          <span className="flex-1">{runLabel(run)}이(가) {timeAgo(run.started_at)}({formatLogTime(run.started_at)}) 시작된 뒤 응답이 없습니다 (프로세스 중단 의심)</span>
           <button onClick={() => cleanupStale(run)} disabled={cleaning} className="shrink-0 px-2 py-1 rounded bg-red-500/20 hover:bg-red-500/30 disabled:opacity-50">
             실패로 정리
           </button>

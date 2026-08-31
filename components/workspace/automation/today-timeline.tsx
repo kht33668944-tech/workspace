@@ -1,7 +1,7 @@
 "use client";
 
 // 오늘의 자동화 타임라인 — 예정/진행중/성공/일부실패/실패/미실행
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import type { TimelineSlot, SlotStatus } from "@/lib/automation-schedule";
 import { formatLogTime } from "@/lib/log-format";
@@ -16,22 +16,33 @@ const STATUS_META: Record<SlotStatus, { dot: string; label: string; text: string
   stale: { dot: "bg-red-400", label: "중단됨", text: "text-red-400" },
   missed: { dot: "bg-red-400", label: "미실행", text: "text-red-400" },
   manual: { dot: "bg-blue-400", label: "수동 실행", text: "text-blue-400" },
+  unknown: { dot: "bg-[var(--border)]", label: "기록 없음", text: "text-[var(--text-muted)]" },
 };
 
 export default function TodayTimeline({ slots }: { slots: TimelineSlot[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const nowRef = useRef<HTMLDivElement | null>(null);
+  const scrolledRef = useRef(false);
+
+  // 첫 로드 시 현재 시각 근처(다가오는 첫 슬롯)로 스크롤
+  const firstUpcomingIdx = slots.findIndex((s) => s.status === "upcoming" || s.status === "running");
+  useEffect(() => {
+    if (scrolledRef.current || !nowRef.current) return;
+    scrolledRef.current = true;
+    nowRef.current.scrollIntoView({ block: "center" });
+  }, [firstUpcomingIdx]);
 
   return (
     <section className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
       <h2 className="text-base font-semibold text-[var(--text-primary)] mb-4">오늘의 타임라인</h2>
       <div className="relative space-y-0.5 max-h-[28rem] overflow-y-auto pr-1">
-        {slots.map((slot) => {
+        {slots.map((slot, idx) => {
           const id = `${slot.key}-${slot.scheduledAt}`;
           const meta = STATUS_META[slot.status];
           const clickable = slot.runs.length > 0;
           const isOpen = expanded === id;
           return (
-            <div key={id}>
+            <div key={id} ref={idx === firstUpcomingIdx ? nowRef : null}>
               <button
                 onClick={() => clickable && setExpanded(isOpen ? null : id)}
                 className={`w-full flex items-center gap-3 px-2 py-1.5 rounded-lg text-left ${clickable ? "hover:bg-[var(--bg-hover)] cursor-pointer" : "cursor-default"}`}

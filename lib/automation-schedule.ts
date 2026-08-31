@@ -110,7 +110,7 @@ export function slotsForKstDate(def: AutomationDef, dateKst: string): string[] {
   return out;
 }
 
-export type SlotStatus = "upcoming" | "running" | "success" | "partial" | "failed" | "missed" | "stale" | "manual";
+export type SlotStatus = "upcoming" | "running" | "success" | "partial" | "failed" | "missed" | "stale" | "manual" | "unknown";
 
 export interface TimelineSlot {
   key: AutomationKey;
@@ -145,6 +145,16 @@ export function buildTodayTimeline(runs: MarketplaceSyncRun[], now: Date = new D
   const slots: TimelineSlot[] = [];
   const usedRunIds = new Set<string>();
 
+  // 자동화별 최초 기록 시각 — 기록 도입 전 슬롯은 "미실행"이 아니라 "기록 없음"으로 (콜드스타트 오탐 방지)
+  const firstRunMs = new Map<AutomationKey, number>();
+  for (const r of runs) {
+    const key = KIND_TO_KEY[(r.kind ?? "orders") as RunKind];
+    if (!key) continue;
+    const t = new Date(r.started_at).getTime();
+    const prev = firstRunMs.get(key);
+    if (prev === undefined || t < prev) firstRunMs.set(key, t);
+  }
+
   for (const def of AUTOMATIONS) {
     for (const slotIso of slotsForKstDate(def, today)) {
       const slotMs = new Date(slotIso).getTime();
@@ -157,8 +167,11 @@ export function buildTodayTimeline(runs: MarketplaceSyncRun[], now: Date = new D
       for (const r of matched) usedRunIds.add(r.id);
       let status: SlotStatus;
       if (matched.length > 0) status = worstOf(matched, now);
-      else if (slotMs + tolMs < now.getTime()) status = "missed";
-      else status = "upcoming";
+      else if (slotMs + tolMs >= now.getTime()) status = "upcoming";
+      else {
+        const first = firstRunMs.get(def.key);
+        status = first !== undefined && first <= slotMs ? "missed" : "unknown";
+      }
       slots.push({ key: def.key, label: def.label, scheduledAt: slotIso, status, runs: matched });
     }
   }
