@@ -499,9 +499,9 @@ export function useOrders(options: UseOrdersOptions = {}) {
         autoStatusUpdates.shipped_to_marketplace_at = null;
         autoStatusUpdates.ship_error = null;
       }
-      // 주문번호 입력 → 배송준비 (결제전 상태일 때만)
+      // 주문번호 입력 → 배송준비 (구매대기 상태일 때만)
       else if (hasText(autoStatusUpdates.purchase_order_no) && autoStatusUpdates.purchase_order_no !== currentOrder.purchase_order_no) {
-        if (merged.delivery_status === "결제전") {
+        if (merged.delivery_status === "구매대기") {
           autoStatusUpdates.delivery_status = "배송준비";
         }
       }

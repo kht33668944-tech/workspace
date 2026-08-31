@@ -67,13 +67,13 @@ export const COURIERS = [
 
 // 배송상태 목록 및 색상
 export const DELIVERY_STATUSES = [
-  "결제전", "구매진행중", "구매확인필요", "발송불가", "부분구매", "배송준비", "배송완료", "취소요청", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료",
+  "구매대기", "구매진행중", "구매확인필요", "발송불가", "부분구매", "배송준비", "배송완료", "취소요청", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료",
 ] as const;
 
 export type DeliveryStatus = typeof DELIVERY_STATUSES[number];
 
 export const DELIVERY_STATUS_COLORS: Record<string, string> = {
-  결제전: "bg-gray-500/20 text-gray-400",
+  구매대기: "bg-gray-500/20 text-gray-400",
   구매진행중: "bg-cyan-500/20 text-cyan-400",
   구매확인필요: "bg-yellow-500/20 text-yellow-400",
   발송불가: "bg-amber-500/20 text-amber-400",
@@ -89,7 +89,7 @@ export const DELIVERY_STATUS_COLORS: Record<string, string> = {
   교환완료: "bg-purple-500/20 text-purple-400",
 };
 
-/** 클레임 동기화·자동 전이가 건드리지 않는 종료 상태. 발송불가 = 품절·역마진으로 보낼 수 없는 보류 상태(구 재고부족) — 사람이 취소준비/결제전으로 보낼 때까지 자동화 제외 */
+/** 클레임 동기화·자동 전이가 건드리지 않는 종료 상태. 발송불가 = 품절·역마진으로 보낼 수 없는 보류 상태(구 재고부족) — 사람이 취소준비/구매대기로 보낼 때까지 자동화 제외 */
 export const TERMINAL_STATUSES = new Set<string>(["취소완료", "반품완료", "교환완료", "발송불가"]);
 /** 자동구매 락 중 — 상태는 두고 claim_* 만 기록 */
 export const LOCKED_STATUSES = new Set<string>(["구매진행중"]);

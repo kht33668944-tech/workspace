@@ -42,9 +42,9 @@ export class PurchaseCancellationError extends Error {
   }
 }
 
-// 품절·역마진(구매 전)은 재구매를 막기 위해 발송불가(보류)로, 그 외에는 재구매 가능하도록 결제전으로 복귀
+// 품절·역마진(구매 전)은 재구매를 막기 위해 발송불가(보류)로, 그 외에는 재구매 가능하도록 구매대기로 복귀
 function getTargetStatus(mode: PurchaseCancelMode, reason: PurchaseCancelReason): string {
-  return mode === "not_purchased" && (reason === "품절/재고부족" || reason === "판매가 마이너스") ? "발송불가" : "결제전";
+  return mode === "not_purchased" && (reason === "품절/재고부족" || reason === "판매가 마이너스") ? "발송불가" : "구매대기";
 }
 
 function getCancellationMessage(reason: PurchaseCancelReason, mode: PurchaseCancelMode, existing: string | null): string {

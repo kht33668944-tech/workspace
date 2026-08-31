@@ -66,12 +66,12 @@ export default function TodoFlow({
       <div className="flex flex-col md:flex-row items-stretch md:items-start gap-2 md:gap-0">
         <div className="flex-1 flex flex-col gap-2 min-w-0">
           <Step
-            label="결제 전"
+            label="구매대기"
             count={unpurchasedCount}
             sub="구매 처리 필요"
             countColor={unpurchasedCount > 0 ? "text-orange-400" : undefined}
             loading={loading}
-            filter={{ delivery_status: ["결제전"] }}
+            filter={{ delivery_status: ["구매대기"] }}
           />
           <Step
             label="발송불가"

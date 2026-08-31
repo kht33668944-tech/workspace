@@ -139,7 +139,7 @@ export default function KpiCards({
       <Link
         href="/workspace/orders"
         onClick={() =>
-          setOrdersFilter({ delivery_status: ["결제전", "배송준비"] })
+          setOrdersFilter({ delivery_status: ["구매대기", "배송준비"] })
         }
         className="bg-[var(--bg-card)] border border-red-500/30 rounded-xl p-4 md:p-5 block hover:border-red-500/60 hover:bg-[var(--bg-hover)] transition-colors"
       >

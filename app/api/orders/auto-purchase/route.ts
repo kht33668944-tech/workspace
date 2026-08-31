@@ -371,7 +371,7 @@ export async function POST(request: NextRequest) {
 
         const releasePurchaseLock = async (orderId: string) => {
           if (!lockedOrderIds.has(orderId)) return;
-          const restoreStatus = lockReleaseStatusByOrderId.get(orderId) || "결제전";
+          const restoreStatus = lockReleaseStatusByOrderId.get(orderId) || "구매대기";
 
           const releaseQuery = supabase
             .from("orders")
@@ -456,10 +456,10 @@ export async function POST(request: NextRequest) {
                 reason = `이미 구매번호(${existingPurchaseNo})가 있는 주문이라 자동구매를 차단했습니다.`;
               } else if (loggedPurchaseNos.length >= expectedQty) {
                 reason = `구매 로그에 이미 구매번호(${loggedPurchaseNos.join(", ")})가 있어 자동구매를 차단했습니다.`;
-              } else if (currentOrder.delivery_status !== "결제전") {
+              } else if (currentOrder.delivery_status !== "구매대기") {
                 reason = currentOrder.delivery_status === purchaseLockStatus
                   ? "이미 다른 자동구매 작업이 진행 중인 주문이라 차단했습니다."
-                  : `현재 상태가 '${currentOrder.delivery_status}'인 주문이라 자동구매를 차단했습니다. 결제전 상태만 구매할 수 있습니다.`;
+                  : `현재 상태가 '${currentOrder.delivery_status}'인 주문이라 자동구매를 차단했습니다. 구매대기 상태만 구매할 수 있습니다.`;
               }
 
               if (!reason) return true;
@@ -493,7 +493,7 @@ export async function POST(request: NextRequest) {
                 .update({ delivery_status: purchaseLockStatus })
                 .eq("id", order.orderId)
                 .eq("user_id", userId)
-                .eq("delivery_status", "결제전")
+                .eq("delivery_status", "구매대기")
                 .or("purchase_order_no.is.null,purchase_order_no.eq.")
                 .select("id");
 

@@ -1,6 +1,6 @@
 // 마켓 API 주문 수집 · 발주확인 · 클레임 동기화 (쿠팡·스마트스토어)
 //
-//  수집  : 마켓 결제완료/상품준비중 주문 → 발주서에 없는 건만 "결제전"으로 등록 (source='api')
+//  수집  : 마켓 결제완료/상품준비중 주문 → 발주서에 없는 건만 "구매대기"으로 등록 (source='api')
 //  확인  : 새로 등록한 건 즉시 발주확인(상품준비중) → 플레이오토가 더 이상 가져가지 못함
 //  클레임: 구매자 취소요청 → "취소요청" / 자동취소·승인 → "취소완료" / 반품 → "반품준비" / 교환 → "교환준비"
 //
@@ -130,7 +130,7 @@ export function mapCoupangOrderSheet(sheet: CoupangOrderSheet, userId: string): 
       purchase_order_no: null,
       courier: null,
       tracking_no: null,
-      delivery_status: "결제전",
+      delivery_status: "구매대기",
       consultation_logs: [],
       memo: null,
       source: "api",
@@ -180,7 +180,7 @@ export function mapNaverProductOrder(d: NaverProductOrderDetail, userId: string)
     purchase_order_no: null,
     courier: null,
     tracking_no: null,
-    delivery_status: "결제전",
+    delivery_status: "구매대기",
     consultation_logs: [],
     memo: null,
     source: "api",

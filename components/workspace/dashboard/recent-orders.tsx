@@ -5,7 +5,7 @@ import type { DashboardRecentOrder } from "@/hooks/use-dashboard";
 import { getKoreanDateKey } from "@/lib/date-utils";
 
 const STATUS_COLORS: Record<string, string> = {
-  결제전: "text-orange-400 bg-orange-400/10",
+  구매대기: "text-orange-400 bg-orange-400/10",
   배송준비: "text-yellow-400 bg-yellow-400/10",
   배송완료: "text-green-400 bg-green-400/10",
   취소준비: "text-[var(--text-muted)] bg-[var(--bg-subtle)]",

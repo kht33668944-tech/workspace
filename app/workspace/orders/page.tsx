@@ -1221,10 +1221,10 @@ function OrdersPageInner() {
     const ids = [...selectedIds];
     const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
 
-    // 취소완료는 '주문 종료' 최종상태이므로 구매정보 유무와 무관하게 허용. 결제전 되돌리기만 차단한다.
-    if (status === "결제전" && selectedOrders.some(hasPurchaseEvidence)) {
+    // 취소완료는 '주문 종료' 최종상태이므로 구매정보 유무와 무관하게 허용. 구매대기 되돌리기만 차단한다.
+    if (status === "구매대기" && selectedOrders.some(hasPurchaseEvidence)) {
       showToast(
-        "구매정보가 있는 주문은 결제전으로 바로 되돌릴 수 없습니다. 구매취소/정리 버튼을 이용해주세요.",
+        "구매정보가 있는 주문은 구매대기로 바로 되돌릴 수 없습니다. 구매취소/정리 버튼을 이용해주세요.",
         "error",
       );
       return;

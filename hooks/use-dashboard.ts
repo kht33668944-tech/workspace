@@ -402,12 +402,12 @@ export function useDashboard() {
             .eq("user_id", uid)
             .is("tracking_no", null)
             .not("delivery_status", "in", "(취소완료,반품완료,교환완료)"),
-          // 1. 결제 전 (미구매)
+          // 1. 구매대기 (미구매)
           supabase
             .from("orders")
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
-            .eq("delivery_status", "결제전"),
+            .eq("delivery_status", "구매대기"),
           // 2. 배송준비중 (운송장 미수집)
           supabase
             .from("orders")
