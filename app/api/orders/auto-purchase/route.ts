@@ -248,7 +248,8 @@ export async function POST(request: NextRequest) {
           orderId: string,
           purchaseOrderNo: string,
           cost?: number,
-          paymentMethod?: string
+          paymentMethod?: string,
+          payNo?: string
         ) => {
           completedCallbackOrderIds.add(orderId);
 
@@ -342,7 +343,7 @@ export async function POST(request: NextRequest) {
           sendEvent({ type: "db_updated", orderId, status: "ok", purchaseOrderNo, cost, paymentMethod });
 
           // 구매처 주문상세 링크 — 컬럼 미적용 환경에서도 구매번호 저장이 깨지지 않게 별도 갱신
-          const detailUrl = purchaseDetailUrl(platform, purchaseOrderNo);
+          const detailUrl = purchaseDetailUrl(platform, purchaseOrderNo, payNo);
           if (detailUrl) {
             await supabase.from("orders").update({ purchase_detail_url: detailUrl })
               .eq("id", orderId).eq("user_id", userId)
@@ -591,7 +592,7 @@ export async function POST(request: NextRequest) {
           // 성공한 주문 즉시 DB 업데이트 (스크래퍼에서 콜백 안 탄 경우 대비)
           for (const s of result.success) {
             if (!completedCallbackOrderIds.has(s.orderId)) {
-              await onOrderComplete(s.orderId, s.purchaseOrderNo, s.cost, s.paymentMethod);
+              await onOrderComplete(s.orderId, s.purchaseOrderNo, s.cost, s.paymentMethod, s.payNo);
             }
           }
 

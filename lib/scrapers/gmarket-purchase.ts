@@ -27,7 +27,7 @@ interface ProgressCallback {
 }
 
 interface OrderCompleteCallback {
-  (orderId: string, purchaseOrderNo: string, cost?: number, paymentMethod?: string): Promise<void> | void;
+  (orderId: string, purchaseOrderNo: string, cost?: number, paymentMethod?: string, payNo?: string): Promise<void> | void;
 }
 
 interface OrderPreflightCallback {
@@ -143,6 +143,7 @@ export async function purchaseGmarket(
       );
 
       let lastOrderNo = "";
+      let lastPayNo: string | undefined;
       let totalCost = 0;
       let costExtractedCount = 0;
       let lastPaymentMethod: string | undefined;
@@ -182,9 +183,10 @@ export async function purchaseGmarket(
           // 2번째 이후 구매는 배송지가 이미 저장되어 있으므로 빠른 검증만 수행
           const singleOrder = { ...order, quantity: 1 };
           const isRepeat = q > 1;
-          const { purchaseOrderNo, cost, paymentMethod } = await processSingleOrder(activePage, context, singleOrder, paymentPin, existingOrderNosBeforePurchase, isRepeat);
+          const { purchaseOrderNo, cost, paymentMethod, payNo } = await processSingleOrder(activePage, context, singleOrder, paymentPin, existingOrderNosBeforePurchase, isRepeat);
 
           lastOrderNo = purchaseOrderNo;
+          if (payNo) lastPayNo = payNo;
           if (cost) { totalCost += cost; costExtractedCount++; }
           if (paymentMethod) lastPaymentMethod = paymentMethod;
           successCount++;
@@ -202,14 +204,14 @@ export async function purchaseGmarket(
             ? Math.round(totalCost / costExtractedCount) * totalQty
             : totalCost;
         }
-        result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod });
+        result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod, payNo: lastPayNo });
         onProgress?.(order.orderId, "success", `주문번호: ${lastOrderNo}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${lastPaymentMethod ? ` [${lastPaymentMethod}]` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`, lastOrderNo, { purchased: successCount, total: totalQty });
         console.log(`[gmarket-purchase] 주문 성공: ${order.orderId} → ${lastOrderNo} (총 원가: ${finalCost ?? "미확인"}, ${totalQty}개, 카드: ${lastPaymentMethod ?? "미확인"})`);
 
         // 성공 즉시 DB 반영 (취소/예외로 배치가 중단돼도 데이터 유실 방지)
         if (onOrderComplete) {
           try {
-            await onOrderComplete(order.orderId, lastOrderNo, finalCost, lastPaymentMethod);
+            await onOrderComplete(order.orderId, lastOrderNo, finalCost, lastPaymentMethod, lastPayNo);
           } catch (cbErr) {
             console.error(`[gmarket-purchase] onOrderComplete 콜백 오류 (${order.orderId}):`, cbErr instanceof Error ? cbErr.message : String(cbErr));
           }
@@ -233,6 +235,7 @@ export async function purchaseGmarket(
             purchaseOrderNo: lastOrderNo || undefined,
             cost: totalCost > 0 ? totalCost : undefined,
             paymentMethod: lastPaymentMethod,
+            payNo: lastPayNo,
           });
           onProgress?.(order.orderId, "failed", failMsg, lastOrderNo || undefined, { purchased: successCount, total: totalQty });
           console.error(`[gmarket-purchase] 주문 실패: ${order.orderId}`, failMsg, err instanceof Error ? err.message : String(err));
@@ -343,6 +346,8 @@ interface SingleOrderResult {
   purchaseOrderNo: string;
   cost?: number;
   paymentMethod?: string;
+  /** 결제번호 — 주문상세 페이지(/ko/pc/detail/basic/{payNo}) 진입에 필요 */
+  payNo?: string;
 }
 async function hasBotChallenge(page: Page): Promise<boolean> {
   const pageState = await page
@@ -2239,5 +2244,5 @@ async function extractOrderInfo(page: Page, existingOrderNosBeforePurchase: Set<
     console.log("[gmarket-purchase] payNo를 찾을 수 없어 상세 페이지 접근 불가");
   }
 
-  return { purchaseOrderNo: orderNo, cost, paymentMethod };
+  return { purchaseOrderNo: orderNo, cost, paymentMethod, payNo: payNo ?? undefined };
 }
