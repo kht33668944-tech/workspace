@@ -21,7 +21,7 @@ const CHANNEL_ENV: Record<DiscordChannel, string> = {
 export function inferDiscordChannel(title: string): DiscordChannel {
   if (/운송장|송장/.test(title)) return "tracking";
   if (/구매/.test(title)) return "purchase";
-  if (/가격|재고|최저가/.test(title)) return "price";
+  if (/가격|재고|최저가|원가/.test(title)) return "price";
   if (/주문|정산|취소|클레임/.test(title)) return "orders";
   if (/AI|상세페이지/.test(title)) return "ai";
   return "default";

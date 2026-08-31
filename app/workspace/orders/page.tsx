@@ -15,7 +15,7 @@ import { formatKoreanDateTime, getKoreanMonthKey } from "@/lib/date-utils";
 import { rememberWorkspaceHref, replaceUrlParams } from "@/lib/view-state";
 import { supabase } from "@/lib/supabase";
 import { exportPriceV2All } from "@/lib/price-update-v2-export";
-import { applyPriceChangesToMarketplaces, summarizeMarketApply } from "@/lib/marketplace-apply-client";
+import { applyPriceChangesToMarketplaces, summarizeMarketApply, type MarketApplyResult } from "@/lib/marketplace-apply-client";
 import OrderTable from "@/components/workspace/orders/order-table";
 import OrderModal from "@/components/workspace/orders/order-modal";
 import OrderSidePanel, { OrderSidePanelContent } from "@/components/workspace/orders/order-side-panel";
@@ -280,6 +280,16 @@ function OrdersPageInner() {
   const [costRefreshResults, setCostRefreshResults] = useState<CostRefreshResult[]>([]);
   const [costRefreshResultOpen, setCostRefreshResultOpen] = useState(false);
   const [applyingCostRefresh, setApplyingCostRefresh] = useState(false);
+  // 적용하기 결과 팝업 — 마켓에 실제로 어떻게 반영됐는지 확인용
+  const [marketApplyReport, setMarketApplyReport] = useState<{
+    productCount: number;
+    orderCount: number;
+    changed: number;
+    soldOut: number;
+    restocked: number;
+    market: MarketApplyResult | null; // null = 마켓 반영 대상 없음
+    marketError: string | null;
+  } | null>(null);
   const [exportingCostExcel, setExportingCostExcel] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const autoMenuRef = useRef<HTMLDivElement>(null);
@@ -679,7 +689,7 @@ function OrdersPageInner() {
     results: CostRefreshResult[],
     groups: Map<string, { product: ProductCostRow; orders: Order[] }>,
   ) => {
-    if (results.length === 0) return { productCount: 0, orderCount: 0, exportProductIds: [] as string[], changedProductIds: [] as string[], newlySoldOutIds: [] as string[], restockedIds: [] as string[] };
+    if (results.length === 0) return { productCount: 0, orderCount: 0, exportProductIds: [] as string[], changedProductIds: [] as string[], newlySoldOutIds: [] as string[], restockedIds: [] as string[], changedItems: [] as { name: string; previous: number; price: number }[], soldOutNames: [] as string[], restockedNames: [] as string[] };
 
     const changed = results.filter((r) => r.status === "priced" && r.price !== r.previous);
     for (let i = 0; i < changed.length; i += 500) {
@@ -704,10 +714,12 @@ function OrdersPageInner() {
     // - 품절이었다가 정상가로 재수집된 상품은 7%로 복귀
     const newlySoldOutIds: string[] = [];
     const restockedIds: string[] = [];
+    const soldOutNames: string[] = [];
+    const restockedNames: string[] = [];
     for (const r of results) {
       const margin = groups.get(r.productId)?.product.margin_rate;
-      if (r.status === "sold_out" && margin !== COST_REFRESH_SOLDOUT_MARGIN) newlySoldOutIds.push(r.productId);
-      if (r.status === "priced" && margin === COST_REFRESH_SOLDOUT_MARGIN) restockedIds.push(r.productId);
+      if (r.status === "sold_out" && margin !== COST_REFRESH_SOLDOUT_MARGIN) { newlySoldOutIds.push(r.productId); soldOutNames.push(r.productName); }
+      if (r.status === "priced" && margin === COST_REFRESH_SOLDOUT_MARGIN) { restockedIds.push(r.productId); restockedNames.push(r.productName); }
     }
     const marginUpdates = [
       ...newlySoldOutIds.map((id) => ({ id, margin: COST_REFRESH_SOLDOUT_MARGIN })),
@@ -771,7 +783,17 @@ function OrdersPageInner() {
       throw err;
     }
 
-    return { productCount: results.length, orderCount: updatedOrders, exportProductIds, changedProductIds: changed.map((r) => r.productId), newlySoldOutIds, restockedIds };
+    return {
+      productCount: results.length,
+      orderCount: updatedOrders,
+      exportProductIds,
+      changedProductIds: changed.map((r) => r.productId),
+      newlySoldOutIds,
+      restockedIds,
+      changedItems: changed.map((r) => ({ name: r.productName, previous: r.previous, price: r.price })),
+      soldOutNames,
+      restockedNames,
+    };
   }, [endBatchUndo, session?.access_token, startBatchUndo, updateOrder]);
 
   const handleStopCostRefresh = useCallback(() => {
@@ -943,6 +965,15 @@ function OrdersPageInner() {
       showToast(`원가 적용 완료: 발주서 ${applied.orderCount}건 수정`, "success");
 
       // 쿠팡·스마트스토어 API 즉시 반영 (변동가·품절·재입고) — 실패해도 로컬 적용은 유지
+      const report = {
+        productCount: applied.productCount,
+        orderCount: applied.orderCount,
+        changed: applied.changedProductIds.length,
+        soldOut: applied.newlySoldOutIds.length,
+        restocked: applied.restockedIds.length,
+        market: null as MarketApplyResult | null,
+        marketError: null as string | null,
+      };
       if (applied.changedProductIds.length || applied.newlySoldOutIds.length || applied.restockedIds.length) {
         try {
           pushCostRefreshLog("쿠팡·스마트스토어 API 반영 중...");
@@ -953,31 +984,42 @@ function OrdersPageInner() {
           });
           const summary = summarizeMarketApply(marketResult);
           pushCostRefreshLog(`마켓 API 반영: ${summary}`);
-          showToast(`마켓 API 반영: ${summary}`, "success");
+          report.market = marketResult;
 
-          // 디스코드 합산 알림 1회 — 사람이 알아볼 수 있는 형태로
+          // 디스코드 합산 알림 1회 — 어떤 상품이 얼마에서 얼마로 바뀌었고 어떤 마켓에 반영됐는지
           const failedCount = (marketResult.coupang?.failed ?? 0) + (marketResult.smartstore?.failed ?? 0);
+          const fmt = (n: number) => n.toLocaleString();
+          const listSection = (heading: string, items: string[]) => {
+            if (items.length === 0) return [];
+            return [heading, ...items.slice(0, 10).map((l) => `· ${l}`), ...(items.length > 10 ? [`· 외 ${items.length - 10}건`] : []), ""];
+          };
+          const lines = [
+            ...listSection(`📈 가격 변동 ${applied.changedItems.length}건`, applied.changedItems.map((it) => {
+              const diff = it.price - it.previous;
+              return `${it.name}: ${fmt(it.previous)}원 → **${fmt(it.price)}원** (${diff > 0 ? "▲" : "▼"}${fmt(Math.abs(diff))})`;
+            })),
+            ...listSection(`🚫 품절 → 판매중지 ${applied.soldOutNames.length}건`, applied.soldOutNames),
+            ...listSection(`🔄 재입고 → 판매재개 ${applied.restockedNames.length}건`, applied.restockedNames),
+            `🛒 마켓 반영: ${summary}`,
+            ...(applied.orderCount > 0 ? [`📋 발주서 ${applied.orderCount}건 수정`] : []),
+          ];
           fetch("/api/notifications/automation-result", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
             body: JSON.stringify({
               title: "원가 갱신 → 마켓 수정",
               status: failedCount > 0 ? "partial" : "success",
-              summary: `원가 갱신 변동사항을 마켓에 반영했습니다 — ${summary}`,
-              fields: [
-                { name: "가격 변동", value: applied.changedProductIds.length },
-                { name: "품절", value: applied.newlySoldOutIds.length },
-                { name: "재입고", value: applied.restockedIds.length },
-                { name: "발주서 수정", value: applied.orderCount },
-              ],
+              summary: lines.join("\n"),
+              channel: "price", // 가격재고-자동화 채널
             }),
           }).catch(() => {});
         } catch (marketErr) {
           const msg = marketErr instanceof Error ? marketErr.message : String(marketErr);
           pushCostRefreshLog(`마켓 API 반영 실패: ${msg} — 상품목록은 갱신됐으니 가격수정 엑셀 또는 API 반영 버튼으로 재시도하세요.`);
-          showToast("마켓 API 반영에 실패했습니다. 로그를 확인하세요.", "error");
+          report.marketError = msg;
         }
       }
+      setMarketApplyReport(report);
       setCostRefreshResultOpen(false);
       setCostRefreshResults([]);
 
@@ -1802,6 +1844,79 @@ function OrdersPageInner() {
                 {exportingCostExcel ? "엑셀 생성 중..." : "적용 + 엑셀 다운로드"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {marketApplyReport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMarketApplyReport(null)} />
+          <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-md p-6 mx-3">
+            <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">원가 갱신 적용 결과</h3>
+            <p className="text-xs text-[var(--text-muted)] mb-4">
+              상품 {marketApplyReport.productCount}개 확인 · 발주서 {marketApplyReport.orderCount}건 수정
+              {" · "}가격 변동 {marketApplyReport.changed} · 품절 {marketApplyReport.soldOut} · 재입고 {marketApplyReport.restocked}
+            </p>
+
+            <div className="space-y-2 mb-4">
+              {marketApplyReport.marketError ? (
+                <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2.5 text-xs text-red-400">
+                  마켓 API 반영 실패: {marketApplyReport.marketError}
+                  <p className="mt-1 text-[var(--text-muted)]">상품목록·발주서는 수정됐습니다. 가격수정 엑셀 또는 API 반영 버튼으로 다시 시도하세요.</p>
+                </div>
+              ) : !marketApplyReport.market ? (
+                <div className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2.5 text-xs text-[var(--text-muted)]">
+                  가격 변동·품절·재입고가 없어 마켓에 보낼 변경사항이 없습니다.
+                </div>
+              ) : marketApplyReport.market.skipped ? (
+                <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-400">
+                  {marketApplyReport.market.skipped}
+                </div>
+              ) : !marketApplyReport.market.coupang && !marketApplyReport.market.smartstore ? (
+                <div className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2.5 text-xs text-[var(--text-muted)]">
+                  연동된 마켓 API 계정이 없어 마켓 반영을 건너뛰었습니다.
+                </div>
+              ) : (
+                ([["coupang", "쿠팡"], ["smartstore", "스마트스토어"]] as const).map(([platform, label]) => {
+                  const r = marketApplyReport.market![platform];
+                  if (!r) return null;
+                  return (
+                    <div key={platform} className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2.5 text-xs">
+                      <p className="font-medium text-[var(--text-primary)] mb-1">
+                        {label}
+                        {r.dry && <span className="text-amber-400 ml-1">[테스트 모드 — 실제 반영 안 됨]</span>}
+                      </p>
+                      <p className="text-[var(--text-secondary)]">
+                        가격 변경 <span className="text-emerald-400 font-medium">{r.price}건</span>
+                        {" · "}판매중지 <span className="text-amber-400 font-medium">{r.stop}건</span>
+                        {" · "}판매재개 <span className="text-blue-400 font-medium">{r.resume}건</span>
+                        {r.failed > 0 && <> · 실패 <span className="text-red-400 font-medium">{r.failed}건</span></>}
+                        {r.blocked > 0 && <> · 미연동 <span className="text-[var(--text-muted)]">{r.blocked}건</span></>}
+                      </p>
+                      {r.errors.length > 0 && (
+                        <ul className="mt-1.5 space-y-0.5 text-red-400">
+                          {r.errors.slice(0, 3).map((err, i) => (
+                            <li key={i} className="truncate">· {err}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+              {marketApplyReport.market && !marketApplyReport.market.skipped && (
+                <p className="text-[11px] text-[var(--text-muted)] px-1">
+                  지마켓·옥션·11번가는 API가 없어 가격수정 엑셀로 올려야 반영됩니다. 미연동은 마켓 상품번호가 연결 안 된 상품입니다.
+                </p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setMarketApplyReport(null)}
+              className="w-full px-4 py-2.5 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+            >
+              확인
+            </button>
           </div>
         </div>
       )}
