@@ -311,7 +311,18 @@ async function scrapeWithRetry(token, initialIds, onRound) {
       log(`CF차단/실패 ${currentIds.length}개 자동 재시도 (${round}/${MAX_RETRY})...`);
       await sleep(3000);
     }
-    const r = await scrapeOnce(token, currentIds);
+    let r;
+    try {
+      r = await scrapeOnce(token, currentIds);
+    } catch (e) {
+      // 서버 재컴파일·일시 네트워크 단절로 SSE 연결이 끊겨도 수집분을 버리지 않는다.
+      // 첫 라운드(수집분 없음)만 치명적, 이후엔 30초 쉬고 같은 대상으로 재시도.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (round === 0 && byId.size === 0) throw e;
+      log(`라운드 ${round} 연결 오류 (${msg}) — 30초 후 재시도 계속`);
+      await sleep(30000);
+      continue;
+    }
     for (const c of r.changes) byId.set(c.id, c);
     for (const id of r.soldOut) allSoldOut.add(id);
     if (round === 0) skipped = r.skipped;
