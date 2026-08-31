@@ -531,7 +531,8 @@ function OrdersPageInner() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ productIds }),
+        // 라운드마다 디스코드 알림을 보내지 않는다 — 적용하기 완료 시 합산 1회만 발송
+        body: JSON.stringify({ productIds, notify: false }),
         signal: abortController.signal,
       });
 
@@ -952,6 +953,24 @@ function OrdersPageInner() {
           const summary = summarizeMarketApply(marketResult);
           pushCostRefreshLog(`마켓 API 반영: ${summary}`);
           showToast(`마켓 API 반영: ${summary}`, "success");
+
+          // 디스코드 합산 알림 1회 — 사람이 알아볼 수 있는 형태로
+          const failedCount = (marketResult.coupang?.failed ?? 0) + (marketResult.smartstore?.failed ?? 0);
+          fetch("/api/notifications/automation-result", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+            body: JSON.stringify({
+              title: "원가 갱신 → 마켓 수정",
+              status: failedCount > 0 ? "partial" : "success",
+              summary: `원가 갱신 변동사항을 마켓에 반영했습니다 — ${summary}`,
+              fields: [
+                { name: "가격 변동", value: applied.changedProductIds.length },
+                { name: "품절", value: applied.newlySoldOutIds.length },
+                { name: "재입고", value: applied.restockedIds.length },
+                { name: "발주서 수정", value: applied.orderCount },
+              ],
+            }),
+          }).catch(() => {});
         } catch (marketErr) {
           const msg = marketErr instanceof Error ? marketErr.message : String(marketErr);
           pushCostRefreshLog(`마켓 API 반영 실패: ${msg} — 상품목록은 갱신됐으니 가격수정 엑셀 또는 API 반영 버튼으로 재시도하세요.`);
