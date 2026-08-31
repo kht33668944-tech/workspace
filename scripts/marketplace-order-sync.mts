@@ -58,13 +58,15 @@ for (const platform of platforms) {
     log(`${platform}: 예외 — ${err instanceof Error ? err.message : String(err)}`);
   }
 }
-// 발송불가(품절·역마진 보류) 중 발송기한 임박(내일까지) 건 — 알림으로 결정 촉구
+// 미발송 주문(구매대기·확인·부분구매·발송불가·배송준비) 중 발송기한 임박(내일까지) — 알림으로 결정 촉구
 let shipDeadline: Array<{ recipientName: string | null; productName: string | null; shipByDate: string }> = [];
 try {
   const tomorrowKst = new Date(Date.now() + 9 * 3600000 + 86400000).toISOString().slice(0, 10);
   const { data: holdRows } = await sb.from("orders")
     .select("recipient_name,product_name,ship_by_date")
-    .eq("user_id", userId).eq("delivery_status", "발송불가")
+    .eq("user_id", userId)
+    .in("delivery_status", ["구매대기", "구매확인필요", "부분구매", "발송불가", "배송준비"])
+    .is("tracking_no", null)
     .not("ship_by_date", "is", null).lte("ship_by_date", tomorrowKst);
   shipDeadline = (holdRows ?? []).map((r) => ({ recipientName: r.recipient_name, productName: r.product_name, shipByDate: r.ship_by_date }));
   if (shipDeadline.length > 0) log(`발송불가 발송기한 임박 ${shipDeadline.length}건 (≤${tomorrowKst})`);

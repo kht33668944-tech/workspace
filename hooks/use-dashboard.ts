@@ -438,24 +438,25 @@ export function useDashboard() {
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
             .eq("delivery_status", "발송불가"),
-          // 5-1. 구매확인필요 (자동구매 이상)
+          // 5-1. 구매 확인 (자동구매 이상 + 부분구매)
           supabase
             .from("orders")
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
-            .eq("delivery_status", "구매확인필요"),
+            .in("delivery_status", ["구매확인필요", "부분구매"]),
           // 5-2. 취소요청 (승인/거절 판단 대기)
           supabase
             .from("orders")
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
             .eq("delivery_status", "취소요청"),
-          // 5-3. 발송불가 중 발송기한 임박(내일까지)
+          // 5-3. 미발송 주문 중 발송기한 임박(내일까지) — 구매대기·확인·부분구매·발송불가·배송준비
           supabase
             .from("orders")
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
-            .eq("delivery_status", "발송불가")
+            .in("delivery_status", ["구매대기", "구매확인필요", "부분구매", "발송불가", "배송준비"])
+            .is("tracking_no", null)
             .not("ship_by_date", "is", null)
             .lte("ship_by_date", new Date(Date.now() + 9 * 3600000 + 86400000).toISOString().slice(0, 10)),
           // 6. 최근 구매 로그 150건 (배치 집계용, 15배치 보장)

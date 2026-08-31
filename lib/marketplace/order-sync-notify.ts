@@ -47,7 +47,7 @@ export async function notifySyncResults(results: SyncResult[], trigger: "manual"
     for (const c of cancelReq.slice(0, 6)) lines.push(`   • ${c.recipientName ?? "-"} · ${c.productName ?? "-"}${c.reason ? ` (${c.reason})` : ""}`);
   }
   if (shipDeadline.length > 0) {
-    lines.push(`👉 발송불가 ${shipDeadline.length}건 발송기한 임박 — 취소준비로 보내거나 발송하세요`);
+    lines.push(`👉 미발송 ${shipDeadline.length}건 발송기한 임박 — 오늘 발송하거나 취소하세요`);
     for (const w of shipDeadline.slice(0, 6)) lines.push(`   • ${w.recipientName ?? "-"} · ${w.productName ?? "-"} (기한 ${w.shipByDate})`);
   }
   if (confirmFailed > 0) lines.push(`👉 발주확인 실패 ${confirmFailed}건 — 다음 회차에 재시도, 계속되면 마켓 센터 확인`);
