@@ -4,129 +4,112 @@ import Link from "next/link";
 import { setOrdersFilter } from "@/lib/dashboard-filters";
 import SkeletonBlock from "./skeleton-block";
 
+// 오늘 할 일 — "사람이 결정해야 하는 것"만 카드로. 자동화가 알아서 하는 흐름(배송준비→배송완료)은 아래 현황 한 줄.
 interface TodoFlowProps {
-  unpurchasedCount: number;
-  outOfStockCount: number;
-  noTrackingCount: number;
-  deliveredCount: number;
-  csCount: number;
-  cancelPendingCount: number;
+  unpurchasedCount: number;     // 구매대기
+  reviewCount: number;          // 구매확인필요
+  outOfStockCount: number;      // 발송불가
+  shipDeadlineCount: number;    // 발송불가 중 발송기한 임박
+  cancelRequestCount: number;   // 취소요청
+  csCount: number;              // 반품준비 + 교환준비
+  cancelPendingCount: number;   // 취소준비
+  noTrackingCount: number;      // 배송준비 (자동 진행 현황)
+  deliveredCount: number;       // 이번달 배송완료 (현황)
   loading: boolean;
 }
 
-interface StepProps {
+interface CardProps {
   label: string;
   count: number;
   sub: string;
-  countColor?: string;
-  borderColor?: string;
+  accent: "orange" | "purple" | "amber" | "rose" | "red";
+  badge?: string;
   loading: boolean;
-  filter?: Record<string, string[]>;
+  filter: Record<string, string[]>;
 }
 
-function Step({ label, count, sub, countColor, borderColor, loading, filter }: StepProps) {
+const ACCENT = {
+  orange: { count: "text-orange-400", border: "border-orange-500/30 hover:border-orange-500/60" },
+  purple: { count: "text-purple-400", border: "border-purple-500/30 hover:border-purple-500/60" },
+  amber: { count: "text-amber-400", border: "border-amber-500/30 hover:border-amber-500/60" },
+  rose: { count: "text-rose-400", border: "border-rose-500/30 hover:border-rose-500/60" },
+  red: { count: "text-red-400", border: "border-red-500/30 hover:border-red-500/60" },
+} as const;
+
+function Card({ label, count, sub, accent, badge, loading, filter }: CardProps) {
+  const active = count > 0;
+  const a = ACCENT[accent];
   return (
     <Link
       href="/workspace/orders"
-      onClick={() => { if (filter) setOrdersFilter(filter); }}
-      className={`flex-1 bg-[var(--bg-card)] border rounded-xl px-5 py-4 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer min-w-0 min-h-[44px] ${borderColor ?? "border-[var(--border)] hover:border-blue-500/50"}`}
+      onClick={() => setOrdersFilter(filter)}
+      className={`bg-[var(--bg-card)] border rounded-xl px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer min-w-0 min-h-[44px] ${active ? a.border : "border-[var(--border)] hover:border-blue-500/50"}`}
     >
-      <p className="text-xs text-[var(--text-muted)] mb-2">{label}</p>
+      <p className="text-xs text-[var(--text-muted)] mb-1.5">{label}</p>
       {loading ? (
         <SkeletonBlock className="h-7 w-14 mb-1" />
       ) : (
-        <p className={`text-2xl font-bold mb-1 ${countColor ?? "text-[var(--text-primary)]"}`}>
+        <p className={`text-2xl font-bold mb-0.5 ${active ? a.count : "text-[var(--text-primary)]"}`}>
           {count.toLocaleString("ko-KR")}
           <span className="text-sm font-normal text-[var(--text-muted)] ml-1">건</span>
+          {badge && <span className="ml-2 text-xs font-semibold text-red-400 align-middle">{badge}</span>}
         </p>
       )}
-      <p className="text-xs text-[var(--text-muted)]">{sub}</p>
+      <p className="text-xs text-[var(--text-muted)] truncate">{sub}</p>
     </Link>
-  );
-}
-
-function Arrow() {
-  return (
-    <div className="hidden md:flex items-center text-[var(--text-muted)] px-2 text-lg min-h-[100px]">→</div>
   );
 }
 
 export default function TodoFlow({
   unpurchasedCount,
+  reviewCount,
   outOfStockCount,
-  noTrackingCount,
-  deliveredCount,
+  shipDeadlineCount,
+  cancelRequestCount,
   csCount,
   cancelPendingCount,
+  noTrackingCount,
+  deliveredCount,
   loading,
 }: TodoFlowProps) {
+  const totalTodo = unpurchasedCount + reviewCount + outOfStockCount + cancelRequestCount + csCount + cancelPendingCount;
+  const allClear = !loading && totalTodo === 0;
+
   return (
     <div>
-      <p className="text-sm font-semibold text-[var(--text-secondary)] mb-3">오늘 할일</p>
-      <div className="flex flex-col md:flex-row items-stretch md:items-start gap-2 md:gap-0">
-        <div className="flex-1 flex flex-col gap-2 min-w-0">
-          <Step
-            label="구매대기"
-            count={unpurchasedCount}
-            sub="구매 처리 필요"
-            countColor={unpurchasedCount > 0 ? "text-orange-400" : undefined}
-            loading={loading}
-            filter={{ delivery_status: ["구매대기"] }}
-          />
-          <Step
-            label="발송불가"
-            count={outOfStockCount}
-            sub="재고 확인 필요"
-            countColor={outOfStockCount > 0 ? "text-amber-400" : undefined}
-            borderColor={outOfStockCount > 0 ? "border-amber-500/30 hover:border-amber-500/60" : "border-[var(--border)] hover:border-amber-400/50"}
-            loading={loading}
-            filter={{ delivery_status: ["발송불가"] }}
-          />
-        </div>
-        <Arrow />
-        <Step
-          label="배송준비중"
-          count={noTrackingCount}
-          sub="운송장 수집 필요"
-          countColor={noTrackingCount > 0 ? "text-yellow-400" : undefined}
-          loading={loading}
-          filter={{ delivery_status: ["배송준비"] }}
+      <p className="text-sm font-semibold text-[var(--text-secondary)] mb-3">
+        오늘 할 일{allClear && <span className="ml-2 text-green-400 font-medium">✅ 전부 처리됨</span>}
+      </p>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+        <Card
+          label="구매대기" count={unpurchasedCount} sub="자동구매 실행" accent="orange"
+          loading={loading} filter={{ delivery_status: ["구매대기"] }}
         />
-        <Arrow />
-        <Step
-          label="배송완료"
-          count={deliveredCount}
-          sub="이번달 완료"
-          countColor="text-green-400"
-          loading={loading}
-          filter={{ delivery_status: ["배송완료"] }}
+        <Card
+          label="구매확인필요" count={reviewCount} sub="자동구매 이상 확인" accent="purple"
+          loading={loading} filter={{ delivery_status: ["구매확인필요"] }}
         />
-
-        {/* CS 구분선 */}
-        <div className="hidden md:flex items-center px-2 min-h-[100px]">
-          <div className="w-px h-10 bg-[var(--border)]" />
-        </div>
-
-        <Step
-          label="CS 처리"
-          count={csCount}
-          sub="교환·반품 준비"
-          countColor={csCount > 0 ? "text-red-400" : undefined}
-          borderColor={csCount > 0 ? "border-red-500/30 hover:border-red-500/60" : "border-[var(--border)] hover:border-red-400/50"}
-          loading={loading}
-          filter={{ delivery_status: ["교환준비", "반품준비"] }}
+        <Card
+          label="발송불가" count={outOfStockCount} sub="취소 또는 발송 결정" accent="amber"
+          badge={shipDeadlineCount > 0 ? `⚠️ 기한임박 ${shipDeadlineCount}` : undefined}
+          loading={loading} filter={{ delivery_status: ["발송불가"] }}
         />
-
-        <Step
-          label="취소준비"
-          count={cancelPendingCount}
-          sub="취소 처리 필요"
-          countColor={cancelPendingCount > 0 ? "text-red-400" : undefined}
-          borderColor={cancelPendingCount > 0 ? "border-red-500/30 hover:border-red-500/60" : "border-[var(--border)] hover:border-red-400/50"}
-          loading={loading}
-          filter={{ delivery_status: ["취소준비"] }}
+        <Card
+          label="취소요청" count={cancelRequestCount} sub="승인/거절 판단" accent="rose"
+          loading={loading} filter={{ delivery_status: ["취소요청"] }}
+        />
+        <Card
+          label="CS 처리" count={csCount} sub="반품·교환 준비" accent="red"
+          loading={loading} filter={{ delivery_status: ["교환준비", "반품준비"] }}
+        />
+        <Card
+          label="취소준비" count={cancelPendingCount} sub="마켓 취소 실행" accent="red"
+          loading={loading} filter={{ delivery_status: ["취소준비"] }}
         />
       </div>
+      <p className="text-xs text-[var(--text-muted)] mt-2">
+        자동 진행 중 — 배송준비 {loading ? "…" : noTrackingCount.toLocaleString("ko-KR")}건 · 이번달 배송완료 {loading ? "…" : deliveredCount.toLocaleString("ko-KR")}건
+      </p>
     </div>
   );
 }

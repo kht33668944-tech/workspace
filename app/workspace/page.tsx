@@ -29,11 +29,14 @@ export default function WorkspacePage() {
         <div className="lg:col-span-2">
           <TodoFlow
             unpurchasedCount={data.unpurchasedCount}
+            reviewCount={data.reviewCount}
             outOfStockCount={data.outOfStockCount}
-            noTrackingCount={data.noTrackingCount}
-            deliveredCount={data.deliveredCount}
+            shipDeadlineCount={data.shipDeadlineCount}
+            cancelRequestCount={data.cancelRequestCount}
             csCount={data.csCount}
             cancelPendingCount={data.cancelPendingCount}
+            noTrackingCount={data.noTrackingCount}
+            deliveredCount={data.deliveredCount}
             loading={loading}
           />
         </div>

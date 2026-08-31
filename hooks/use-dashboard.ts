@@ -66,6 +66,9 @@ export interface DashboardData {
   deliveredCount: number;       // 이번달만
   csCount: number;              // 교환준비 + 반품준비
   cancelPendingCount: number;   // 취소준비
+  reviewCount: number;          // 구매확인필요 (자동구매 이상)
+  cancelRequestCount: number;   // 취소요청 (승인/거절 판단 대기)
+  shipDeadlineCount: number;    // 발송불가 중 발송기한 임박(내일까지)
   // 손익/로그
   dailyProfitRows: DashboardDailyProfitRow[];
   monthlyProfitSummary: DashboardMonthlyProfitSummary;
@@ -109,6 +112,9 @@ const EMPTY_DATA: DashboardData = {
   deliveredCount: 0,
   csCount: 0,
   cancelPendingCount: 0,
+  reviewCount: 0,
+  cancelRequestCount: 0,
+  shipDeadlineCount: 0,
   dailyProfitRows: [],
   monthlyProfitSummary: emptyMonthlySummary(),
   activityLogs: [],
@@ -432,6 +438,26 @@ export function useDashboard() {
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
             .eq("delivery_status", "발송불가"),
+          // 5-1. 구매확인필요 (자동구매 이상)
+          supabase
+            .from("orders")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", uid)
+            .eq("delivery_status", "구매확인필요"),
+          // 5-2. 취소요청 (승인/거절 판단 대기)
+          supabase
+            .from("orders")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", uid)
+            .eq("delivery_status", "취소요청"),
+          // 5-3. 발송불가 중 발송기한 임박(내일까지)
+          supabase
+            .from("orders")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", uid)
+            .eq("delivery_status", "발송불가")
+            .not("ship_by_date", "is", null)
+            .lte("ship_by_date", new Date(Date.now() + 9 * 3600000 + 86400000).toISOString().slice(0, 10)),
           // 6. 최근 구매 로그 150건 (배치 집계용, 15배치 보장)
           supabase
             .from("purchase_logs")
@@ -452,7 +478,7 @@ export function useDashboard() {
         fetchMonthlyProfit(uid, currentMonth),
       ]);
 
-      const [c0, c1, c2, c4, c5, c6, c7, c8] = counts;
+      const [c0, c1, c2, c4, c5, c6, c6a, c6b, c6c, c7, c8] = counts;
 
       // 구매/운송장 배치 집계 후 시간순 병합 (최신 15개)
       type LogRow = { batch_id: string; platform: string; status: string; created_at: string };
@@ -476,6 +502,9 @@ export function useDashboard() {
         csCount: c4.count ?? 0,
         cancelPendingCount: c5.count ?? 0,
         outOfStockCount: c6.count ?? 0,
+        reviewCount: c6a.count ?? 0,
+        cancelRequestCount: c6b.count ?? 0,
+        shipDeadlineCount: c6c.count ?? 0,
         dailyProfitRows: profitStats.rows,
         monthlyProfitSummary: profitStats.summary,
         activityLogs,
