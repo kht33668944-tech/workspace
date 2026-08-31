@@ -71,6 +71,7 @@ export interface DashboardData {
   reviewCount: number;          // 구매확인필요 (자동구매 이상)
   cancelRequestCount: number;   // 취소요청 (승인/거절 판단 대기)
   shipDeadlineCount: number;    // 발송불가 중 발송기한 임박(내일까지)
+  inquiryCount: number;         // 미답변 마켓 문의
   // 손익/로그
   dailyProfitRows: DashboardDailyProfitRow[];
   monthlyProfitSummary: DashboardMonthlyProfitSummary;
@@ -117,6 +118,7 @@ const EMPTY_DATA: DashboardData = {
   reviewCount: 0,
   cancelRequestCount: 0,
   shipDeadlineCount: 0,
+  inquiryCount: 0,
   dailyProfitRows: [],
   monthlyProfitSummary: emptyMonthlySummary(),
   activityLogs: [],
@@ -483,13 +485,19 @@ export function useDashboard() {
             .in("action", Object.keys(MARKETPLACE_ACTIVITY_LABELS))
             .order("created_at", { ascending: false })
             .limit(150),
+          // 9. 미답변 마켓 문의
+          supabase
+            .from("marketplace_inquiries")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", uid)
+            .eq("status", "unanswered"),
         ]),
         fetchMonthStats(uid, currentMonth),
         fetchMonthStats(uid, lastMonth),
         fetchMonthlyProfit(uid, currentMonth),
       ]);
 
-      const [c0, c1, c2, c4, c5, c6, c6a, c6b, c6c, c7, c8, c9] = counts;
+      const [c0, c1, c2, c4, c5, c6, c6a, c6b, c6c, c7, c8, c9, c10] = counts;
 
       // 구매/운송장 배치 + 마켓 API 활동을 시간순 병합 (최신 20개)
       type LogRow = { batch_id: string; platform: string; status: string; created_at: string; order_id: string | null };
@@ -518,6 +526,7 @@ export function useDashboard() {
         reviewCount: c6a.count ?? 0,
         cancelRequestCount: c6b.count ?? 0,
         shipDeadlineCount: c6c.count ?? 0,
+        inquiryCount: c10.count ?? 0,
         dailyProfitRows: profitStats.rows,
         monthlyProfitSummary: profitStats.summary,
         activityLogs,

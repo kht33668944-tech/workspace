@@ -6,7 +6,7 @@ interface AutomationNotifyField {
 }
 
 /** 디스코드 채널 (채널별 웹훅 환경변수). 없으면 DISCORD_WEBHOOK_URL 로 */
-export type DiscordChannel = "orders" | "tracking" | "purchase" | "price" | "ai" | "default";
+export type DiscordChannel = "orders" | "tracking" | "purchase" | "price" | "ai" | "inquiry" | "default";
 
 const CHANNEL_ENV: Record<DiscordChannel, string> = {
   orders: "DISCORD_WEBHOOK_ORDERS",     // 주문수집-자동화: 주문 수집·취소요청·정산
@@ -14,12 +14,14 @@ const CHANNEL_ENV: Record<DiscordChannel, string> = {
   purchase: "DISCORD_WEBHOOK_PURCHASE", // 구매자동화
   price: "DISCORD_WEBHOOK_PRICE",       // 가격재고-자동화
   ai: "DISCORD_WEBHOOK_AI",             // AI 상세페이지 등
+  inquiry: "DISCORD_WEBHOOK_INQUIRY",   // 문의-자동화: 마켓 고객문의 수집·AI 자동답변
   default: "DISCORD_WEBHOOK_URL",
 };
 
 /** 제목으로 채널 추론 (channel 을 명시하지 않은 기존 호출부용) */
 export function inferDiscordChannel(title: string): DiscordChannel {
   if (/운송장|송장/.test(title)) return "tracking";
+  if (/문의/.test(title)) return "inquiry";
   if (/구매/.test(title)) return "purchase";
   if (/가격|재고|최저가|원가/.test(title)) return "price";
   if (/주문|정산|취소|클레임/.test(title)) return "orders";

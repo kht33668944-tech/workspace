@@ -433,6 +433,104 @@ export class NaverCommerceApiClient {
       },
     );
   }
+
+  // ───────── 고객 문의(CS) ─────────
+
+  /** 상품문의(Q&A) 조회 — fromDate/toDate 는 ISO 일시 필수 (yyyy-MM-dd 는 400). 응답 키는 contents (실측) */
+  getProductQnas(params: { fromDate: string; toDate: string; page?: number; size?: number; answered?: boolean }) {
+    const iso = (d: string, end: boolean) => (d.includes("T") ? d : `${d}T${end ? "23:59:59.999" : "00:00:00.000"}+09:00`);
+    return this.request<NaverQnaPage>("GET", "/v1/contents/qnas", {
+      query: {
+        fromDate: iso(params.fromDate, false),
+        toDate: iso(params.toDate, true),
+        page: params.page ?? 1,
+        size: params.size ?? 100,
+        answered: params.answered === undefined ? undefined : String(params.answered),
+      },
+    });
+  }
+
+  /** 상품문의(Q&A) 답변 등록/수정 */
+  answerProductQna(questionId: number | string, commentContent: string) {
+    return this.request<Record<string, unknown>>("PUT", `/v1/contents/qnas/${questionId}`, {
+      body: { commentContent },
+    });
+  }
+
+  /** 1:1 고객문의 조회 — 날짜 yyyy-MM-dd, size 10~200 */
+  getCustomerInquiries(params: { startSearchDate: string; endSearchDate: string; page?: number; size?: number; answered?: boolean }) {
+    return this.request<NaverPagedResponse<NaverCustomerInquiry>>("GET", "/v1/pay-user/inquiries", {
+      query: {
+        startSearchDate: params.startSearchDate,
+        endSearchDate: params.endSearchDate,
+        page: params.page ?? 1,
+        size: params.size ?? 200,
+        answered: params.answered === undefined ? undefined : String(params.answered),
+      },
+    });
+  }
+
+  /** 1:1 고객문의 답변 등록 */
+  answerCustomerInquiry(inquiryNo: number | string, answerContent: string) {
+    return this.request<Record<string, unknown>>("POST", `/v1/pay-merchant/inquiries/${inquiryNo}/answer`, {
+      body: { answerContent },
+    });
+  }
+}
+
+// ─── 고객 문의(CS) 타입 — 응답 필드는 실측 편차 대비 인덱스 시그니처 허용 ───
+
+/** 상품문의(Q&A) 1건 — 실측: answer 는 답변 텍스트 문자열 */
+export interface NaverQna {
+  questionId: number;
+  question?: string;
+  answer?: string | null;
+  answered?: boolean;
+  createDate?: string;
+  productId?: number;
+  productName?: string;
+  maskedWriterId?: string;
+  [key: string]: unknown;
+}
+
+/** contents/qnas 응답 (실측: 목록 키가 contents) */
+export interface NaverQnaPage {
+  contents?: NaverQna[];
+  page?: number;
+  size?: number;
+  totalElements?: number;
+  totalPages?: number;
+  first?: boolean;
+  last?: boolean;
+  [key: string]: unknown;
+}
+
+export interface NaverCustomerInquiry {
+  inquiryNo: number;
+  category?: string;
+  title?: string;
+  inquiryContent?: string;
+  inquiryRegistrationDateTime?: string;
+  answered?: boolean;
+  answerContent?: string;
+  answerRegistrationDateTime?: string;
+  orderId?: string;
+  productOrderIdList?: string[];
+  productNo?: number;
+  productName?: string;
+  customerName?: string;
+  [key: string]: unknown;
+}
+
+export interface NaverPagedResponse<T> {
+  content?: T[];
+  page?: number;
+  size?: number;
+  totalElements?: number;
+  totalPages?: number;
+  first?: boolean;
+  last?: boolean;
+  [key: string]: unknown;
 }
 
 /** 상품주문 처리 계열 API 공통 응답 (발주확인·발송·클레임) */

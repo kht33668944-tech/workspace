@@ -4,7 +4,7 @@ import Link from "next/link";
 import { setOrdersFilter } from "@/lib/dashboard-filters";
 import SkeletonBlock from "./skeleton-block";
 
-// 오늘 할 일 — 윗줄: 정상 흐름(구매대기 → 구매 확인 → 배송준비 → 배송완료), 아랫줄: 예외 처리(발송불가·취소요청·CS·취소준비).
+// 오늘 할 일 — 윗줄: 정상 흐름(구매대기 → 구매 확인 → 배송준비 → 배송완료), 아랫줄: 예외 처리(발송불가·취소요청·CS·취소준비·문의).
 // "✅ 전부 처리됨"은 사람이 결정할 카드(배송준비·배송완료 제외)가 전부 0일 때.
 interface TodoFlowProps {
   unpurchasedCount: number;     // 구매대기
@@ -16,6 +16,7 @@ interface TodoFlowProps {
   cancelPendingCount: number;   // 취소준비
   noTrackingCount: number;      // 배송준비 (운송장 대기)
   deliveredCount: number;       // 이번달 배송완료
+  inquiryCount: number;         // 미답변 마켓 문의
   loading: boolean;
 }
 
@@ -23,10 +24,12 @@ interface CardProps {
   label: string;
   count: number;
   sub: string;
-  accent: "orange" | "purple" | "amber" | "rose" | "red" | "blue" | "green";
+  accent: "orange" | "purple" | "amber" | "rose" | "red" | "blue" | "green" | "teal";
   highlight?: boolean; // false 면 건수가 있어도 강조하지 않음 (자동 진행·실적 카드)
   loading: boolean;
   filter: Record<string, string[]>;
+  /** 기본은 발주서 탭 — 문의 카드처럼 다른 탭으로 보낼 때만 지정 */
+  href?: string;
 }
 
 const ACCENT = {
@@ -37,15 +40,16 @@ const ACCENT = {
   red: { count: "text-red-400", border: "border-red-500/30 hover:border-red-500/60" },
   blue: { count: "text-blue-400", border: "border-[var(--border)] hover:border-blue-500/50" },
   green: { count: "text-green-400", border: "border-[var(--border)] hover:border-green-500/50" },
+  teal: { count: "text-teal-400", border: "border-teal-500/30 hover:border-teal-500/60" },
 } as const;
 
-function Card({ label, count, sub, accent, highlight = true, loading, filter }: CardProps) {
+function Card({ label, count, sub, accent, highlight = true, loading, filter, href = "/workspace/orders" }: CardProps) {
   const active = highlight && count > 0;
   const a = ACCENT[accent];
   return (
     <Link
-      href="/workspace/orders"
-      onClick={() => setOrdersFilter(filter)}
+      href={href}
+      onClick={() => { if (Object.keys(filter).length > 0) setOrdersFilter(filter); }}
       className={`bg-[var(--bg-card)] border rounded-xl px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer min-w-0 min-h-[44px] ${active ? a.border : "border-[var(--border)] hover:border-blue-500/50"}`}
     >
       <p className="text-xs text-[var(--text-muted)] mb-1.5">{label}</p>
@@ -72,9 +76,10 @@ export default function TodoFlow({
   cancelPendingCount,
   noTrackingCount,
   deliveredCount,
+  inquiryCount,
   loading,
 }: TodoFlowProps) {
-  const totalTodo = unpurchasedCount + reviewCount + outOfStockCount + cancelRequestCount + csCount + cancelPendingCount;
+  const totalTodo = unpurchasedCount + reviewCount + outOfStockCount + cancelRequestCount + csCount + cancelPendingCount + inquiryCount;
   const allClear = !loading && totalTodo === 0;
 
   return (
@@ -86,8 +91,8 @@ export default function TodoFlow({
           <span className="ml-2 text-red-400 font-semibold">⚠️ 발송기한 임박 {shipDeadlineCount}건 (미발송)</span>
         )}
       </p>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        {/* 윗줄: 정상 흐름 */}
+      {/* 윗줄: 정상 흐름 4칸 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
         <Card
           label="구매대기" count={unpurchasedCount} sub="자동구매 실행" accent="orange"
           loading={loading} filter={{ delivery_status: ["구매대기"] }}
@@ -104,7 +109,9 @@ export default function TodoFlow({
           label="배송완료" count={deliveredCount} sub="이번달 완료" accent="green" highlight={false}
           loading={loading} filter={{ delivery_status: ["배송완료"] }}
         />
-        {/* 아랫줄: 예외 처리 */}
+      </div>
+      {/* 아랫줄: 예외 처리 5칸 */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
         <Card
           label="발송불가" count={outOfStockCount} sub="취소 또는 발송 결정" accent="amber"
           loading={loading} filter={{ delivery_status: ["발송불가"] }}
@@ -112,6 +119,10 @@ export default function TodoFlow({
         <Card
           label="취소요청" count={cancelRequestCount} sub="승인/거절 판단" accent="rose"
           loading={loading} filter={{ delivery_status: ["취소요청"] }}
+        />
+        <Card
+          label="문의" count={inquiryCount} sub="미답변 마켓 문의" accent="teal"
+          loading={loading} filter={{}} href="/workspace/orders?tab=inquiries"
         />
         <Card
           label="CS 처리" count={csCount} sub="반품·교환 준비" accent="red"

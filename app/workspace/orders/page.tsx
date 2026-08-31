@@ -6,6 +6,7 @@ import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
 import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban, Send, Globe } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
+import InquiryTab from "@/components/workspace/orders/inquiry-tab";
 import { useOrders } from "@/hooks/use-orders";
 import { useAuth } from "@/context/AuthContext";
 import { exportOrdersToCSV } from "@/lib/excel-parser";
@@ -41,7 +42,7 @@ import type { PurchaseCancelMode, PurchaseCancelReason } from "@/lib/purchase-ca
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
 
 const FILTER_STORAGE_KEY = "orders-filter-state";
-type OrdersTab = "orders" | "logs" | "tracking-logs";
+type OrdersTab = "orders" | "logs" | "tracking-logs" | "inquiries";
 type ProductCostRow = {
   id: string;
   product_name: string | null;
@@ -297,7 +298,7 @@ function OrdersPageInner() {
   const importMenuRef = useRef<HTMLDivElement>(null);
   const urlTab = searchParams.get("tab") as OrdersTab | null;
   const activeBatchId = searchParams.get("batch");
-  const initialTab: OrdersTab = urlTab === "orders" || urlTab === "logs" || urlTab === "tracking-logs"
+  const initialTab: OrdersTab = urlTab === "orders" || urlTab === "logs" || urlTab === "tracking-logs" || urlTab === "inquiries"
     ? urlTab
     : saved?.tab ?? "orders";
   const [activeTab, setActiveTab] = useState<OrdersTab>(initialTab);
@@ -1404,6 +1405,17 @@ function OrdersPageInner() {
           <Truck className="w-4 h-4" />
           운송장 로그
         </button>
+        <button
+          onClick={() => handleTabChange("inquiries")}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "inquiries"
+              ? "border-blue-500 text-blue-400"
+              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" />
+          문의
+        </button>
       </div>
 
       {/* 구매 로그 탭 */}
@@ -1411,6 +1423,9 @@ function OrdersPageInner() {
 
       {/* 운송장 로그 탭 */}
       {activeTab === "tracking-logs" && <TrackingLogTab initialBatchId={activeBatchId} />}
+
+      {/* 문의 탭 */}
+      {activeTab === "inquiries" && <InquiryTab />}
 
       {/* 발주서 탭 */}
       {activeTab === "orders" && (<>

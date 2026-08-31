@@ -285,7 +285,8 @@ export type MarketplaceApiAction =
   | "ship" | "ship-fix"
   | "return-approve" | "return-receive" | "return-complete" | "return-reject"
   | "exchange-collect" | "exchange-ship" | "exchange-reject"
-  | "settlement";
+  | "settlement"
+  | "sync-inquiries" | "inquiry_reply";
 
 export interface MarketplaceApiCredential {
   id: string;
@@ -317,6 +318,33 @@ export interface MarketplaceApiLog {
   error_message: string | null;
   response_payload: Record<string, unknown> | null;
   created_at: string;
+}
+
+// ─── 마켓 문의 (쿠팡 상품문의/고객센터, 스토어 상품Q&A/1:1) ───
+export type MarketplaceInquiryType = "coupang_product" | "coupang_cs" | "naver_qna" | "naver_inquiry";
+export type MarketplaceInquiryStatus = "unanswered" | "answered";
+export type MarketplaceInquiryAnswerSource = "sync" | "app" | "auto";
+
+export interface MarketplaceInquiry {
+  id: string;
+  user_id: string;
+  platform: "coupang" | "smartstore";
+  inquiry_type: MarketplaceInquiryType;
+  inquiry_id: string;
+  content: string;
+  product_name: string | null;
+  market_order_ids: string[];
+  order_id: string | null;
+  inquiry_at: string | null;
+  status: MarketplaceInquiryStatus;
+  answer_content: string | null;
+  answered_at: string | null;
+  answer_source: MarketplaceInquiryAnswerSource | null;
+  ai_draft: string | null;
+  ai_draft_at: string | null;
+  raw: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 // ─── 옥션·지마켓(ESM) 가격 인벤토리 ───

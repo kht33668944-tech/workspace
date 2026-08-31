@@ -467,6 +467,150 @@ export class CoupangOpenApiClient {
       },
     );
   }
+
+  // ───────── 고객 문의(CS) ─────────
+
+  /** 상품문의(고객문의) 조회 — 최대 7일, pageSize≤50 */
+  listOnlineInquiries(params: {
+    inquiryStartAt: string; // yyyy-MM-dd
+    inquiryEndAt: string;
+    answeredType?: "ALL" | "ANSWERED" | "NOANSWER";
+    pageNum?: number;
+    pageSize?: number;
+  }) {
+    return this.request<CoupangInquiryPagedResponse<CoupangOnlineInquiry>>(
+      "GET",
+      `${ORDER_API}/v5/vendors/${this.vendorId}/onlineInquiries`,
+      {
+        vendorId: this.vendorId,
+        answeredType: params.answeredType ?? "ALL",
+        inquiryStartAt: params.inquiryStartAt,
+        inquiryEndAt: params.inquiryEndAt,
+        pageNum: params.pageNum ?? 1,
+        pageSize: params.pageSize ?? 50,
+      },
+    );
+  }
+
+  /** 상품문의 답변 — replyBy 는 쿠팡윙 로그인 ID. 이미 답변된 문의에 다시 보내면 400 */
+  replyOnlineInquiry(params: { inquiryId: number | string; content: string; replyBy: string }) {
+    return this.request<{ code: string | number; message: string }>(
+      "POST",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/onlineInquiries/${params.inquiryId}/replies`,
+      undefined,
+      { content: params.content, vendorId: this.vendorId, replyBy: params.replyBy },
+    );
+  }
+
+  /** 고객센터문의 조회 — 최대 7일, pageSize≤30 */
+  listCallCenterInquiries(params: {
+    inquiryStartAt: string; // yyyy-MM-dd
+    inquiryEndAt: string;
+    partnerCounselingStatus?: "NONE" | "ANSWER" | "NO_ANSWER" | "TRANSFER";
+    pageNum?: number;
+    pageSize?: number;
+  }) {
+    return this.request<CoupangInquiryPagedResponse<CoupangCallCenterInquiry>>(
+      "GET",
+      `${ORDER_API}/v5/vendors/${this.vendorId}/callCenterInquiries`,
+      {
+        vendorId: this.vendorId,
+        partnerCounselingStatus: params.partnerCounselingStatus ?? "NONE",
+        inquiryStartAt: params.inquiryStartAt,
+        inquiryEndAt: params.inquiryEndAt,
+        pageNum: params.pageNum ?? 1,
+        pageSize: params.pageSize ?? 30,
+      },
+    );
+  }
+
+  /** 고객센터문의 답변 — content 2~1000자, 미답변(progress + requestAnswer) 상태에서만 가능 */
+  replyCallCenterInquiry(params: { inquiryId: number | string; content: string; replyBy: string; parentAnswerId: number }) {
+    return this.request<{ code: string | number; message: string }>(
+      "POST",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/callCenterInquiries/${params.inquiryId}/replies`,
+      undefined,
+      {
+        inquiryId: String(params.inquiryId),
+        content: params.content,
+        vendorId: this.vendorId,
+        replyBy: params.replyBy,
+        parentAnswerId: params.parentAnswerId,
+      },
+    );
+  }
+
+  /** 고객센터문의 확인 처리 — 답변 없이 확인만 남길 때 */
+  confirmCallCenterInquiry(inquiryId: number | string) {
+    return this.request<{ code: string | number; message: string }>(
+      "POST",
+      `${ORDER_API}/v4/vendors/${this.vendorId}/callCenterInquiries/${inquiryId}/confirms`,
+      undefined,
+      { vendorId: this.vendorId, inquiryId: String(inquiryId) },
+    );
+  }
+}
+
+// ─── 고객 문의(CS) 타입 ───
+
+export interface CoupangInquiryComment {
+  inquiryCommentId: number;
+  content: string;
+  inquiryCommentAt?: string;
+  [key: string]: unknown;
+}
+
+export interface CoupangOnlineInquiry {
+  inquiryId: number;
+  productId?: number;
+  sellerProductId?: number;
+  sellerItemId?: number;
+  vendorItemId?: number;
+  content: string;
+  inquiryAt: string;
+  orderIds?: Array<number | string>;
+  buyerEmail?: string;
+  commentDtoList?: CoupangInquiryComment[];
+  [key: string]: unknown;
+}
+
+/** 고객센터문의 답변/이관글 1건 (실측: replies[]) — needAnswer=true 인 행의 answerId 가 답변 시 parentAnswerId */
+export interface CoupangCallCenterReply {
+  answerId?: number;
+  parentAnswerId?: number | null;
+  content?: string;
+  replyAt?: string;
+  receptionistName?: string;
+  receptionist?: string | null;
+  partnerTransferStatus?: string; // requestAnswer | answered
+  answerType?: string; // csAgent | vendor
+  needAnswer?: boolean;
+  [key: string]: unknown;
+}
+
+/** 고객센터문의 — 답변 조건(inquiryStatus/partnerTransferStatus) 판정용 필드는 raw 보존 후 방어적으로 추출 */
+export interface CoupangCallCenterInquiry {
+  inquiryId: number;
+  inquiryStatus?: string; // progress | complete
+  csPartnerCounselingStatus?: string; // requestAnswer | answered
+  vendorItemId?: number | number[];
+  itemName?: string;
+  content?: string;
+  inquiryAt?: string;
+  answeredAt?: string;
+  orderId?: number;
+  buyerPhone?: string;
+  replies?: CoupangCallCenterReply[];
+  [key: string]: unknown;
+}
+
+export interface CoupangInquiryPagedResponse<T> {
+  code: string | number;
+  message: string;
+  data?: {
+    content?: T[];
+    pagination?: { currentPage?: number; totalPages?: number; totalElements?: number; countPerPage?: number };
+  };
 }
 
 export interface CoupangRevenueItem {

@@ -37,6 +37,7 @@ export default function WorkspacePage() {
             cancelPendingCount={data.cancelPendingCount}
             noTrackingCount={data.noTrackingCount}
             deliveredCount={data.deliveredCount}
+            inquiryCount={data.inquiryCount}
             loading={loading}
           />
         </div>

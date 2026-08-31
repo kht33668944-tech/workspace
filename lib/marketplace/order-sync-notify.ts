@@ -3,6 +3,7 @@
 
 import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
 import type { SyncResult } from "@/lib/marketplace/order-sync";
+import { INQUIRY_TYPE_LABEL, type InquirySyncResult, type InquirySyncItem } from "@/lib/marketplace/inquiry-sync";
 import type { ShipResult } from "@/lib/marketplace/order-ship";
 import type { CollectAllResult } from "@/lib/tracking/collect-all";
 import type { EsmExportResult } from "@/lib/tracking/esm-export";
@@ -122,6 +123,60 @@ export async function notifyShipResults(results: ShipResult[], trigger: "manual"
   await notifyAutomationResult({
     channel: "tracking",
     title: `🚚 운송장·송장${trigger === "manual" ? "(수동)" : ""} ${headline(todo, failed)}`,
+    status,
+    summary: lines.join("\n").trim(),
+  });
+}
+
+/** 문의 동기화 결과 (#문의-자동화). 새 문의·자동답변·오류 없으면 보내지 않는다 */
+export async function notifyInquiryResults(results: InquirySyncResult[], trigger: "manual" | "scheduler") {
+  const held = results.flatMap((r) => r.heldForReview);
+  const auto = results.flatMap((r) => r.autoReplied);
+  // 초안 생성 전 단계(동기화만 된) 새 문의 중 held/auto 에 없는 것
+  const handled = new Set([...held, ...auto].map((i) => `${i.inquiryType}|${i.inquiryId}`));
+  const rawNew = results.flatMap((r) => r.newInquiries).filter((i) => !handled.has(`${i.inquiryType}|${i.inquiryId}`));
+  const errors = results.flatMap((r) => r.errors);
+  const permissionDenied = [...new Set(results.flatMap((r) => r.permissionDenied))];
+  const answeredSynced = results.reduce((n, r) => n + r.updatedAnswered, 0);
+  if (held.length === 0 && auto.length === 0 && rawNew.length === 0 && errors.length === 0 && permissionDenied.length === 0) return;
+
+  const itemLine = (i: InquirySyncItem) =>
+    `   • [${INQUIRY_TYPE_LABEL[i.inquiryType]}] ${i.productName ?? "-"} — ${i.contentPreview}`;
+
+  const todo = held.length + rawNew.length;
+  const failed = errors.length > 0 && auto.length === 0 && todo === 0;
+  const lines: string[] = [];
+
+  if (held.length > 0) {
+    lines.push(`👉 확인 필요 ${held.length}건 → 사이트 주문관리 ▸ 문의 탭에서 답변 (AI 초안 준비됨)`);
+    for (const i of held.slice(0, 6)) lines.push(itemLine(i));
+    if (held.length > 6) lines.push(`   • 외 ${held.length - 6}건`);
+  }
+  if (rawNew.length > 0) {
+    lines.push(`👉 새 문의 ${rawNew.length}건 → 문의 탭에서 답변`);
+    for (const i of rawNew.slice(0, 6)) lines.push(itemLine(i));
+    if (rawNew.length > 6) lines.push(`   • 외 ${rawNew.length - 6}건`);
+  }
+  if (errors.length > 0) {
+    lines.push(`👉 오류 ${errors.length}건`);
+    for (const e of errors.slice(0, 3)) lines.push(`   • ${e.slice(0, 140)}`);
+  }
+  if (permissionDenied.length > 0) {
+    lines.push(`👉 API 권한 없음: ${permissionDenied.map((t) => INQUIRY_TYPE_LABEL[t]).join(", ")} — 커머스API센터에서 권한 확인`);
+  }
+  if (lines.length > 0) lines.push("");
+
+  if (auto.length > 0) {
+    lines.push(`🤖 AI 자동 답변 ${auto.length}건 (단순 배송문의)`);
+    for (const i of auto.slice(0, 6)) lines.push(itemLine(i));
+    if (auto.length > 6) lines.push(`   • 외 ${auto.length - 6}건`);
+  }
+  if (answeredSynced > 0) lines.push(`마켓에서 답변 완료 반영 ${answeredSynced}건`);
+
+  const status: AutomationNotifyStatus = failed ? "failed" : todo > 0 || errors.length > 0 ? "partial" : "success";
+  await notifyAutomationResult({
+    channel: "inquiry",
+    title: `💬 마켓 문의${trigger === "manual" ? "(수동)" : ""} ${headline(todo, failed)}`,
     status,
     summary: lines.join("\n").trim(),
   });

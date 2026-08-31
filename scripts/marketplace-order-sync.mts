@@ -12,9 +12,10 @@ import { decrypt } from "@/lib/crypto";
 import { CoupangOpenApiClient } from "@/lib/coupang-api";
 import { NaverCommerceApiClient } from "@/lib/naver-commerce-api";
 import { syncOrders, type SyncPlatform, type SyncResult } from "@/lib/marketplace/order-sync";
-import { notifySyncResults } from "@/lib/marketplace/order-sync-notify";
+import { notifySyncResults, notifyInquiryResults } from "@/lib/marketplace/order-sync-notify";
 import { syncSettlements } from "@/lib/marketplace/settlement-sync";
 import { sendDailySummary } from "@/lib/marketplace/daily-summary";
+import { syncInquiries, type InquirySyncResult } from "@/lib/marketplace/inquiry-sync";
 
 const argv = process.argv.slice(2);
 const opt = (name: string, def: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : def; };
@@ -40,14 +41,17 @@ const platforms: SyncPlatform[] = platformArg === "coupang" || platformArg === "
 const { data: creds, error } = await sb.from("marketplace_api_credentials").select("*").eq("user_id", userId).in("platform", platforms);
 if (error) { log(`자격증명 조회 실패: ${error.message}`); process.exit(1); }
 
+const makeClients = (platform: SyncPlatform, cred: { account_id: string; access_key_encrypted: string; secret_key_encrypted: string; client_id_encrypted: string; client_secret_encrypted: string }) =>
+  platform === "coupang"
+    ? { coupang: new CoupangOpenApiClient({ vendorId: cred.account_id, accessKey: decrypt(cred.access_key_encrypted), secretKey: decrypt(cred.secret_key_encrypted) }) }
+    : { smartstore: new NaverCommerceApiClient({ clientId: decrypt(cred.client_id_encrypted), clientSecret: decrypt(cred.client_secret_encrypted) }) };
+
 const results: SyncResult[] = [];
 for (const platform of platforms) {
   const cred = (creds ?? []).find((c) => c.platform === platform);
   if (!cred) { log(`${platform}: API 계정 없음 — 건너뜀`); continue; }
   try {
-    const clients = platform === "coupang"
-      ? { coupang: new CoupangOpenApiClient({ vendorId: cred.account_id, accessKey: decrypt(cred.access_key_encrypted), secretKey: decrypt(cred.secret_key_encrypted) }) }
-      : { smartstore: new NaverCommerceApiClient({ clientId: decrypt(cred.client_id_encrypted), clientSecret: decrypt(cred.client_secret_encrypted) }) };
+    const clients = makeClients(platform, cred);
     const r = await syncOrders({ supabase: sb, userId, platform, credentialId: cred.id, days, trigger: "scheduler", ...clients });
     results.push(r);
     log(`${platform}: remote=${r.remoteCount} new=${r.newOrders.length} existing=${r.skippedExisting} confirmed=${r.confirmed}/${r.confirmFailed} claims=${JSON.stringify(r.claimCounts)} errors=${r.errors.length}${r.dryRun ? " [DRY]" : ""}`);
@@ -74,6 +78,27 @@ try {
 
 await notifySyncResults(results, "scheduler", { shipDeadline });
 
+// 문의 동기화 — 새 문의는 AI 초안·단순건 자동답변 후 #문의-자동화 알림 (--skip-inquiries 로 생략)
+if (!argv.includes("--skip-inquiries")) {
+  const inquiryResults: InquirySyncResult[] = [];
+  for (const platform of platforms) {
+    const cred = (creds ?? []).find((c) => c.platform === platform);
+    if (!cred) continue;
+    try {
+      const r = await syncInquiries({
+        supabase: sb, userId, platform, credentialId: cred.id, days: 7,
+        wingUserId: typeof cred.meta?.wingUserId === "string" ? cred.meta.wingUserId : null,
+        ...makeClients(platform, cred),
+      });
+      inquiryResults.push(r);
+      log(`${platform} 문의: remote=${r.remoteCount} new=${r.newInquiries.length} auto=${r.autoReplied.length} held=${r.heldForReview.length} answered+=${r.updatedAnswered} errors=${r.errors.length}`);
+      for (const e of r.errors.slice(0, 3)) log(`  x ${e}`);
+    } catch (err) { log(`${platform} 문의 예외: ${err instanceof Error ? err.message : String(err)}`); }
+  }
+  try { await notifyInquiryResults(inquiryResults, "scheduler"); }
+  catch (e) { log(`문의 알림 실패: ${e instanceof Error ? e.message : String(e)}`); }
+}
+
 // 정산 반영 — 하루 1회 (오늘 kind=settlement 실행이 없을 때만)
 if (!argv.includes("--skip-settlement") && !process.env.MARKETPLACE_API_DRY_RUN) {
   const todayKst = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
@@ -84,9 +109,7 @@ if (!argv.includes("--skip-settlement") && !process.env.MARKETPLACE_API_DRY_RUN)
       const cred = (creds ?? []).find((c) => c.platform === platform);
       if (!cred) continue;
       try {
-        const clients = platform === "coupang"
-          ? { coupang: new CoupangOpenApiClient({ vendorId: cred.account_id, accessKey: decrypt(cred.access_key_encrypted), secretKey: decrypt(cred.secret_key_encrypted) }) }
-          : { smartstore: new NaverCommerceApiClient({ clientId: decrypt(cred.client_id_encrypted), clientSecret: decrypt(cred.client_secret_encrypted) }) };
+        const clients = makeClients(platform, cred);
         const s = await syncSettlements({ supabase: sb, userId, platform, credentialId: cred.id, days: 35, trigger: "scheduler", ...clients });
         log(`${platform} 정산: ${s.from}~${s.to} rows=${s.remoteRows} matched=${s.matched} updated=${s.updated} unmatched=${s.unmatched} errors=${s.errors.length}`);
         for (const e of s.errors.slice(0, 3)) log(`  x ${e}`);

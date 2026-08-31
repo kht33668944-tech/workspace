@@ -5,14 +5,21 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = SupabaseClient<any, any, any>;
 
-export type AppSettingKey = "auto_approve_cancel";
+export type AppSettingKey = "auto_approve_cancel" | "auto_reply_inquiry";
 
 export interface AutoApproveCancelSetting {
   enabled: boolean;
 }
 
+export interface AutoReplyInquirySetting {
+  enabled: boolean;
+}
+
 export const APP_SETTING_DEFAULTS: Record<AppSettingKey, unknown> = {
   auto_approve_cancel: { enabled: false } satisfies AutoApproveCancelSetting,
+  // AI가 단순 배송문의에 자동 답변. 기본 꺼짐 — 쿠팡 고객센터 문의는 링크 응답 등
+  // 일반 답변으로 해결 안 되는 건이 있어 사람이 확인 후 전송하는 것을 기본으로 한다
+  auto_reply_inquiry: { enabled: false } satisfies AutoReplyInquirySetting,
 };
 
 export async function getAppSetting<T>(supabase: AnySupabase, userId: string, key: AppSettingKey): Promise<T | null> {
