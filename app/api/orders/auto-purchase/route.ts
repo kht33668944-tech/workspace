@@ -5,7 +5,7 @@ import { purchaseOhouse } from "@/lib/scrapers/ohouse-purchase";
 import { decrypt } from "@/lib/crypto";
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
-import type { PurchaseOrderInfo } from "@/lib/scrapers/types";
+import { purchaseDetailUrl, type PurchaseOrderInfo } from "@/lib/scrapers/types";
 import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
 
 export const maxDuration = 300;
@@ -340,6 +340,16 @@ export async function POST(request: NextRequest) {
           allSuccess.push({ orderId, purchaseOrderNo, cost, paymentMethod });
           console.log(`[auto-purchase] DB 즉시 업데이트 성공 (${orderId}): ${JSON.stringify(updateData)}`);
           sendEvent({ type: "db_updated", orderId, status: "ok", purchaseOrderNo, cost, paymentMethod });
+
+          // 구매처 주문상세 링크 — 컬럼 미적용 환경에서도 구매번호 저장이 깨지지 않게 별도 갱신
+          const detailUrl = purchaseDetailUrl(platform, purchaseOrderNo);
+          if (detailUrl) {
+            await supabase.from("orders").update({ purchase_detail_url: detailUrl })
+              .eq("id", orderId).eq("user_id", userId)
+              .then(({ error: urlErr }) => {
+                if (urlErr) console.error(`[auto-purchase] 주문상세링크 저장 실패 (${orderId}):`, urlErr.message);
+              });
+          }
 
           // 구매 로그 기록
           await supabase.from("purchase_logs").insert({

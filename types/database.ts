@@ -52,6 +52,8 @@ export interface Order {
   settlement_source?: "estimate" | "api" | "excel" | string | null;
   settlement_confirmed_at?: string | null;
   claim_receipt_id?: string | null;
+  // 구매처 주문상세 링크 (add_purchase_detail_url 마이그레이션, 자동구매 시 자동 입력)
+  purchase_detail_url?: string | null;
   created_at: string;
   updated_at: string;
   purchase_log_order_nos?: string[];

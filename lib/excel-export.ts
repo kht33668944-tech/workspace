@@ -42,6 +42,7 @@ export async function generateOrderExcel(orders: Order[]): Promise<{ buffer: Arr
     운송장: o.tracking_no,
     배송상태: o.delivery_status,
     최저가링크: o.purchase_url,
+    주문상세링크: o.purchase_detail_url,
   }));
 
   const ws = XLSX.utils.json_to_sheet(data);

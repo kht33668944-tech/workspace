@@ -165,6 +165,7 @@ const ALIASES: Record<string, string[]> = {
   purchase_source: ["구매처"],
   purchase_id: ["아이디", "구매아이디", "구매ID"],
   purchase_url: ["최저가링크", "구매링크", "구매URL", "상품URL", "상품링크"],
+  purchase_detail_url: ["주문상세링크", "주문상세", "구매주문링크"],
   purchase_order_no: ["주문번호", "발주번호"],
   courier: ["택배사", "배송업체"],
   tracking_no: ["운송장", "운송장번호", "송장번호", "송장"],
@@ -565,6 +566,7 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
   if (mapped.purchase_id === undefined) mapped.purchase_id = null;
   if (mapped.purchase_source === undefined) mapped.purchase_source = null;
   if (mapped.purchase_url === undefined) mapped.purchase_url = null;
+  if (mapped.purchase_detail_url === undefined) mapped.purchase_detail_url = null;
   if (mapped.purchase_order_no === undefined) mapped.purchase_order_no = null;
   if (mapped.courier === undefined) mapped.courier = null;
   if (mapped.tracking_no === undefined) mapped.tracking_no = null;
