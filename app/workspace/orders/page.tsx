@@ -15,6 +15,7 @@ import { formatKoreanDateTime, getKoreanMonthKey } from "@/lib/date-utils";
 import { rememberWorkspaceHref, replaceUrlParams } from "@/lib/view-state";
 import { supabase } from "@/lib/supabase";
 import { exportPriceV2All } from "@/lib/price-update-v2-export";
+import { applyPriceChangesToMarketplaces, summarizeMarketApply } from "@/lib/marketplace-apply-client";
 import OrderTable from "@/components/workspace/orders/order-table";
 import OrderModal from "@/components/workspace/orders/order-modal";
 import OrderSidePanel, { OrderSidePanelContent } from "@/components/workspace/orders/order-side-panel";
@@ -677,7 +678,7 @@ function OrdersPageInner() {
     results: CostRefreshResult[],
     groups: Map<string, { product: ProductCostRow; orders: Order[] }>,
   ) => {
-    if (results.length === 0) return { productCount: 0, orderCount: 0, exportProductIds: [] as string[] };
+    if (results.length === 0) return { productCount: 0, orderCount: 0, exportProductIds: [] as string[], changedProductIds: [] as string[], newlySoldOutIds: [] as string[], restockedIds: [] as string[] };
 
     const changed = results.filter((r) => r.status === "priced" && r.price !== r.previous);
     for (let i = 0; i < changed.length; i += 500) {
@@ -768,7 +769,7 @@ function OrdersPageInner() {
       throw err;
     }
 
-    return { productCount: results.length, orderCount: updatedOrders, exportProductIds };
+    return { productCount: results.length, orderCount: updatedOrders, exportProductIds, changedProductIds: changed.map((r) => r.productId), newlySoldOutIds, restockedIds };
   }, [endBatchUndo, session?.access_token, startBatchUndo, updateOrder]);
 
   const handleStopCostRefresh = useCallback(() => {
@@ -938,6 +939,25 @@ function OrdersPageInner() {
       await refetch();
       pushCostRefreshLog(`적용 완료: 상품 ${applied.productCount}개 확인, 발주서 ${applied.orderCount}건 수정`);
       showToast(`원가 적용 완료: 발주서 ${applied.orderCount}건 수정`, "success");
+
+      // 쿠팡·스마트스토어 API 즉시 반영 (변동가·품절·재입고) — 실패해도 로컬 적용은 유지
+      if (applied.changedProductIds.length || applied.newlySoldOutIds.length || applied.restockedIds.length) {
+        try {
+          pushCostRefreshLog("쿠팡·스마트스토어 API 반영 중...");
+          const marketResult = await applyPriceChangesToMarketplaces(session?.access_token ?? "", {
+            changedIds: applied.changedProductIds,
+            soldOutIds: applied.newlySoldOutIds,
+            restoredIds: applied.restockedIds,
+          });
+          const summary = summarizeMarketApply(marketResult);
+          pushCostRefreshLog(`마켓 API 반영: ${summary}`);
+          showToast(`마켓 API 반영: ${summary}`, "success");
+        } catch (marketErr) {
+          const msg = marketErr instanceof Error ? marketErr.message : String(marketErr);
+          pushCostRefreshLog(`마켓 API 반영 실패: ${msg} — 상품목록은 갱신됐으니 가격수정 엑셀 또는 API 반영 버튼으로 재시도하세요.`);
+          showToast("마켓 API 반영에 실패했습니다. 로그를 확인하세요.", "error");
+        }
+      }
       setCostRefreshResultOpen(false);
       setCostRefreshResults([]);
 
