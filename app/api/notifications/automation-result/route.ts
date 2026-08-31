@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
-import { notifyAutomationResult, type AutomationNotifyStatus, type DiscordChannel } from "@/lib/discord-notifier";
+import { notifyAutomationResult, isDiscordChannel, type AutomationNotifyStatus, type DiscordChannel } from "@/lib/discord-notifier";
 
 export const maxDuration = 30;
 
 const VALID_STATUS: AutomationNotifyStatus[] = ["success", "partial", "failed", "cancelled"];
-const VALID_CHANNELS: DiscordChannel[] = ["orders", "tracking", "purchase", "price", "ai", "default"];
 
 interface NotifyBody {
   title?: string;
@@ -33,7 +32,7 @@ export async function POST(request: NextRequest) {
     status,
     summary: body.summary?.trim() || "작업이 끝났습니다.",
     fields: Array.isArray(body.fields) ? body.fields.slice(0, 10) : undefined,
-    channel: body.channel && VALID_CHANNELS.includes(body.channel) ? body.channel : undefined,
+    channel: body.channel && isDiscordChannel(body.channel) ? body.channel : undefined,
   });
 
   return NextResponse.json({ ok: true });

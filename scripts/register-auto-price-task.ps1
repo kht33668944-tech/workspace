@@ -16,8 +16,11 @@ if ($Remove) {
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "logs") | Out-Null
 
 $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument ("/c `"" + $Cmd + "`"") -WorkingDirectory $Root
-# start at next hour + 15 min: order sync runs at :00, tracking/ship at :30
-$start = (Get-Date).Date.AddHours((Get-Date).Hour + 1).AddMinutes(15)
+# fixed anchor 00:15 + every N hours (:15 avoids order sync at :00 and tracking/ship at :30).
+# MUST match lib/automation-schedule.ts (anchorHour 0, minute 15) - the automation page timeline
+# and health checks assume this anchor, so re-registering at any time keeps the same slots.
+$start = (Get-Date).Date.AddMinutes(15)
+while ($start -le (Get-Date)) { $start = $start.AddHours($IntervalHours) }
 $trigger = New-ScheduledTaskTrigger -Once -At $start -RepetitionInterval (New-TimeSpan -Hours $IntervalHours) -RepetitionDuration (New-TimeSpan -Days 3650)
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description "Onlive lowest-price refresh (reset daily diff, then refresh), every $IntervalHours h" -Force | Out-Null

@@ -1,7 +1,6 @@
 "use client";
 
 // 자동화 현황 — 타임라인·진행중·상태 카드·오류 센터·설정
-import { useCallback, useState } from "react";
 import { useAutomationRuns } from "@/hooks/use-automation-runs";
 import RunningNowCard from "@/components/workspace/automation/running-now-card";
 import AutomationStatusCards from "@/components/workspace/automation/automation-status-cards";
@@ -13,12 +12,6 @@ import { Loader2 } from "lucide-react";
 
 export default function AutomationPage() {
   const { loading, refetch, todayTimeline, runningRuns, staleRuns, errorRuns, weekStats, nextRun } = useAutomationRuns();
-  const [toast, setToast] = useState<string | null>(null);
-
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 4000);
-  }, []);
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -29,10 +22,6 @@ export default function AutomationPage() {
         </p>
       </div>
 
-      {toast && (
-        <div className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-xs text-blue-400">{toast}</div>
-      )}
-
       {loading ? (
         <div className="flex items-center justify-center py-16 text-[var(--text-muted)]">
           <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -41,9 +30,9 @@ export default function AutomationPage() {
       ) : (
         <>
           <RunningNowCard runningRuns={runningRuns} staleRuns={staleRuns} nextRun={nextRun} onRefetch={refetch} />
-          <AutomationStatusCards weekStats={weekStats} onRefetch={refetch} showToast={showToast} />
+          <AutomationStatusCards weekStats={weekStats} onRefetch={refetch} />
           <TodayTimeline slots={todayTimeline} />
-          <ErrorCenter errorRuns={errorRuns} onRefetch={refetch} showToast={showToast} />
+          <ErrorCenter errorRuns={errorRuns} onRefetch={refetch} />
           <div className="space-y-3">
             <h2 className="text-base font-semibold text-[var(--text-primary)]">자동화 설정</h2>
             <AutoApproveSetting />

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
+import { fetchAllPages } from "@/lib/supabase-paginate";
 import type { MarketplaceInquiry } from "@/types/database";
 
 /** 문의에 연결된 발주서 주문 요약 (join) */
@@ -41,22 +42,17 @@ export function useInquiries(options: UseInquiriesOptions = {}) {
 
   const userId = user?.id;
 
-  const fetchInquiries = useCallback(async () => {
+  const fetchList = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
 
-    const PAGE_SIZE = 1000;
-    const allData: InquiryWithOrder[] = [];
-    let from = 0;
-    let hasMore = true;
-
-    while (hasMore) {
+    const { rows, error } = await fetchAllPages<InquiryWithOrder>((from, to) => {
       let query = supabase
         .from("marketplace_inquiries")
         .select("*, order:orders(id, delivery_status, tracking_no, courier, purchased_at, order_date, ship_by_date, recipient_name, product_name, quantity, marketplace)")
         .eq("user_id", userId)
         .order("inquiry_at", { ascending: false, nullsFirst: false })
-        .range(from, from + PAGE_SIZE - 1);
+        .range(from, to);
 
       if (options.status) query = query.eq("status", options.status);
       if (options.platform) query = query.eq("platform", options.platform);
@@ -64,30 +60,35 @@ export function useInquiries(options: UseInquiriesOptions = {}) {
         const s = options.search.replace(/[%_\\]/g, "\\$&");
         query = query.or(`product_name.ilike.%${s}%,content.ilike.%${s}%`);
       }
+      return query as unknown as PromiseLike<{ data: InquiryWithOrder[] | null; error: { message: string } | null }>;
+    });
+    if (error) console.error("[use-inquiries] 조회 실패:", error);
 
-      const { data, error } = await query;
-      if (error) {
-        console.error("[use-inquiries] 조회 실패:", error.message);
-        break;
-      }
-      allData.push(...((data ?? []) as unknown as InquiryWithOrder[]));
-      hasMore = (data ?? []).length === PAGE_SIZE;
-      from += PAGE_SIZE;
-    }
+    setInquiries(rows);
+    setLoading(false);
+  }, [userId, options.status, options.platform, options.search]);
 
-    setInquiries(allData);
-
+  // 미답변/답변완료 칩 카운트 — 필터와 무관한 전체 기준이라 필터 변경 시 재조회하지 않는다
+  const fetchCounts = useCallback(async () => {
+    if (!userId) return;
     const [un, an] = await Promise.all([
       supabase.from("marketplace_inquiries").select("*", { count: "exact", head: true }).eq("user_id", userId).eq("status", "unanswered"),
       supabase.from("marketplace_inquiries").select("*", { count: "exact", head: true }).eq("user_id", userId).eq("status", "answered"),
     ]);
     setCounts({ unanswered: un.count ?? 0, answered: an.count ?? 0 });
-    setLoading(false);
-  }, [userId, options.status, options.platform, options.search]);
+  }, [userId]);
 
   useEffect(() => {
-    fetchInquiries();
-  }, [fetchInquiries]);
+    fetchList();
+  }, [fetchList]);
+
+  useEffect(() => {
+    fetchCounts();
+  }, [fetchCounts]);
+
+  const refetch = useCallback(async () => {
+    await Promise.all([fetchList(), fetchCounts()]);
+  }, [fetchList, fetchCounts]);
 
   const groupedByDay: InquiryDay[] = useMemo(() => {
     const dayMap = new Map<string, InquiryWithOrder[]>();
@@ -102,5 +103,5 @@ export function useInquiries(options: UseInquiriesOptions = {}) {
       .map(([date, dayInquiries]) => ({ date, inquiries: dayInquiries }));
   }, [inquiries]);
 
-  return { inquiries, groupedByDay, counts, loading, refetch: fetchInquiries };
+  return { inquiries, groupedByDay, counts, loading, refetch };
 }

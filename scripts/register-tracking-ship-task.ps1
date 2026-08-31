@@ -16,8 +16,11 @@ if ($Remove) {
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "logs") | Out-Null
 
 $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument ("/c `"" + $Cmd + "`"") -WorkingDirectory $Root
-# start at the next hour + 30 min so it does not collide with the hourly order sync (runs at :00)
-$start = (Get-Date).Date.AddHours((Get-Date).Hour + 1).AddMinutes(30)
+# fixed anchor 02:30 + every N hours (:30 avoids the hourly order sync at :00).
+# MUST match lib/automation-schedule.ts (anchorHour 2, minute 30) - the automation page timeline
+# and health checks assume this anchor, so re-registering at any time keeps the same slots.
+$start = (Get-Date).Date.AddHours(2).AddMinutes(30)
+while ($start -le (Get-Date)) { $start = $start.AddHours($IntervalHours) }
 $trigger = New-ScheduledTaskTrigger -Once -At $start -RepetitionInterval (New-TimeSpan -Hours $IntervalHours) -RepetitionDuration (New-TimeSpan -Days 3650)
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 40) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description "Onlive tracking collect + marketplace invoice upload + ESM excel, every $IntervalHours h" -Force | Out-Null

@@ -413,3 +413,18 @@ export async function buildSmartstorePreview(
 
   return { items, blocked };
 }
+
+// ───────────────────────── 문의 공용 ─────────────────────────
+
+/** 문의 동기화/답변용 플랫폼 클라이언트 + 쿠팡윙ID 조립 (sync·reply 라우트 공용) */
+export async function getInquiryClients(
+  supabase: SupabaseClient,
+  cred: { id: string; platform: string; meta: unknown },
+): Promise<{ coupang?: CoupangOpenApiClient; smartstore?: NaverCommerceApiClient; wingUserId: string | null }> {
+  const clients = cred.platform === "coupang"
+    ? { coupang: (await getCoupangClientFromCredential(supabase, cred.id)).client }
+    : { smartstore: (await getNaverClientFromCredential(supabase, cred.id)).client };
+  const meta = cred.meta as Record<string, unknown> | null;
+  const wingUserId = typeof meta?.wingUserId === "string" ? meta.wingUserId : null;
+  return { ...clients, wingUserId };
+}

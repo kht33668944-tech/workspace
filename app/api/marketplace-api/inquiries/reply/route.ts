@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
-import { getCoupangClientFromCredential, getNaverClientFromCredential } from "@/lib/marketplace-api-helpers";
+import { getInquiryClients } from "@/lib/marketplace-api-helpers";
 import { sendInquiryReply } from "@/lib/marketplace/inquiry-sync";
 import { logMarketplaceApi } from "@/lib/marketplace/common";
 import type { MarketplaceInquiry } from "@/types/database";
@@ -35,19 +35,13 @@ export async function POST(request: NextRequest) {
       .eq("platform", inquiry.platform).limit(1).maybeSingle();
     if (!cred) return NextResponse.json({ error: `${inquiry.platform} API 계정이 등록되지 않았습니다.` }, { status: 400 });
 
-    const clients = inquiry.platform === "coupang"
-      ? { coupang: (await getCoupangClientFromCredential(supabase, cred.id)).client }
-      : { smartstore: (await getNaverClientFromCredential(supabase, cred.id)).client };
-    const wingUserId = typeof (cred.meta as Record<string, unknown> | null)?.wingUserId === "string"
-      ? (cred.meta as Record<string, string>).wingUserId
-      : null;
+    const clients = await getInquiryClients(supabase, cred);
 
     const sent = await sendInquiryReply({
       inquiryType: inquiry.inquiry_type,
       inquiryId: inquiry.inquiry_id,
       raw: inquiry.raw ?? {},
       content,
-      wingUserId,
       ...clients,
     });
 

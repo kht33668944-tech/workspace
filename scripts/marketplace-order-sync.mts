@@ -18,6 +18,7 @@ import { sendDailySummary } from "@/lib/marketplace/daily-summary";
 import { syncInquiries, type InquirySyncResult } from "@/lib/marketplace/inquiry-sync";
 import { AUTOMATIONS, isOverdue, isStaleRunning } from "@/lib/automation-schedule";
 import { notifyAutomationResult } from "@/lib/discord-notifier";
+import { toKstDateKey } from "@/lib/date-utils";
 
 const argv = process.argv.slice(2);
 const opt = (name: string, def: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : def; };
@@ -67,7 +68,7 @@ for (const platform of platforms) {
 // 미발송 주문(구매대기·확인·부분구매·발송불가·배송준비) 중 발송기한 임박(내일까지) — 알림으로 결정 촉구
 let shipDeadline: Array<{ recipientName: string | null; productName: string | null; shipByDate: string }> = [];
 try {
-  const tomorrowKst = new Date(Date.now() + 9 * 3600000 + 86400000).toISOString().slice(0, 10);
+  const tomorrowKst = toKstDateKey(Date.now() + 86400000);
   const { data: holdRows } = await sb.from("orders")
     .select("recipient_name,product_name,ship_by_date")
     .eq("user_id", userId)
@@ -103,9 +104,9 @@ if (!argv.includes("--skip-inquiries")) {
 
 // 정산 반영 — 하루 1회 (오늘 kind=settlement 실행이 없을 때만)
 if (!argv.includes("--skip-settlement") && !process.env.MARKETPLACE_API_DRY_RUN) {
-  const todayKst = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+  const todayKst = toKstDateKey();
   const { data: last } = await sb.from("marketplace_sync_runs").select("started_at").eq("user_id", userId).eq("kind", "settlement").order("started_at", { ascending: false }).limit(1).maybeSingle();
-  const lastKst = last?.started_at ? new Date(new Date(last.started_at).getTime() + 9 * 3600000).toISOString().slice(0, 10) : null;
+  const lastKst = last?.started_at ? toKstDateKey(new Date(last.started_at)) : null;
   if (lastKst !== todayKst) {
     for (const platform of platforms) {
       const cred = (creds ?? []).find((c) => c.platform === platform);
@@ -122,10 +123,10 @@ if (!argv.includes("--skip-settlement") && !process.env.MARKETPLACE_API_DRY_RUN)
 // 하루 요약 — KST 21시 이후 그날 첫 실행에서 1회 (#주문수집-자동화)
 if (!argv.includes("--skip-summary") && !process.env.MARKETPLACE_API_DRY_RUN) {
   const kstNow = new Date(Date.now() + 9 * 3600000);
-  const todayKst = kstNow.toISOString().slice(0, 10);
+  const todayKst = toKstDateKey();
   if (kstNow.getUTCHours() >= 21) {
     const { data: last } = await sb.from("marketplace_sync_runs").select("started_at").eq("user_id", userId).eq("kind", "daily-summary").order("started_at", { ascending: false }).limit(1).maybeSingle();
-    const lastKst = last?.started_at ? new Date(new Date(last.started_at).getTime() + 9 * 3600000).toISOString().slice(0, 10) : null;
+    const lastKst = last?.started_at ? toKstDateKey(new Date(last.started_at)) : null;
     if (lastKst !== todayKst) {
       try {
         const s = await sendDailySummary(sb, userId);
@@ -154,9 +155,8 @@ if (!argv.includes("--skip-health") && !process.env.MARKETPLACE_API_DRY_RUN) {
       }
     }
 
-    // 2) 예정 주기 초과 미실행 감지 (운송장·최저가)
-    for (const key of ["tracking-ship", "price"] as const) {
-      const def = AUTOMATIONS.find((d) => d.key === key)!;
+    // 2) 예정 주기 초과 미실행 감지 — 이 크론(OnliveOrderSync) 밖에서 도는 schtasks 자동화 전부
+    for (const def of AUTOMATIONS.filter((d) => d.schedule.type === "interval" && d.runVia === "schtasks")) {
       const { data: lastRows } = await sb.from("marketplace_sync_runs")
         .select("started_at").eq("user_id", userId).eq("kind", def.primaryKind)
         .order("started_at", { ascending: false }).limit(1);
@@ -169,9 +169,9 @@ if (!argv.includes("--skip-health") && !process.env.MARKETPLACE_API_DRY_RUN) {
 
     if (problems.length > 0) {
       // 1일 1회 래치 (정산 래치와 동일 패턴)
-      const todayKst = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+      const todayKst = toKstDateKey();
       const { data: lastAlert } = await sb.from("marketplace_sync_runs").select("started_at").eq("user_id", userId).eq("kind", "health-alert").order("started_at", { ascending: false }).limit(1).maybeSingle();
-      const lastAlertKst = lastAlert?.started_at ? new Date(new Date(lastAlert.started_at).getTime() + 9 * 3600000).toISOString().slice(0, 10) : null;
+      const lastAlertKst = lastAlert?.started_at ? toKstDateKey(new Date(lastAlert.started_at)) : null;
       if (lastAlertKst !== todayKst) {
         await notifyAutomationResult({
           channel: "default",

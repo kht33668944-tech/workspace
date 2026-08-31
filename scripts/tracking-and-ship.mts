@@ -17,6 +17,7 @@ import { shipOrders, type ShipResult } from "@/lib/marketplace/order-ship";
 import { notifyShipResults } from "@/lib/marketplace/order-sync-notify";
 import { collectTrackingForUser, type CollectAllResult } from "@/lib/tracking/collect-all";
 import { exportEsmTrackingExcel, type EsmExportResult } from "@/lib/tracking/esm-export";
+import { startSyncRun, finishSyncRun, type SyncRunPatch } from "@/lib/marketplace/sync-run";
 
 const argv = process.argv.slice(2);
 const has = (f: string) => argv.includes(`--${f}`);
@@ -57,21 +58,9 @@ const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_
 if (!(await acquireLock())) { log("다른 마켓 작업이 실행 중 — 10분 대기 후 포기"); process.exit(2); }
 process.on("exit", releaseLock);
 
-// 실행 기록 (자동화 페이지 타임라인용) — 실패해도 본작업 계속
-async function startRun(kind: string): Promise<string | null> {
-  try {
-    const { data } = await sb.from("marketplace_sync_runs")
-      .insert({ user_id: userId, platform: "all", kind, trigger: "scheduler", dry_run: dry })
-      .select("id").single();
-    return data?.id ?? null;
-  } catch (e) { log(`실행 기록 생성 실패(${kind}): ${e instanceof Error ? e.message : String(e)}`); return null; }
-}
-async function finishRun(id: string | null, patch: { status: string; remote_count?: number; confirmed?: number; error?: string | null; detail?: unknown }) {
-  if (!id) return;
-  try {
-    await sb.from("marketplace_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", id);
-  } catch (e) { log(`실행 기록 마무리 실패: ${e instanceof Error ? e.message : String(e)}`); }
-}
+// 실행 기록 (자동화 페이지 타임라인용) — 실패해도 본작업 계속 (lib/marketplace/sync-run 공용)
+const startRun = (kind: string) => startSyncRun(sb, { userId, platform: "all", kind, trigger: "scheduler", dryRun: dry });
+const finishRun = (id: string | null, patch: SyncRunPatch) => finishSyncRun(sb, id, patch);
 
 let collect: CollectAllResult | null = null;
 const ships: ShipResult[] = [];

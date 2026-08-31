@@ -55,6 +55,20 @@ type ProductCostRow = {
 const COST_REFRESH_SOLDOUT_MARGIN = 35;
 const COST_REFRESH_DEFAULT_MARGIN = 8;
 
+/** 원가갱신 적용 결과 (마켓 반영·엑셀·디스코드 알림·결과 팝업 공용) */
+interface CostApplyOutcome {
+  productCount: number;
+  orderCount: number;
+  exportProductIds: string[];
+  changedItems: { id: string; name: string; previous: number; price: number }[];
+  soldOut: { id: string; name: string }[];
+  restocked: { id: string; name: string }[];
+}
+
+const EMPTY_COST_APPLY: CostApplyOutcome = {
+  productCount: 0, orderCount: 0, exportProductIds: [], changedItems: [], soldOut: [], restocked: [],
+};
+
 type CostRefreshResult = {
   productId: string;
   productName: string;
@@ -283,11 +297,7 @@ function OrdersPageInner() {
   const [applyingCostRefresh, setApplyingCostRefresh] = useState(false);
   // 적용하기 결과 팝업 — 마켓에 실제로 어떻게 반영됐는지 확인용
   const [marketApplyReport, setMarketApplyReport] = useState<{
-    productCount: number;
-    orderCount: number;
-    changed: number;
-    soldOut: number;
-    restocked: number;
+    applied: CostApplyOutcome;
     market: MarketApplyResult | null; // null = 마켓 반영 대상 없음
     marketError: string | null;
   } | null>(null);
@@ -689,8 +699,8 @@ function OrdersPageInner() {
   const applyCostRefreshResults = useCallback(async (
     results: CostRefreshResult[],
     groups: Map<string, { product: ProductCostRow; orders: Order[] }>,
-  ) => {
-    if (results.length === 0) return { productCount: 0, orderCount: 0, exportProductIds: [] as string[], changedProductIds: [] as string[], newlySoldOutIds: [] as string[], restockedIds: [] as string[], changedItems: [] as { name: string; previous: number; price: number }[], soldOutNames: [] as string[], restockedNames: [] as string[] };
+  ): Promise<CostApplyOutcome> => {
+    if (results.length === 0) return EMPTY_COST_APPLY;
 
     const changed = results.filter((r) => r.status === "priced" && r.price !== r.previous);
     for (let i = 0; i < changed.length; i += 500) {
@@ -713,18 +723,16 @@ function OrdersPageInner() {
     // 품절 마진 동기화 (상품소싱 최저가 갱신과 동일 규칙)
     // - 신규 품절(마진 ≠ 35)만 35%로 변경. 이미 품절이던 상품은 변동 없음
     // - 품절이었다가 정상가로 재수집된 상품은 7%로 복귀
-    const newlySoldOutIds: string[] = [];
-    const restockedIds: string[] = [];
-    const soldOutNames: string[] = [];
-    const restockedNames: string[] = [];
+    const soldOut: CostApplyOutcome["soldOut"] = [];
+    const restocked: CostApplyOutcome["restocked"] = [];
     for (const r of results) {
       const margin = groups.get(r.productId)?.product.margin_rate;
-      if (r.status === "sold_out" && margin !== COST_REFRESH_SOLDOUT_MARGIN) { newlySoldOutIds.push(r.productId); soldOutNames.push(r.productName); }
-      if (r.status === "priced" && margin === COST_REFRESH_SOLDOUT_MARGIN) { restockedIds.push(r.productId); restockedNames.push(r.productName); }
+      if (r.status === "sold_out" && margin !== COST_REFRESH_SOLDOUT_MARGIN) soldOut.push({ id: r.productId, name: r.productName });
+      if (r.status === "priced" && margin === COST_REFRESH_SOLDOUT_MARGIN) restocked.push({ id: r.productId, name: r.productName });
     }
     const marginUpdates = [
-      ...newlySoldOutIds.map((id) => ({ id, margin: COST_REFRESH_SOLDOUT_MARGIN })),
-      ...restockedIds.map((id) => ({ id, margin: COST_REFRESH_DEFAULT_MARGIN })),
+      ...soldOut.map(({ id }) => ({ id, margin: COST_REFRESH_SOLDOUT_MARGIN })),
+      ...restocked.map(({ id }) => ({ id, margin: COST_REFRESH_DEFAULT_MARGIN })),
     ];
     if (marginUpdates.length > 0) {
       const settled = await Promise.allSettled(
@@ -741,8 +749,8 @@ function OrdersPageInner() {
     // 가격수정 엑셀 다운로드 대상: 가격 변동 + 신규 품절 + 재입고 복귀
     const exportProductIds = [...new Set([
       ...changed.map((r) => r.productId),
-      ...newlySoldOutIds,
-      ...restockedIds,
+      ...soldOut.map(({ id }) => id),
+      ...restocked.map(({ id }) => id),
     ])];
 
     let updatedOrders = 0;
@@ -788,12 +796,9 @@ function OrdersPageInner() {
       productCount: results.length,
       orderCount: updatedOrders,
       exportProductIds,
-      changedProductIds: changed.map((r) => r.productId),
-      newlySoldOutIds,
-      restockedIds,
-      changedItems: changed.map((r) => ({ name: r.productName, previous: r.previous, price: r.price })),
-      soldOutNames,
-      restockedNames,
+      changedItems: changed.map((r) => ({ id: r.productId, name: r.productName, previous: r.previous, price: r.price })),
+      soldOut,
+      restocked,
     };
   }, [endBatchUndo, session?.access_token, startBatchUndo, updateOrder]);
 
@@ -966,22 +971,16 @@ function OrdersPageInner() {
       showToast(`원가 적용 완료: 발주서 ${applied.orderCount}건 수정`, "success");
 
       // 쿠팡·스마트스토어 API 즉시 반영 (변동가·품절·재입고) — 실패해도 로컬 적용은 유지
-      const report = {
-        productCount: applied.productCount,
-        orderCount: applied.orderCount,
-        changed: applied.changedProductIds.length,
-        soldOut: applied.newlySoldOutIds.length,
-        restocked: applied.restockedIds.length,
-        market: null as MarketApplyResult | null,
-        marketError: null as string | null,
+      const report: { applied: CostApplyOutcome; market: MarketApplyResult | null; marketError: string | null } = {
+        applied, market: null, marketError: null,
       };
-      if (applied.changedProductIds.length || applied.newlySoldOutIds.length || applied.restockedIds.length) {
+      if (applied.changedItems.length || applied.soldOut.length || applied.restocked.length) {
         try {
           pushCostRefreshLog("쿠팡·스마트스토어 API 반영 중...");
           const marketResult = await applyPriceChangesToMarketplaces(session?.access_token ?? "", {
-            changedIds: applied.changedProductIds,
-            soldOutIds: applied.newlySoldOutIds,
-            restoredIds: applied.restockedIds,
+            changedIds: applied.changedItems.map(({ id }) => id),
+            soldOutIds: applied.soldOut.map(({ id }) => id),
+            restoredIds: applied.restocked.map(({ id }) => id),
           });
           const summary = summarizeMarketApply(marketResult);
           pushCostRefreshLog(`마켓 API 반영: ${summary}`);
@@ -999,8 +998,8 @@ function OrdersPageInner() {
               const diff = it.price - it.previous;
               return `${it.name}: ${fmt(it.previous)}원 → **${fmt(it.price)}원** (${diff > 0 ? "▲" : "▼"}${fmt(Math.abs(diff))})`;
             })),
-            ...listSection(`🚫 품절 → 판매중지 ${applied.soldOutNames.length}건`, applied.soldOutNames),
-            ...listSection(`🔄 재입고 → 판매재개 ${applied.restockedNames.length}건`, applied.restockedNames),
+            ...listSection(`🚫 품절 → 판매중지 ${applied.soldOut.length}건`, applied.soldOut.map(({ name }) => name)),
+            ...listSection(`🔄 재입고 → 판매재개 ${applied.restocked.length}건`, applied.restocked.map(({ name }) => name)),
             `🛒 마켓 반영: ${summary}`,
             ...(applied.orderCount > 0 ? [`📋 발주서 ${applied.orderCount}건 수정`] : []),
           ];
@@ -1868,8 +1867,8 @@ function OrdersPageInner() {
           <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-md p-6 mx-3">
             <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">원가 갱신 적용 결과</h3>
             <p className="text-xs text-[var(--text-muted)] mb-4">
-              상품 {marketApplyReport.productCount}개 확인 · 발주서 {marketApplyReport.orderCount}건 수정
-              {" · "}가격 변동 {marketApplyReport.changed} · 품절 {marketApplyReport.soldOut} · 재입고 {marketApplyReport.restocked}
+              상품 {marketApplyReport.applied.productCount}개 확인 · 발주서 {marketApplyReport.applied.orderCount}건 수정
+              {" · "}가격 변동 {marketApplyReport.applied.changedItems.length} · 품절 {marketApplyReport.applied.soldOut.length} · 재입고 {marketApplyReport.applied.restocked.length}
             </p>
 
             <div className="space-y-2 mb-4">

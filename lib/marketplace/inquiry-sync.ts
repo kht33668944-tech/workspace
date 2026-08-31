@@ -14,18 +14,14 @@ import { sleep, logMarketplaceApi } from "@/lib/marketplace/common";
 import type { SyncPlatform } from "@/lib/marketplace/order-sync";
 import { toKstDateKey } from "@/lib/date-utils";
 import { getAppSetting } from "@/lib/app-settings";
+import { startSyncRun, finishSyncRun } from "@/lib/marketplace/sync-run";
 import { generateInquiryDraft, type InquiryOrderContext } from "@/lib/marketplace/inquiry-ai";
-import type { MarketplaceInquiryType } from "@/types/database";
+import { INQUIRY_TYPE_LABEL, INQUIRY_REPLY_LIMITS, type MarketplaceInquiryType } from "@/types/database";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = SupabaseClient<any, any, any>;
 
-export const INQUIRY_TYPE_LABEL: Record<MarketplaceInquiryType, string> = {
-  coupang_product: "쿠팡·상품문의",
-  coupang_cs: "쿠팡·고객센터",
-  naver_qna: "스토어·상품Q&A",
-  naver_inquiry: "스토어·1:1",
-};
+export { INQUIRY_TYPE_LABEL };
 
 const MAX_PAGES = 30;          // 페이지네이션 안전 상한
 const MAX_AUTO_REPLY = 5;      // 한 번의 동기화에서 AI 자동답변 최대 건수 (폭주 방지)
@@ -204,6 +200,11 @@ export interface InquiryReplyOutcome {
   message: string;
 }
 
+/** 마켓이 "이미 답변된 문의"라 거절한 응답인지 (order-ship 의 isAlreadyShippedMessage 와 같은 관용구) */
+function isAlreadyAnsweredMessage(message: string): boolean {
+  return /이미|중복|duplicate|already/i.test(message);
+}
+
 /** 고객센터 문의 답변에 필요한 parentAnswerId — needAnswer=true 인 최신 이관글의 answerId */
 export function extractCsParentAnswerId(raw: Record<string, unknown>): number | null {
   const replies = (raw.replies as CoupangCallCenterReply[] | undefined) ?? [];
@@ -230,19 +231,20 @@ export async function sendInquiryReply(opts: {
     }
     if (inquiryType === "coupang_product") {
       const res = await opts.coupang.replyOnlineInquiry({ inquiryId, content, replyBy: opts.wingUserId });
-      const alreadyAnswered = !res.ok && res.status === 400 && /이미|중복|duplicate|already/i.test(res.message);
+      const alreadyAnswered = !res.ok && res.status === 400 && isAlreadyAnsweredMessage(res.message);
       return { ok: res.ok, dryRun: res.dryRun === true, alreadyAnswered, message: res.message };
     }
-    // coupang_cs — 답변 조건: 미답변 + parentAnswerId 확보
-    if (content.trim().length < 2 || content.length > 1000) {
-      return { ok: false, dryRun: false, alreadyAnswered: false, message: "쿠팡 고객센터 답변은 2~1000자여야 합니다." };
+    // coupang_cs — 답변 조건: 글자수 제약 + 미답변 + parentAnswerId 확보
+    const limits = INQUIRY_REPLY_LIMITS[inquiryType];
+    if (limits && (content.trim().length < limits.min || content.length > limits.max)) {
+      return { ok: false, dryRun: false, alreadyAnswered: false, message: `쿠팡 고객센터 답변은 ${limits.min}~${limits.max}자여야 합니다.` };
     }
     const parentAnswerId = extractCsParentAnswerId(opts.raw);
     if (parentAnswerId === null) {
       return { ok: false, dryRun: false, alreadyAnswered: false, message: "답변 대상 이관글(parentAnswerId)을 찾지 못했습니다. 동기화 후 다시 시도하세요." };
     }
     const res = await opts.coupang.replyCallCenterInquiry({ inquiryId, content, replyBy: opts.wingUserId, parentAnswerId });
-    const alreadyAnswered = !res.ok && res.status === 400 && /이미|중복|duplicate|already/i.test(res.message);
+    const alreadyAnswered = !res.ok && res.status === 400 && isAlreadyAnsweredMessage(res.message);
     return { ok: res.ok, dryRun: res.dryRun === true, alreadyAnswered, message: res.message };
   }
 
@@ -250,13 +252,13 @@ export async function sendInquiryReply(opts: {
   const res = inquiryType === "naver_qna"
     ? await opts.smartstore.answerProductQna(opts.inquiryId, content)
     : await opts.smartstore.answerCustomerInquiry(opts.inquiryId, content);
-  const alreadyAnswered = !res.ok && /이미|중복|duplicate|already/i.test(res.message);
+  const alreadyAnswered = !res.ok && isAlreadyAnsweredMessage(res.message);
   return { ok: res.ok, dryRun: res.dryRun === true, alreadyAnswered, message: res.message };
 }
 
 // ───────── 동기화 본체 ─────────
 
-export async function syncInquiries(options: {
+export interface SyncInquiriesOptions {
   supabase: AnySupabase;
   userId: string;
   platform: SyncPlatform;
@@ -267,7 +269,9 @@ export async function syncInquiries(options: {
   smartstore?: NaverCommerceApiClient;
   /** 쿠팡 자동답변용 윙ID (credential.meta.wingUserId) */
   wingUserId?: string | null;
-}): Promise<InquirySyncResult> {
+}
+
+export async function syncInquiries(options: SyncInquiriesOptions): Promise<InquirySyncResult> {
   const { supabase, userId, platform } = options;
   const days = Math.min(Math.max(options.days ?? 7, 1), 7); // 쿠팡 최대 7일
   const to = toKstDateKey();
@@ -279,46 +283,32 @@ export async function syncInquiries(options: {
   };
 
   // 실행 기록 (자동화 페이지 타임라인용) — 기록 실패는 본작업을 막지 않는다
-  try {
-    const { data: run } = await supabase
-      .from("marketplace_sync_runs")
-      .insert({ user_id: userId, platform, kind: "inquiries", trigger: options.trigger ?? "manual", dry_run: false })
-      .select("id")
-      .single();
-    result.runId = run?.id ?? null;
-  } catch (e) {
-    console.warn("[inquiry-sync] 실행 기록 생성 실패:", e instanceof Error ? e.message : String(e));
-  }
+  result.runId = await startSyncRun(supabase, { userId, platform, kind: "inquiries", trigger: options.trigger ?? "manual" });
 
   try {
     await syncInquiriesBody(options, from, to, result);
   } finally {
-    if (result.runId) {
-      const hasWork = result.newInquiries.length + result.updatedAnswered + result.autoReplied.length > 0;
-      await supabase.from("marketplace_sync_runs").update({
-        finished_at: new Date().toISOString(),
-        status: result.errors.length > 0 ? (hasWork ? "partial" : "failed") : "success",
-        remote_count: result.remoteCount,
-        confirmed: result.autoReplied.length,
-        error: result.errors[0] ?? null,
-        detail: {
-          new: result.newInquiries.length,
-          autoReplied: result.autoReplied.length,
-          held: result.heldForReview.length,
-          updatedAnswered: result.updatedAnswered,
-          permissionDenied: result.permissionDenied,
-          samples: result.newInquiries.slice(0, 20),
-        },
-      }).eq("id", result.runId).then(({ error: upErr }: { error: { message: string } | null }) => {
-        if (upErr) console.warn("[inquiry-sync] 실행 기록 마무리 실패:", upErr.message);
-      });
-    }
+    const hasWork = result.newInquiries.length + result.updatedAnswered + result.autoReplied.length > 0;
+    await finishSyncRun(supabase, result.runId, {
+      status: result.errors.length > 0 ? (hasWork ? "partial" : "failed") : "success",
+      remote_count: result.remoteCount,
+      confirmed: result.autoReplied.length,
+      error: result.errors[0] ?? null,
+      detail: {
+        new: result.newInquiries.length,
+        autoReplied: result.autoReplied.length,
+        held: result.heldForReview.length,
+        updatedAnswered: result.updatedAnswered,
+        permissionDenied: result.permissionDenied,
+        samples: result.newInquiries.slice(0, 20),
+      },
+    });
   }
   return result;
 }
 
 async function syncInquiriesBody(
-  options: Parameters<typeof syncInquiries>[0],
+  options: SyncInquiriesOptions,
   from: string,
   to: string,
   result: InquirySyncResult,
@@ -357,38 +347,47 @@ async function syncInquiriesBody(
   result.remoteCount = collected.length;
   if (collected.length === 0) return;
 
-  // 2. 기존 행 대조
+  // 2. 기존 행 대조 — 이번 수집분과 대응하는 행만 조회 (히스토리가 쌓여도 payload 고정)
   const types = [...new Set(collected.map((c) => c.inquiryType))];
-  const { data: existingRows, error: exErr } = await supabase
-    .from("marketplace_inquiries")
-    .select("id, inquiry_type, inquiry_id, status")
-    .eq("user_id", userId)
-    .in("inquiry_type", types);
-  if (exErr) {
-    result.errors.push(`기존 문의 조회 실패: ${exErr.message}`);
-    return;
-  }
   const existing = new Map<string, { id: string; status: string }>();
-  for (const r of existingRows ?? []) existing.set(`${r.inquiry_type}|${r.inquiry_id}`, { id: r.id, status: r.status });
+  const collectedIds = [...new Set(collected.map((c) => c.inquiryId))];
+  for (let i = 0; i < collectedIds.length; i += 200) {
+    const { data: existingRows, error: exErr } = await supabase
+      .from("marketplace_inquiries")
+      .select("id, inquiry_type, inquiry_id, status")
+      .eq("user_id", userId)
+      .in("inquiry_type", types)
+      .in("inquiry_id", collectedIds.slice(i, i + 200));
+    if (exErr) {
+      result.errors.push(`기존 문의 조회 실패: ${exErr.message}`);
+      return;
+    }
+    for (const r of existingRows ?? []) existing.set(`${r.inquiry_type}|${r.inquiry_id}`, { id: r.id, status: r.status });
+  }
 
-  // 3. 주문 매칭 (배치 1회)
-  const orderIdByMarketNo = new Map<string, { id: string; product_name: string | null }>();
+  // 3. 주문 매칭 (배치 1회) — AI 초안에 필요한 주문 컨텍스트까지 함께 조회 (5단계 개별 재조회 방지)
+  //    쿠팡의 marketplace_product_order_no 는 `${shipmentBoxId}-${vendorItemId}` 형태라 문의 주문번호와 매칭 불가 → 제외
+  const orderByMarketNo = new Map<string, { id: string } & InquiryOrderContext>();
   const allMarketNos = [...new Set(collected.flatMap((c) => c.marketOrderIds))];
   if (allMarketNos.length > 0) {
     const marketLabel = platform === "coupang" ? "쿠팡" : "스마트스토어";
-    for (const col of ["marketplace_order_no", "marketplace_product_order_no"] as const) {
+    const cols = platform === "coupang"
+      ? (["marketplace_order_no"] as const)
+      : (["marketplace_order_no", "marketplace_product_order_no"] as const);
+    const ctxCols = "id, product_name, delivery_status, tracking_no, courier, order_date, purchased_at, ship_by_date, recipient_name, quantity, marketplace";
+    for (const col of cols) {
       for (let i = 0; i < allMarketNos.length; i += 200) {
         const chunk = allMarketNos.slice(i, i + 200);
         const { data: rows } = await supabase
           .from("orders")
-          .select(`id, product_name, ${col}`)
+          .select(`${ctxCols}, ${col}`)
           .eq("user_id", userId)
           .eq("marketplace", marketLabel)
           .in(col, chunk);
         for (const row of (rows ?? []) as Array<Record<string, unknown>>) {
           const no = row[col];
-          if (typeof no === "string" && no && !orderIdByMarketNo.has(no)) {
-            orderIdByMarketNo.set(no, { id: String(row.id), product_name: (row.product_name as string | null) ?? null });
+          if (typeof no === "string" && no && !orderByMarketNo.has(no)) {
+            orderByMarketNo.set(no, row as unknown as { id: string } & InquiryOrderContext);
           }
         }
       }
@@ -396,10 +395,10 @@ async function syncInquiriesBody(
   }
 
   // 4. upsert (answered → unanswered 다운그레이드 금지)
-  const newlyInserted: Array<{ dbId: string; item: NormalizedInquiry; orderId: string | null }> = [];
+  const newlyInserted: Array<{ dbId: string; item: NormalizedInquiry; orderCtx: InquiryOrderContext | null }> = [];
   for (const item of collected) {
     const key = `${item.inquiryType}|${item.inquiryId}`;
-    const matched = item.marketOrderIds.map((no) => orderIdByMarketNo.get(no)).find(Boolean) ?? null;
+    const matched = item.marketOrderIds.map((no) => orderByMarketNo.get(no)).find(Boolean) ?? null;
     const productName = item.productName ?? matched?.product_name ?? null;
     const prev = existing.get(key);
 
@@ -435,11 +434,13 @@ async function syncInquiriesBody(
           productName,
           contentPreview: preview(item.content),
         });
-        newlyInserted.push({ dbId: inserted.id, item, orderId: matched?.id ?? null });
+        newlyInserted.push({ dbId: inserted.id, item, orderCtx: matched });
       }
-    } else {
+    } else if (prev.status === "unanswered") {
+      // 답변 완료된 기존 행은 건드리지 않는다 (매시 no-op UPDATE 방지).
+      // 미답변 행은 raw 를 최신화 — 쿠팡 CS 답변에 필요한 parentAnswerId 가 raw 에 있다
       const updates: Record<string, unknown> = { raw: item.raw };
-      if (prev.status === "unanswered" && item.answered) {
+      if (item.answered) {
         updates.status = "answered";
         updates.answer_content = item.answerContent;
         updates.answered_at = item.answeredAt;
@@ -457,17 +458,7 @@ async function syncInquiriesBody(
     const autoEnabled = setting?.enabled === true; // 기본 꺼짐 — AI는 초안만 준비, 전송은 사람이 확인 후
     let autoSent = 0;
 
-    for (const { dbId, item, orderId } of newlyInserted) {
-      let orderCtx: InquiryOrderContext | null = null;
-      if (orderId) {
-        const { data: order } = await supabase
-          .from("orders")
-          .select("delivery_status, tracking_no, courier, order_date, purchased_at, ship_by_date, recipient_name, product_name, quantity, marketplace")
-          .eq("id", orderId)
-          .maybeSingle();
-        orderCtx = (order as InquiryOrderContext | null) ?? null;
-      }
-
+    for (const { dbId, item, orderCtx } of newlyInserted) {
       const draft = await generateInquiryDraft({
         inquiryType: item.inquiryType,
         content: item.content,

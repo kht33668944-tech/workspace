@@ -2,6 +2,7 @@
 
 // 실행 1건의 kind별 상세 요약 (타임라인 펼침·오류 센터 공용)
 import type { MarketplaceSyncRun } from "@/types/database";
+import type { PriceRound } from "@/lib/automation-schedule";
 import { formatLogTime } from "@/lib/log-format";
 
 const PLATFORM_LABEL: Record<string, string> = { coupang: "쿠팡", smartstore: "스토어", all: "전체" };
@@ -15,7 +16,6 @@ function Row({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-interface PriceRound { round: number; collected: number; soldOut: number; retry: number }
 interface MarketCounts { price?: number; stop?: number; resume?: number; failed?: number; blocked?: number }
 
 function summarize(run: MarketplaceSyncRun): Array<[string, string | number]> {

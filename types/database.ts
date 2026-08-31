@@ -325,6 +325,19 @@ export type MarketplaceInquiryType = "coupang_product" | "coupang_cs" | "naver_q
 export type MarketplaceInquiryStatus = "unanswered" | "answered";
 export type MarketplaceInquiryAnswerSource = "sync" | "app" | "auto";
 
+/** 문의 유형 라벨 — 화면(문의 탭)·디스코드 알림·동기화 로그가 공유하는 정본 */
+export const INQUIRY_TYPE_LABEL: Record<MarketplaceInquiryType, string> = {
+  coupang_product: "쿠팡·상품문의",
+  coupang_cs: "쿠팡·고객센터",
+  naver_qna: "스토어·상품Q&A",
+  naver_inquiry: "스토어·1:1",
+};
+
+/** 마켓 API 답변 글자수 제약 (없으면 제약 없음) — 화면 검증·전송 전 검증 공용 */
+export const INQUIRY_REPLY_LIMITS: Partial<Record<MarketplaceInquiryType, { min: number; max: number }>> = {
+  coupang_cs: { min: 2, max: 1000 },
+};
+
 export interface MarketplaceInquiry {
   id: string;
   user_id: string;

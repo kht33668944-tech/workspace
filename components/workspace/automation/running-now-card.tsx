@@ -5,25 +5,8 @@ import { useEffect, useState } from "react";
 import { Loader2, Clock, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { MarketplaceSyncRun } from "@/types/database";
-import { KIND_TO_KEY, AUTOMATIONS, type RunKind, type AutomationDef } from "@/lib/automation-schedule";
+import { runLabelForKind, PRICE_PHASE_LABEL, type PriceRound, type AutomationDef } from "@/lib/automation-schedule";
 import { formatLogTime, timeAgo } from "@/lib/log-format";
-
-interface PriceRound { round: number; collected: number; soldOut: number; retry: number }
-
-const PHASE_LABEL: Record<string, string> = {
-  init: "시작 중",
-  reset: "전일대비 초기화",
-  scrape: "최저가 수집",
-  apply: "가격 적용",
-  margins: "품절/재입고 마진 처리",
-  market: "마켓 API 반영",
-  excel: "엑셀 저장",
-};
-
-function runLabel(run: MarketplaceSyncRun): string {
-  const key = KIND_TO_KEY[(run.kind ?? "orders") as RunKind];
-  return AUTOMATIONS.find((d) => d.key === key)?.label ?? run.kind ?? "자동화";
-}
 
 function priceProgress(run: MarketplaceSyncRun): string | null {
   const d = (run.detail ?? {}) as Record<string, unknown>;
@@ -38,7 +21,7 @@ function priceProgress(run: MarketplaceSyncRun): string | null {
     }
     return "최저가 수집 중";
   }
-  return PHASE_LABEL[phase] ?? null;
+  return PRICE_PHASE_LABEL[phase] ?? null;
 }
 
 function elapsedText(startedAt: string, now: number): string {
@@ -55,10 +38,12 @@ export default function RunningNowCard({ runningRuns, staleRuns, nextRun, onRefe
   const [now, setNow] = useState(Date.now());
   const [cleaning, setCleaning] = useState(false);
 
+  // 초 단위가 보이는 건 카운트다운(다음 실행까지 1시간 미만)뿐 — 그때만 1초, 나머지는 30초 tick
+  const showsSeconds = runningRuns.length === 0 && !!nextRun && new Date(nextRun.at).getTime() - now < 3600000;
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => setNow(Date.now()), showsSeconds ? 1000 : 30000);
     return () => clearInterval(t);
-  }, []);
+  }, [showsSeconds]);
 
   const cleanupStale = async (run: MarketplaceSyncRun) => {
     if (cleaning) return;
@@ -93,7 +78,7 @@ export default function RunningNowCard({ runningRuns, staleRuns, nextRun, onRefe
               <Loader2 className="w-5 h-5 text-blue-400 animate-spin shrink-0 mt-0.5" />
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-[var(--text-primary)]">
-                  {runLabel(run)} 실행 중
+                  {runLabelForKind(run.kind)} 실행 중
                   <span className="text-xs font-normal text-[var(--text-muted)] ml-2">{formatLogTime(run.started_at)} 시작 · {elapsedText(run.started_at, now)}</span>
                 </p>
                 {run.kind === "price" && (
@@ -119,7 +104,7 @@ export default function RunningNowCard({ runningRuns, staleRuns, nextRun, onRefe
       {staleRuns.map((run) => (
         <div key={run.id} className="flex items-center gap-2 mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          <span className="flex-1">{runLabel(run)}이(가) {timeAgo(run.started_at)}({formatLogTime(run.started_at)}) 시작된 뒤 응답이 없습니다 (프로세스 중단 의심)</span>
+          <span className="flex-1">{runLabelForKind(run.kind)}이(가) {timeAgo(run.started_at)}({formatLogTime(run.started_at)}) 시작된 뒤 응답이 없습니다 (프로세스 중단 의심)</span>
           <button onClick={() => cleanupStale(run)} disabled={cleaning} className="shrink-0 px-2 py-1 rounded bg-red-500/20 hover:bg-red-500/30 disabled:opacity-50">
             실패로 정리
           </button>

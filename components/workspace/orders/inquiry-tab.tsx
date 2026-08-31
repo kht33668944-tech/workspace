@@ -4,16 +4,10 @@
 import { useState, useCallback } from "react";
 import { Search, X, ChevronDown, ChevronRight, Loader2, MessageSquare, RefreshCw, Sparkles, Send, Bot, Store } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
 import { useInquiries, type InquiryWithOrder } from "@/hooks/use-inquiries";
 import { formatLogDate, formatLogTime } from "@/lib/log-format";
-import type { MarketplaceInquiryType } from "@/types/database";
-
-const TYPE_LABEL: Record<MarketplaceInquiryType, string> = {
-  coupang_product: "쿠팡·상품문의",
-  coupang_cs: "쿠팡·고객센터",
-  naver_qna: "스토어·상품Q&A",
-  naver_inquiry: "스토어·1:1",
-};
+import { INQUIRY_TYPE_LABEL, INQUIRY_REPLY_LIMITS, type MarketplaceInquiryType } from "@/types/database";
 
 const TYPE_BADGE: Record<MarketplaceInquiryType, string> = {
   coupang_product: "bg-rose-500/10 text-rose-400",
@@ -30,7 +24,7 @@ export default function InquiryTab() {
   const [platformFilter, setPlatformFilter] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   const { groupedByDay, counts, loading, refetch } = useInquiries({
     status: statusFilter,
@@ -43,11 +37,6 @@ export default function InquiryTab() {
     Authorization: `Bearer ${session?.access_token ?? ""}`,
   }), [session?.access_token]);
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 4000);
-  }, []);
-
   const handleSync = useCallback(async () => {
     if (syncing) return;
     setSyncing(true);
@@ -57,11 +46,11 @@ export default function InquiryTab() {
       if (!res.ok) throw new Error(json.error ?? `동기화 실패 (${res.status})`);
       const newCount = (json.results ?? []).reduce((n, r) => n + r.newInquiries.length, 0);
       const autoCount = (json.results ?? []).reduce((n, r) => n + r.autoReplied.length, 0);
-      showToast(`동기화 완료 — 새 문의 ${newCount}건${autoCount ? `, AI 자동답변 ${autoCount}건` : ""}`);
+      showToast(`동기화 완료 — 새 문의 ${newCount}건${autoCount ? `, AI 자동답변 ${autoCount}건` : ""}`, "success");
       await refetch();
     } catch (e) {
       console.error("[inquiry-tab] 동기화 실패:", e instanceof Error ? e.message : String(e));
-      showToast(`동기화 실패: ${e instanceof Error ? e.message : String(e)}`);
+      showToast(`동기화 실패: ${e instanceof Error ? e.message : String(e)}`, "error");
     } finally {
       setSyncing(false);
     }
@@ -134,10 +123,6 @@ export default function InquiryTab() {
         </button>
       </div>
 
-      {toast && (
-        <div className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-xs text-blue-400">{toast}</div>
-      )}
-
       {loading && (
         <div className="flex items-center justify-center py-12 text-[var(--text-muted)]">
           <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -168,7 +153,6 @@ export default function InquiryTab() {
               onToggle={() => toggle(inq.id)}
               headers={headers}
               onChanged={refetch}
-              showToast={showToast}
             />
           ))}
         </div>
@@ -190,14 +174,14 @@ function StatusBadge({ inquiry }: { inquiry: InquiryWithOrder }) {
   );
 }
 
-function InquiryRow({ inquiry, expanded, onToggle, headers, onChanged, showToast }: {
+function InquiryRow({ inquiry, expanded, onToggle, headers, onChanged }: {
   inquiry: InquiryWithOrder;
   expanded: boolean;
   onToggle: () => void;
   headers: () => Record<string, string>;
   onChanged: () => Promise<void>;
-  showToast: (msg: string) => void;
 }) {
+  const { showToast } = useToast();
   const [answer, setAnswer] = useState(inquiry.ai_draft ?? "");
   const [drafting, setDrafting] = useState(false);
   const [sending, setSending] = useState(false);
@@ -213,7 +197,7 @@ function InquiryRow({ inquiry, expanded, onToggle, headers, onChanged, showToast
       setAnswer(json.draft);
     } catch (e) {
       console.error("[inquiry-tab] 초안 생성 실패:", e instanceof Error ? e.message : String(e));
-      showToast(`AI 초안 생성 실패: ${e instanceof Error ? e.message : String(e)}`);
+      showToast(`AI 초안 생성 실패: ${e instanceof Error ? e.message : String(e)}`, "error");
     } finally {
       setDrafting(false);
     }
@@ -235,18 +219,19 @@ function InquiryRow({ inquiry, expanded, onToggle, headers, onChanged, showToast
       const res = await fetch("/api/marketplace-api/inquiries/reply", { method: "POST", headers: headers(), body: JSON.stringify({ id: inquiry.id, content: answer.trim() }) });
       const json = await res.json().catch(() => ({})) as { ok?: boolean; dryRun?: boolean; alreadyAnswered?: boolean; message?: string; error?: string };
       if (!res.ok) throw new Error(json.error ?? `전송 실패 (${res.status})`);
-      showToast(json.alreadyAnswered ? (json.message ?? "이미 답변된 문의였습니다.") : `답변 전송 완료${json.dryRun ? " (DRY RUN — 실제 전송 없음)" : ""}`);
+      showToast(json.alreadyAnswered ? (json.message ?? "이미 답변된 문의였습니다.") : `답변 전송 완료${json.dryRun ? " (DRY RUN — 실제 전송 없음)" : ""}`, "success");
       await onChanged();
     } catch (e) {
       console.error("[inquiry-tab] 답변 전송 실패:", e instanceof Error ? e.message : String(e));
-      showToast(`답변 전송 실패: ${e instanceof Error ? e.message : String(e)}`);
+      showToast(`답변 전송 실패: ${e instanceof Error ? e.message : String(e)}`, "error");
     } finally {
       setSending(false);
     }
   }, [sending, answer, headers, inquiry.id, onChanged, showToast]);
 
   const order = inquiry.order;
-  const isCs = inquiry.inquiry_type === "coupang_cs";
+  const limits = INQUIRY_REPLY_LIMITS[inquiry.inquiry_type]; // 마켓 API 글자수 제약 (쿠팡 고객센터 2~1000자)
+  const overLimits = !!limits && (answer.length > limits.max || answer.trim().length < limits.min);
 
   return (
     <div className="border border-[var(--border)] rounded-lg overflow-hidden">
@@ -261,7 +246,7 @@ function InquiryRow({ inquiry, expanded, onToggle, headers, onChanged, showToast
           {inquiry.inquiry_at ? formatLogTime(inquiry.inquiry_at) : "-"}
         </span>
         <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${TYPE_BADGE[inquiry.inquiry_type]}`}>
-          {TYPE_LABEL[inquiry.inquiry_type]}
+          {INQUIRY_TYPE_LABEL[inquiry.inquiry_type]}
         </span>
         <span className="text-xs text-[var(--text-tertiary)] max-w-40 truncate shrink-0" title={inquiry.product_name ?? ""}>
           {inquiry.product_name ?? "-"}
@@ -327,14 +312,14 @@ function InquiryRow({ inquiry, expanded, onToggle, headers, onChanged, showToast
                   <Sparkles className="w-3.5 h-3.5" />
                   {answer ? "AI 초안 재생성" : "AI 초안 생성"}
                 </button>
-                {isCs && (
-                  <span className={`text-xs ${answer.length > 1000 || (answer.trim().length > 0 && answer.trim().length < 2) ? "text-red-400" : "text-[var(--text-muted)]"}`}>
-                    {answer.length}/1000자 (2자 이상)
+                {limits && (
+                  <span className={`text-xs ${answer.trim().length > 0 && overLimits ? "text-red-400" : "text-[var(--text-muted)]"}`}>
+                    {answer.length}/{limits.max}자 ({limits.min}자 이상)
                   </span>
                 )}
                 <button
                   onClick={handleSend}
-                  disabled={sending || !answer.trim() || (isCs && (answer.length > 1000 || answer.trim().length < 2))}
+                  disabled={sending || !answer.trim() || overLimits}
                   className="ml-auto flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-medium text-white transition-colors disabled:opacity-50"
                 >
                   {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}

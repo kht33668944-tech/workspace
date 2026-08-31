@@ -1,8 +1,10 @@
 // 자동화 스케줄 정의 + 타임라인/헬스체크 계산 (자동화 페이지·크론 공용, React/supabase 의존 없음)
 // ⚠ schedule 값은 Windows 작업 스케줄러 등록(scripts/register-*-task.ps1)과 일치해야 한다.
-//   실측 앵커(2026-08-31): OnliveOrderSync 매시 :00 / OnliveTrackingShip 02:30 기점 3시간 / OnliveAutoPrice 00:15 기점 4시간
+//   ps1 쪽이 이 앵커(OnliveOrderSync 매시 :00 / OnliveTrackingShip 02:30 기점 3시간 / OnliveAutoPrice 00:15 기점 4시간)로
+//   고정 등록하므로, 앵커를 바꿀 때는 ps1과 여기를 같이 수정해야 한다.
 
 import type { MarketplaceSyncRun } from "@/types/database";
+import { toKstDateKey } from "@/lib/date-utils";
 
 export type AutomationKey = "order-sync" | "inquiries" | "tracking-ship" | "price" | "settlement" | "daily-summary";
 export type RunKind =
@@ -86,13 +88,42 @@ export const KIND_TO_KEY: Record<RunKind, AutomationKey | null> = {
   "health-alert": null,
 };
 
-const KST_OFFSET_MS = 9 * 3600000;
+export const AUTOMATION_BY_KEY = Object.fromEntries(
+  AUTOMATIONS.map((d) => [d.key, d]),
+) as Record<AutomationKey, AutomationDef>;
 
-/** KST 기준 YYYY-MM-DD */
-export function kstDateKey(t: number | Date = Date.now()): string {
-  const ms = t instanceof Date ? t.getTime() : t;
-  return new Date(ms + KST_OFFSET_MS).toISOString().slice(0, 10);
+/** run.kind → 사람용 라벨 (진행중 카드·오류 센터 공용) */
+export function runLabelForKind(kind: string | null | undefined): string {
+  const key = KIND_TO_KEY[(kind ?? "orders") as RunKind];
+  return key ? AUTOMATION_BY_KEY[key].label : kind ?? "자동화";
 }
+
+/** run.status/SlotStatus → 사람용 라벨 (타임라인·상태 카드·오류 센터가 공유해 표기 통일) */
+export const RUN_STATUS_LABEL: Record<SlotStatus, string> = {
+  upcoming: "예정",
+  running: "진행중",
+  success: "성공",
+  partial: "일부 실패",
+  failed: "실패",
+  stale: "중단됨",
+  missed: "미실행",
+  manual: "수동 실행",
+  unknown: "기록 없음",
+};
+
+/** price run 의 detail.phase 라벨 — 최저가 자동화 전용 (다른 kind 의 phase 를 섞지 말 것) */
+export const PRICE_PHASE_LABEL: Record<string, string> = {
+  init: "시작 중",
+  reset: "전일대비 초기화",
+  scrape: "최저가 수집",
+  apply: "가격 적용",
+  margins: "품절/재입고 마진 처리",
+  market: "마켓 API 반영",
+  excel: "엑셀 저장",
+};
+
+/** price run detail.scrape.rounds 항목 (auto-price-refresh.mjs 가 기록하는 계약) */
+export interface PriceRound { round: number; collected: number; soldOut: number; retry: number }
 
 /** 해당 KST 날짜의 예정 실행 시각 ISO 배열 (daily-latch 는 기준 시각 1개) */
 export function slotsForKstDate(def: AutomationDef, dateKst: string): string[] {
@@ -124,74 +155,79 @@ export interface TimelineSlot {
 export function isStaleRunning(run: MarketplaceSyncRun, now: Date = new Date()): boolean {
   if (run.status !== "running") return false;
   const key = KIND_TO_KEY[(run.kind ?? "orders") as RunKind] ?? "order-sync";
-  const def = AUTOMATIONS.find((d) => d.key === key);
-  const limitMin = (def?.maxRuntimeMin ?? 30) + 15;
+  const limitMin = AUTOMATION_BY_KEY[key].maxRuntimeMin + 15;
   return now.getTime() - new Date(run.started_at).getTime() > limitMin * 60000;
 }
 
-function worstOf(runs: MarketplaceSyncRun[], now: Date): SlotStatus {
+const STATUS_RANK: Record<SlotStatus, number> = {
+  upcoming: 0, manual: 0, unknown: 0, missed: 0,
+  success: 0, running: 1, partial: 2, stale: 3, failed: 4,
+};
+
+function worstOf(runs: Array<{ run: MarketplaceSyncRun; stale: boolean }>): SlotStatus {
   let worst: SlotStatus = "success";
-  const rank: Record<string, number> = { success: 0, running: 1, partial: 2, stale: 3, failed: 4 };
-  for (const r of runs) {
-    const s: SlotStatus = r.status === "running" ? (isStaleRunning(r, now) ? "stale" : "running") : (r.status as SlotStatus);
-    if ((rank[s] ?? 0) > (rank[worst] ?? 0)) worst = s;
+  for (const { run, stale } of runs) {
+    const s: SlotStatus = run.status === "running" ? (stale ? "stale" : "running") : (run.status as SlotStatus);
+    if (STATUS_RANK[s] > STATUS_RANK[worst]) worst = s;
   }
   return worst;
 }
 
 /** 오늘(KST) 타임라인: 예정 슬롯 + run 매칭 + 미실행 판정. 수동 실행(trigger=manual)은 별도 항목 */
 export function buildTodayTimeline(runs: MarketplaceSyncRun[], now: Date = new Date()): TimelineSlot[] {
-  const today = kstDateKey(now);
+  const today = toKstDateKey(now);
   const slots: TimelineSlot[] = [];
   const usedRunIds = new Set<string>();
 
-  // 자동화별 최초 기록 시각 — 기록 도입 전 슬롯은 "미실행"이 아니라 "기록 없음"으로 (콜드스타트 오탐 방지)
-  const firstRunMs = new Map<AutomationKey, number>();
-  for (const r of runs) {
-    const key = KIND_TO_KEY[(r.kind ?? "orders") as RunKind];
-    if (!key) continue;
-    const t = new Date(r.started_at).getTime();
-    const prev = firstRunMs.get(key);
-    if (prev === undefined || t < prev) firstRunMs.set(key, t);
+  // started_at 파싱·stale 판정·자동화 매핑을 1회만 계산해두고 슬롯 매칭은 자동화별 버킷만 스캔
+  const rows = runs.map((r) => ({
+    run: r,
+    key: KIND_TO_KEY[(r.kind ?? "orders") as RunKind],
+    startedMs: new Date(r.started_at).getTime(),
+    stale: isStaleRunning(r, now),
+  }));
+  const byKey = new Map<AutomationKey, typeof rows>();
+  const firstRunMs = new Map<AutomationKey, number>(); // 기록 도입 전 슬롯은 "미실행" 대신 "기록 없음" (콜드스타트 오탐 방지)
+  for (const row of rows) {
+    if (!row.key) continue;
+    const bucket = byKey.get(row.key);
+    if (bucket) bucket.push(row); else byKey.set(row.key, [row]);
+    const prev = firstRunMs.get(row.key);
+    if (prev === undefined || row.startedMs < prev) firstRunMs.set(row.key, row.startedMs);
   }
 
   for (const def of AUTOMATIONS) {
+    const bucket = byKey.get(def.key) ?? [];
     for (const slotIso of slotsForKstDate(def, today)) {
       const slotMs = new Date(slotIso).getTime();
       const tolMs = def.toleranceMin * 60000;
-      const matched = runs.filter((r) => {
-        if (r.trigger !== "scheduler" || !def.kinds.includes((r.kind ?? "orders") as RunKind)) return false;
-        const t = new Date(r.started_at).getTime();
-        return t >= slotMs - tolMs && t <= slotMs + tolMs;
-      });
-      for (const r of matched) usedRunIds.add(r.id);
+      const matched = bucket.filter((row) =>
+        row.run.trigger === "scheduler" &&
+        def.kinds.includes((row.run.kind ?? "orders") as RunKind) &&
+        row.startedMs >= slotMs - tolMs && row.startedMs <= slotMs + tolMs
+      );
+      for (const row of matched) usedRunIds.add(row.run.id);
       let status: SlotStatus;
-      if (matched.length > 0) status = worstOf(matched, now);
+      if (matched.length > 0) status = worstOf(matched);
       else if (slotMs + tolMs >= now.getTime()) status = "upcoming";
       else {
         const first = firstRunMs.get(def.key);
         status = first !== undefined && first <= slotMs ? "missed" : "unknown";
       }
-      slots.push({ key: def.key, label: def.label, scheduledAt: slotIso, status, runs: matched });
+      slots.push({ key: def.key, label: def.label, scheduledAt: slotIso, status, runs: matched.map((m) => m.run) });
     }
   }
 
   // 수동 실행 + 슬롯에 매칭 안 된 스케줄 실행(catch-up 등)은 실제 시각으로 별도 표시
   const todayStartMs = new Date(`${today}T00:00:00+09:00`).getTime();
-  for (const r of runs) {
-    if (usedRunIds.has(r.id)) continue;
-    const kind = (r.kind ?? "orders") as RunKind;
-    const key = KIND_TO_KEY[kind];
-    if (!key) continue;
-    const t = new Date(r.started_at).getTime();
-    if (t < todayStartMs) continue;
-    const def = AUTOMATIONS.find((d) => d.key === key)!;
+  for (const row of rows) {
+    if (!row.key || usedRunIds.has(row.run.id) || row.startedMs < todayStartMs) continue;
     slots.push({
-      key,
-      label: def.label,
-      scheduledAt: r.started_at,
-      status: r.trigger === "manual" ? "manual" : worstOf([r], now),
-      runs: [r],
+      key: row.key,
+      label: AUTOMATION_BY_KEY[row.key].label,
+      scheduledAt: row.run.started_at,
+      status: row.run.trigger === "manual" ? "manual" : worstOf([row]),
+      runs: [row.run],
     });
   }
 
@@ -201,7 +237,7 @@ export function buildTodayTimeline(runs: MarketplaceSyncRun[], now: Date = new D
 /** 다음 예정 실행 (카운트다운용) — interval 스케줄만 대상 */
 export function nextScheduledRun(now: Date = new Date()): { def: AutomationDef; at: string } | null {
   let best: { def: AutomationDef; at: string } | null = null;
-  const days = [kstDateKey(now), kstDateKey(now.getTime() + 86400000)];
+  const days = [toKstDateKey(now), toKstDateKey(now.getTime() + 86400000)];
   for (const def of AUTOMATIONS) {
     if (def.schedule.type !== "interval") continue;
     for (const day of days) {

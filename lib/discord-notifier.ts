@@ -8,7 +8,7 @@ interface AutomationNotifyField {
 /** 디스코드 채널 (채널별 웹훅 환경변수). 없으면 DISCORD_WEBHOOK_URL 로 */
 export type DiscordChannel = "orders" | "tracking" | "purchase" | "price" | "ai" | "inquiry" | "default";
 
-const CHANNEL_ENV: Record<DiscordChannel, string> = {
+export const CHANNEL_ENV: Record<DiscordChannel, string> = {
   orders: "DISCORD_WEBHOOK_ORDERS",     // 주문수집-자동화: 주문 수집·취소요청·정산
   tracking: "DISCORD_WEBHOOK_TRACKING", // 운송장수집-자동화: 운송장 수집·송장 전송·ESM 엑셀
   purchase: "DISCORD_WEBHOOK_PURCHASE", // 구매자동화
@@ -17,6 +17,11 @@ const CHANNEL_ENV: Record<DiscordChannel, string> = {
   inquiry: "DISCORD_WEBHOOK_INQUIRY",   // 문의-자동화: 마켓 고객문의 수집·AI 자동답변
   default: "DISCORD_WEBHOOK_URL",
 };
+
+/** DiscordChannel 런타임 검증 — CHANNEL_ENV 가 유일한 진실 (채널 추가 시 자동 반영) */
+export function isDiscordChannel(value: string): value is DiscordChannel {
+  return value in CHANNEL_ENV;
+}
 
 /** 제목으로 채널 추론 (channel 을 명시하지 않은 기존 호출부용) */
 export function inferDiscordChannel(title: string): DiscordChannel {

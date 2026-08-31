@@ -77,8 +77,8 @@ false 조건 (하나라도 해당하면): 취소·반품·교환·환불·보상
   if (!raw) return null;
 
   try {
-    const jsonText = raw.replace(/```json|```/g, "").trim();
-    const match = jsonText.match(/\{[\s\S]*\}/);
+    const match = raw.match(/\{[\s\S]*\}/); // 코드펜스 등 JSON 밖 텍스트 제거
+
     if (!match) return null;
     const parsed = JSON.parse(match[0]) as { draft?: unknown; autoSendable?: unknown; reason?: unknown };
     const draft = typeof parsed.draft === "string" ? parsed.draft.trim() : "";

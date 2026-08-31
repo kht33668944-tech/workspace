@@ -3,7 +3,8 @@
 
 import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
 import type { SyncResult } from "@/lib/marketplace/order-sync";
-import { INQUIRY_TYPE_LABEL, type InquirySyncResult } from "@/lib/marketplace/inquiry-sync";
+import type { InquirySyncResult } from "@/lib/marketplace/inquiry-sync";
+import { INQUIRY_TYPE_LABEL } from "@/types/database";
 import type { ShipResult } from "@/lib/marketplace/order-ship";
 import type { CollectAllResult } from "@/lib/tracking/collect-all";
 import type { EsmExportResult } from "@/lib/tracking/esm-export";
