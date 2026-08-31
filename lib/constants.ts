@@ -89,8 +89,9 @@ export const DELIVERY_STATUS_COLORS: Record<string, string> = {
   교환완료: "bg-purple-500/20 text-purple-400",
 };
 
-/** 클레임 동기화·자동 전이가 건드리지 않는 종료 상태. 발송불가 = 품절·역마진으로 보낼 수 없는 보류 상태(구 재고부족) — 사람이 취소준비/구매대기로 보낼 때까지 자동화 제외 */
-export const TERMINAL_STATUSES = new Set<string>(["취소완료", "반품완료", "교환완료", "발송불가"]);
+/** 클레임 동기화·자동 전이가 건드리지 않는 종료 상태.
+ *  발송불가(보류)는 여기 넣지 않는다 — 발송불가 주문에 구매자 취소요청이 오면 취소요청→자동승인으로 흘러야 한다 (품절 주문을 고객이 취소해주는 최선의 경로) */
+export const TERMINAL_STATUSES = new Set<string>(["취소완료", "반품완료", "교환완료"]);
 /** 자동구매 락 중 — 상태는 두고 claim_* 만 기록 */
 export const LOCKED_STATUSES = new Set<string>(["구매진행중"]);
 /** 운송장이 입력돼도 배송완료로 자동 전환하지 않는 클레임 상태 (송장 전송 대상에서도 제외) */
