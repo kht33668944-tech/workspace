@@ -49,7 +49,11 @@ export async function notifySyncResults(results: SyncResult[], trigger: "manual"
     const per = results.map((r) => [LABEL[r.platform], r.newOrders.length] as [string, number]);
     lines.push(`신규 ${newTotal}건 등록·발주확인 완료 (${joinCounts(per)})`);
   }
-  if (autoOk.length > 0) lines.push(`취소요청 ${autoOk.length}건 자동 승인 (운송장 없음·구매 전)`);
+  if (autoOk.length > 0) {
+    lines.push(`취소요청 ${autoOk.length}건 자동 승인 (운송장 없음·구매 전)`);
+    for (const a of autoOk.slice(0, 6)) lines.push(`   • ${a.recipientName ?? "-"} · ${a.productName ?? "-"}`);
+    if (autoOk.length > 6) lines.push(`   • 외 ${autoOk.length - 6}건`);
+  }
   if (otherClaims.length > 0) {
     lines.push(`클레임 반영 ${otherClaims.length}건`);
     for (const c of otherClaims.slice(0, 5)) lines.push(`   • ${c.recipientName ?? "-"} · ${c.productName ?? "-"} → ${c.to}`);
