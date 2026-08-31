@@ -507,5 +507,5 @@ export interface MarketplaceSyncRun {
   claims: Record<string, number>;
   error: string | null;
   detail: Record<string, unknown> | null;
-  kind?: "orders" | "shipping" | "settlement" | string;
+  kind?: "orders" | "shipping" | "settlement" | "daily-summary" | "inquiries" | "tracking-collect" | "esm-export" | "price" | "health-alert" | string;
 }

@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       const wingUserId = typeof (cred.meta as Record<string, unknown> | null)?.wingUserId === "string"
         ? (cred.meta as Record<string, string>).wingUserId
         : null;
-      const r = await syncInquiries({ supabase, userId, platform, credentialId: cred.id, days: 7, wingUserId, ...clients });
+      const r = await syncInquiries({ supabase, userId, platform, credentialId: cred.id, days: 7, trigger: "manual", wingUserId, ...clients });
       results.push(r);
       console.log(`[inquiry-sync] ${platform}: remote=${r.remoteCount} new=${r.newInquiries.length} auto=${r.autoReplied.length} held=${r.heldForReview.length} errors=${r.errors.length}`);
     }

@@ -95,6 +95,43 @@ async function discordDirect(message) {
   }
 }
 
+// ---------- 실행 기록 (marketplace_sync_runs, kind="price" — 자동화 페이지 타임라인·진행중 카드용) ----------
+// 기록 실패는 log만 남기고 본작업(가격 갱신)을 절대 막지 않는다.
+const runHeaders = { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "Content-Type": "application/json" };
+let runId = null;
+const runDetail = { label: LABEL, phase: "init" };
+
+async function insertRun(userId) {
+  try {
+    const res = await fetch(`${SUPA}/rest/v1/marketplace_sync_runs`, {
+      method: "POST",
+      headers: { ...runHeaders, Prefer: "return=representation" },
+      body: JSON.stringify({ user_id: userId, platform: "all", kind: "price", trigger: "scheduler", dry_run: false, detail: runDetail }),
+    });
+    const rows = await res.json().catch(() => null);
+    runId = Array.isArray(rows) && rows[0]?.id ? rows[0].id : null;
+  } catch (e) {
+    log(`실행 기록 생성 실패: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function patchRun(patch) {
+  if (!runId) return;
+  try {
+    await fetch(`${SUPA}/rest/v1/marketplace_sync_runs?id=eq.${runId}`, {
+      method: "PATCH", headers: runHeaders, body: JSON.stringify(patch),
+    });
+  } catch (e) {
+    log(`실행 기록 갱신 실패: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function step(phase, data) {
+  runDetail.phase = phase;
+  if (data !== undefined) runDetail[phase] = data;
+  await patchRun({ detail: runDetail });
+}
+
 // ---------- 서버 살아있는지 확인, 죽어 있으면 기동 ----------
 async function serverAlive() {
   try {
@@ -262,7 +299,7 @@ async function scrapeOnce(token, productIds) {
 }
 
 // ---------- 수집 + 자동 재시도 ----------
-async function scrapeWithRetry(token, initialIds) {
+async function scrapeWithRetry(token, initialIds, onRound) {
   const byId = new Map(); // id -> 마지막 성공 결과
   const allSoldOut = new Set();
   let skipped = 0;
@@ -282,6 +319,7 @@ async function scrapeWithRetry(token, initialIds) {
     const retryMap = new Map();
     for (const item of r.retryItems) retryMap.set(item.id, item);
     remaining = [...retryMap.values()];
+    if (onRound) await onRound({ round, collected: byId.size, soldOut: allSoldOut.size, retry: remaining.length });
     if (remaining.length === 0) break;
     currentIds = remaining.map((b) => b.id);
   }
@@ -480,6 +518,7 @@ async function main() {
 
   await ensureServer();
   const { token, userId } = await getSession();
+  await insertRun(userId);
 
   let productIds = null;
   let clearedCount = 0;
@@ -490,15 +529,26 @@ async function main() {
     if (DO_RESET) clearedCount = await resetToday(token, allIds);
     if (LIMIT) productIds = allIds.slice(0, LIMIT);
   }
+  await step("reset", { cleared: clearedCount });
 
-  const { results, soldOut, remaining, skipped } = await scrapeWithRetry(token, productIds);
+  runDetail.scrape = { maxRetry: MAX_RETRY, rounds: [] };
+  const { results, soldOut, remaining, skipped } = await scrapeWithRetry(token, productIds, async (round) => {
+    runDetail.scrape.rounds.push(round);
+    await step("scrape");
+  });
+  runDetail.scrape.remaining = remaining.length;
+  runDetail.scrape.skipped = skipped;
   const changed = results.filter((r) => r.price !== r.previous);
   const unchanged = results.length - changed.length;
 
   const applied = await applyChanges(token, results);
+  await step("apply", { changed: changed.length, applied, unchanged });
   const { restoredIds } = await applySoldOutMargins(userId, results.map((r) => r.id), soldOut);
+  await step("margins", { soldOut: soldOut.length, restored: restoredIds.length });
   const market = await applyToMarketplaces(token, { changedIds: changed.map((r) => r.id), soldOutIds: soldOut, restoredIds });
+  await step("market", market);
   const excelFiles = await exportPriceExcel(token, changed.map((r) => r.id), soldOut);
+  await step("excel", { files: excelFiles.length });
 
   const elapsed = Math.round((Date.now() - started) / 1000);
   const okCount = results.length + soldOut.length;
@@ -518,6 +568,16 @@ async function main() {
   const marketFailed = [market.coupang, market.smartstore].some((p) => p && (p.failed > 0 || p.errors.length > 0));
 
   const status = okCount === 0 ? "failed" : (remaining.length > 0 || marketFailed) ? "partial" : "success";
+  runDetail.phase = "done";
+  await patchRun({
+    status,
+    finished_at: new Date().toISOString(),
+    remote_count: results.length + soldOut.length,
+    confirmed: applied,
+    confirm_failed: remaining.length,
+    error: status === "failed" ? summary : null,
+    detail: runDetail,
+  });
   await notify(token, { status, summary, fields });
   log(`=== 종료: ${summary} ===`);
   if (status === "failed") process.exitCode = 1;
@@ -526,6 +586,7 @@ async function main() {
 main().catch(async (e) => {
   const msg = e instanceof Error ? e.message : String(e);
   log(`치명적 오류: ${msg}`);
+  await patchRun({ status: "failed", finished_at: new Date().toISOString(), error: msg, detail: runDetail });
   await discordDirect(`**최저가 자동 갱신 (${LABEL}) 실패** — ${msg}`);
   process.exitCode = 1;
 });

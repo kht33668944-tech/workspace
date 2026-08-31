@@ -57,6 +57,22 @@ const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_
 if (!(await acquireLock())) { log("다른 마켓 작업이 실행 중 — 10분 대기 후 포기"); process.exit(2); }
 process.on("exit", releaseLock);
 
+// 실행 기록 (자동화 페이지 타임라인용) — 실패해도 본작업 계속
+async function startRun(kind: string): Promise<string | null> {
+  try {
+    const { data } = await sb.from("marketplace_sync_runs")
+      .insert({ user_id: userId, platform: "all", kind, trigger: "scheduler", dry_run: dry })
+      .select("id").single();
+    return data?.id ?? null;
+  } catch (e) { log(`실행 기록 생성 실패(${kind}): ${e instanceof Error ? e.message : String(e)}`); return null; }
+}
+async function finishRun(id: string | null, patch: { status: string; remote_count?: number; confirmed?: number; error?: string | null; detail?: unknown }) {
+  if (!id) return;
+  try {
+    await sb.from("marketplace_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", id);
+  } catch (e) { log(`실행 기록 마무리 실패: ${e instanceof Error ? e.message : String(e)}`); }
+}
+
 let collect: CollectAllResult | null = null;
 const ships: ShipResult[] = [];
 let esm: EsmExportResult | null = null;
@@ -64,10 +80,23 @@ let esm: EsmExportResult | null = null;
 try {
   // 1) 운송장 수집
   if (!has("skip-collect")) {
+    const runId = await startRun("tracking-collect");
     try {
       collect = await collectTrackingForUser(sb, userId, { days, log });
       log(`수집: 미수집 ${collect.pending}건, 계정 매칭 안 됨 ${collect.unmatched}건, 그룹 ${collect.groups.length}`);
-    } catch (e) { log(`수집 예외: ${e instanceof Error ? e.message : String(e)}`); }
+      const applied = collect.groups.reduce((n, g) => n + g.applied, 0);
+      const hasIssue = collect.groups.some((g) => g.error || g.failed > 0);
+      await finishRun(runId, {
+        status: hasIssue ? "partial" : "success",
+        remote_count: collect.pending,
+        confirmed: applied,
+        detail: { pending: collect.pending, unmatched: collect.unmatched, applied, groups: collect.groups },
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log(`수집 예외: ${msg}`);
+      await finishRun(runId, { status: "failed", error: msg });
+    }
   }
 
   // 2) 마켓 송장 전송
@@ -92,10 +121,16 @@ try {
 
   // 3) ESM 운송장 엑셀
   if (!has("skip-esm")) {
+    const runId = await startRun("esm-export");
     try {
       esm = await exportEsmTrackingExcel(sb, userId, { days, markExported: !dry });
       log(esm.count > 0 ? `ESM 운송장 ${esm.count}건 → ${esm.file}` : "ESM 운송장: 새 건 없음");
-    } catch (e) { log(`ESM 엑셀 예외: ${e instanceof Error ? e.message : String(e)}`); }
+      await finishRun(runId, { status: "success", remote_count: esm.count, detail: { count: esm.count, file: esm.file ?? null } });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log(`ESM 엑셀 예외: ${msg}`);
+      await finishRun(runId, { status: "failed", error: msg });
+    }
   }
 } finally {
   releaseLock();

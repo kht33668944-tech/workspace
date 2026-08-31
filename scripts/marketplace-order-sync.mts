@@ -16,6 +16,8 @@ import { notifySyncResults, notifyInquiryResults } from "@/lib/marketplace/order
 import { syncSettlements } from "@/lib/marketplace/settlement-sync";
 import { sendDailySummary } from "@/lib/marketplace/daily-summary";
 import { syncInquiries, type InquirySyncResult } from "@/lib/marketplace/inquiry-sync";
+import { AUTOMATIONS, isOverdue, isStaleRunning } from "@/lib/automation-schedule";
+import { notifyAutomationResult } from "@/lib/discord-notifier";
 
 const argv = process.argv.slice(2);
 const opt = (name: string, def: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : def; };
@@ -86,7 +88,7 @@ if (!argv.includes("--skip-inquiries")) {
     if (!cred) continue;
     try {
       const r = await syncInquiries({
-        supabase: sb, userId, platform, credentialId: cred.id, days: 7,
+        supabase: sb, userId, platform, credentialId: cred.id, days: 7, trigger: "scheduler",
         wingUserId: typeof cred.meta?.wingUserId === "string" ? cred.meta.wingUserId : null,
         ...makeClients(platform, cred),
       });
@@ -133,4 +135,57 @@ if (!argv.includes("--skip-summary") && !process.env.MARKETPLACE_API_DRY_RUN) {
     }
   }
 }
+// ── 헬스 체크: 다른 자동화(운송장·최저가)가 예정대로 돌았는지 감시 — 이상 시 디스코드 경고 1회/일
+// PC가 꺼졌다 켜지면 이 크론(StartWhenAvailable)이 먼저 살아나 감지하는 구조
+if (!argv.includes("--skip-health") && !process.env.MARKETPLACE_API_DRY_RUN) {
+  try {
+    const problems: string[] = [];
+
+    // 1) 좀비 running 자동 정리 (최대 소요시간 + 15분 초과)
+    const { data: runningRows } = await sb.from("marketplace_sync_runs")
+      .select("*").eq("user_id", userId).eq("status", "running").neq("kind", "health-alert");
+    for (const row of runningRows ?? []) {
+      if (isStaleRunning(row)) {
+        await sb.from("marketplace_sync_runs")
+          .update({ status: "failed", finished_at: new Date().toISOString(), error: "헬스체크: 프로세스 중단 감지 (자동 정리)" })
+          .eq("id", row.id);
+        problems.push(`${row.kind} 작업이 중간에 멈췄습니다 (${new Date(row.started_at).toLocaleTimeString("ko-KR", { hour12: false })} 시작 후 응답 없음)`);
+        log(`헬스체크: 좀비 정리 — kind=${row.kind} id=${row.id}`);
+      }
+    }
+
+    // 2) 예정 주기 초과 미실행 감지 (운송장·최저가)
+    for (const key of ["tracking-ship", "price"] as const) {
+      const def = AUTOMATIONS.find((d) => d.key === key)!;
+      const { data: lastRows } = await sb.from("marketplace_sync_runs")
+        .select("started_at").eq("user_id", userId).eq("kind", def.primaryKind)
+        .order("started_at", { ascending: false }).limit(1);
+      const last = lastRows?.[0]?.started_at ?? null;
+      if (isOverdue(def, last)) {
+        const hours = last ? Math.round((Date.now() - new Date(last).getTime()) / 3600000) : null;
+        problems.push(`${def.label} 자동화가 ${hours !== null ? `${hours}시간째` : "기록상 한 번도"} 실행되지 않았습니다 (주기 ${def.schedule.type === "interval" ? def.schedule.intervalHours : "?"}시간)`);
+      }
+    }
+
+    if (problems.length > 0) {
+      // 1일 1회 래치 (정산 래치와 동일 패턴)
+      const todayKst = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+      const { data: lastAlert } = await sb.from("marketplace_sync_runs").select("started_at").eq("user_id", userId).eq("kind", "health-alert").order("started_at", { ascending: false }).limit(1).maybeSingle();
+      const lastAlertKst = lastAlert?.started_at ? new Date(new Date(lastAlert.started_at).getTime() + 9 * 3600000).toISOString().slice(0, 10) : null;
+      if (lastAlertKst !== todayKst) {
+        await notifyAutomationResult({
+          channel: "default",
+          title: "⚠️ 자동화 헬스 경고",
+          status: "failed",
+          summary: problems.map((p) => `• ${p}`).join("\n") + "\n\n작업 스케줄러와 PC 전원 상태를 확인하세요. 사이트 ▸ 자동화 페이지에서 즉시 실행할 수 있습니다.",
+        });
+        await sb.from("marketplace_sync_runs").insert({ user_id: userId, platform: "all", kind: "health-alert", trigger: "scheduler", status: "success", finished_at: new Date().toISOString(), detail: { problems } });
+        log(`헬스체크: 경고 발송 — ${problems.length}건`);
+      } else {
+        log(`헬스체크: 이상 ${problems.length}건 (오늘 이미 경고함)`);
+      }
+    }
+  } catch (e) { log(`헬스체크 실패: ${e instanceof Error ? e.message : String(e)}`); }
+}
+
 log("done");

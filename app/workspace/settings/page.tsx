@@ -5,7 +5,6 @@ import CourierCodeManager from "@/components/workspace/settings/courier-code-man
 import GeminiUsageDashboard from "@/components/workspace/settings/gemini-usage-dashboard";
 import MarketplaceApiManager from "@/components/workspace/settings/marketplace-api-manager";
 import MarketplaceApiLogs from "@/components/workspace/settings/marketplace-api-logs";
-import AutoApproveSetting from "@/components/workspace/settings/auto-approve-setting";
 import DiscordNotificationTester from "@/components/workspace/settings/discord-notification-tester";
 
 export default function SettingsPage() {
@@ -16,9 +15,9 @@ export default function SettingsPage() {
         <p className="text-sm text-[var(--text-muted)] mt-1">구매처 계정 관리 및 환경 설정</p>
       </div>
 
+      {/* 자동화 동작 설정(취소 자동승인·AI 자동답변)은 자동화 페이지로 이동 */}
       <DiscordNotificationTester />
       <MarketplaceApiManager />
-      <AutoApproveSetting />
       <MarketplaceApiLogs />
       <CredentialManager />
       <CourierCodeManager />

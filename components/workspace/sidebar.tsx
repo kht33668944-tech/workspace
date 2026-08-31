@@ -3,7 +3,7 @@
 import { useRef, type MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, ShoppingCart, Package, Settings, ChevronsLeft, ChevronsRight, Archive, X, Wallet } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Package, Settings, ChevronsLeft, ChevronsRight, Archive, X, Wallet, Activity } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { getRememberedWorkspaceHref } from "@/lib/view-state";
 
@@ -13,6 +13,7 @@ const menuItems = [
   { label: "보관함", href: "/workspace/archive", icon: Archive },
   { label: "상품 소싱", href: "/workspace/products", icon: Package },
   { label: "입출금", href: "/workspace/finance", icon: Wallet },
+  { label: "자동화", href: "/workspace/automation", icon: Activity },
   { label: "설정", href: "/workspace/settings", icon: Settings },
 ];
 

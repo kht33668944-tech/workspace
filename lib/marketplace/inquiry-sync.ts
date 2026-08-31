@@ -47,6 +47,7 @@ export interface InquirySyncResult {
   updatedAnswered: number;           // 마켓에서 답변 완료로 바뀐 기존 행
   permissionDenied: MarketplaceInquiryType[];
   errors: string[];
+  runId: string | null;              // marketplace_sync_runs 기록 id
 }
 
 /** 4종 문의를 upsert 전에 통일하는 중간 형태 */
@@ -261,6 +262,7 @@ export async function syncInquiries(options: {
   platform: SyncPlatform;
   credentialId: string | null;
   days?: number;
+  trigger?: "manual" | "scheduler";
   coupang?: CoupangOpenApiClient;
   smartstore?: NaverCommerceApiClient;
   /** 쿠팡 자동답변용 윙ID (credential.meta.wingUserId) */
@@ -273,8 +275,55 @@ export async function syncInquiries(options: {
 
   const result: InquirySyncResult = {
     platform, remoteCount: 0, newInquiries: [], autoReplied: [], heldForReview: [],
-    updatedAnswered: 0, permissionDenied: [], errors: [],
+    updatedAnswered: 0, permissionDenied: [], errors: [], runId: null,
   };
+
+  // 실행 기록 (자동화 페이지 타임라인용) — 기록 실패는 본작업을 막지 않는다
+  try {
+    const { data: run } = await supabase
+      .from("marketplace_sync_runs")
+      .insert({ user_id: userId, platform, kind: "inquiries", trigger: options.trigger ?? "manual", dry_run: false })
+      .select("id")
+      .single();
+    result.runId = run?.id ?? null;
+  } catch (e) {
+    console.warn("[inquiry-sync] 실행 기록 생성 실패:", e instanceof Error ? e.message : String(e));
+  }
+
+  try {
+    await syncInquiriesBody(options, from, to, result);
+  } finally {
+    if (result.runId) {
+      const hasWork = result.newInquiries.length + result.updatedAnswered + result.autoReplied.length > 0;
+      await supabase.from("marketplace_sync_runs").update({
+        finished_at: new Date().toISOString(),
+        status: result.errors.length > 0 ? (hasWork ? "partial" : "failed") : "success",
+        remote_count: result.remoteCount,
+        confirmed: result.autoReplied.length,
+        error: result.errors[0] ?? null,
+        detail: {
+          new: result.newInquiries.length,
+          autoReplied: result.autoReplied.length,
+          held: result.heldForReview.length,
+          updatedAnswered: result.updatedAnswered,
+          permissionDenied: result.permissionDenied,
+          samples: result.newInquiries.slice(0, 20),
+        },
+      }).eq("id", result.runId).then(({ error: upErr }: { error: { message: string } | null }) => {
+        if (upErr) console.warn("[inquiry-sync] 실행 기록 마무리 실패:", upErr.message);
+      });
+    }
+  }
+  return result;
+}
+
+async function syncInquiriesBody(
+  options: Parameters<typeof syncInquiries>[0],
+  from: string,
+  to: string,
+  result: InquirySyncResult,
+): Promise<void> {
+  const { supabase, userId, platform } = options;
 
   // 1. 수집 (경로별 독립 실패)
   const collected: NormalizedInquiry[] = [];
@@ -306,7 +355,7 @@ export async function syncInquiries(options: {
     }
   }
   result.remoteCount = collected.length;
-  if (collected.length === 0) return result;
+  if (collected.length === 0) return;
 
   // 2. 기존 행 대조
   const types = [...new Set(collected.map((c) => c.inquiryType))];
@@ -317,7 +366,7 @@ export async function syncInquiries(options: {
     .in("inquiry_type", types);
   if (exErr) {
     result.errors.push(`기존 문의 조회 실패: ${exErr.message}`);
-    return result;
+    return;
   }
   const existing = new Map<string, { id: string; status: string }>();
   for (const r of existingRows ?? []) existing.set(`${r.inquiry_type}|${r.inquiry_id}`, { id: r.id, status: r.status });
@@ -492,6 +541,4 @@ export async function syncInquiries(options: {
     new_value: `remote=${result.remoteCount} new=${result.newInquiries.length} auto=${result.autoReplied.length} held=${result.heldForReview.length}`,
     error_message: result.errors.length > 0 ? result.errors.join(" / ").slice(0, 500) : undefined,
   });
-
-  return result;
 }
