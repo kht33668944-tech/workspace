@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
-import { groupIntoBatches } from "@/lib/log-format";
+import { groupIntoBatches, groupMarketplaceLogs, MARKETPLACE_ACTIVITY_LABELS } from "@/lib/log-format";
 import { getKoreanDateKey } from "@/lib/date-utils";
-import type { BatchLogEntry } from "@/lib/log-format";
+import type { BatchLogEntry, MarketplaceLogEntry } from "@/lib/log-format";
 
 export interface DashboardRecentOrder {
   id: string;
@@ -49,6 +49,8 @@ export interface DashboardMonthlyProfitSummary extends Omit<DashboardDailyProfit
 
 // backwards-compat alias
 export type ActivityLogBatch = BatchLogEntry;
+/** 활동 로그 항목 — 구매/운송장 배치 + 마켓 API 활동 */
+export type ActivityEntry = BatchLogEntry | MarketplaceLogEntry;
 
 export interface DashboardData {
   // KPI
@@ -72,7 +74,7 @@ export interface DashboardData {
   // 손익/로그
   dailyProfitRows: DashboardDailyProfitRow[];
   monthlyProfitSummary: DashboardMonthlyProfitSummary;
-  activityLogs: ActivityLogBatch[];
+  activityLogs: ActivityEntry[];
 }
 
 function emptyMonthlySummary(month = ""): DashboardMonthlyProfitSummary {
@@ -462,15 +464,23 @@ export function useDashboard() {
           // 6. 최근 구매 로그 150건 (배치 집계용, 15배치 보장)
           supabase
             .from("purchase_logs")
-            .select("batch_id,platform,status,created_at")
+            .select("batch_id,platform,status,created_at,order_id")
             .eq("user_id", uid)
             .order("created_at", { ascending: false })
             .limit(150),
           // 7. 최근 운송장 로그 150건 (배치 집계용, 15배치 보장)
           supabase
             .from("tracking_logs")
-            .select("batch_id,platform,status,created_at")
+            .select("batch_id,platform,status,created_at,order_id")
             .eq("user_id", uid)
+            .order("created_at", { ascending: false })
+            .limit(150),
+          // 8. 최근 마켓 API 활동 150건 (주문수집·취소승인·송장전송 등)
+          supabase
+            .from("marketplace_api_logs")
+            .select("action,status,platform,target_id,new_value,created_at")
+            .eq("user_id", uid)
+            .in("action", Object.keys(MARKETPLACE_ACTIVITY_LABELS))
             .order("created_at", { ascending: false })
             .limit(150),
         ]),
@@ -479,15 +489,17 @@ export function useDashboard() {
         fetchMonthlyProfit(uid, currentMonth),
       ]);
 
-      const [c0, c1, c2, c4, c5, c6, c6a, c6b, c6c, c7, c8] = counts;
+      const [c0, c1, c2, c4, c5, c6, c6a, c6b, c6c, c7, c8, c9] = counts;
 
-      // 구매/운송장 배치 집계 후 시간순 병합 (최신 15개)
-      type LogRow = { batch_id: string; platform: string; status: string; created_at: string };
+      // 구매/운송장 배치 + 마켓 API 활동을 시간순 병합 (최신 20개)
+      type LogRow = { batch_id: string; platform: string; status: string; created_at: string; order_id: string | null };
+      type ApiLogRow = { action: string; status: string; platform: string; target_id: string | null; new_value: string | null; created_at: string };
       const purchaseBatches = groupIntoBatches((c7.data ?? []) as LogRow[], "purchase");
       const trackingBatches = groupIntoBatches((c8.data ?? []) as LogRow[], "tracking");
-      const activityLogs = [...purchaseBatches, ...trackingBatches]
+      const marketplaceEntries = groupMarketplaceLogs((c9.data ?? []) as ApiLogRow[]);
+      const activityLogs: ActivityEntry[] = [...purchaseBatches, ...trackingBatches, ...marketplaceEntries]
         .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-        .slice(0, 15);
+        .slice(0, 20);
 
       setData({
         currentMonthCount: currentStats.count,
