@@ -69,12 +69,11 @@ export default function ActivityLog({ activityLogs, loading }: ActivityLogProps)
     entries,
   }));
 
-  // 클릭 → 해당 작업에 포함된 주문만 필터된 발주서로 이동
+  // 클릭 → 해당 작업에 포함된 주문만 필터된 발주서로 이동.
+  // 연결된 주문이 없으면 빈 필터를 덮어써서 이전 클릭의 필터가 남지 않게 한다.
   function handleClick(entry: ActivityEntry) {
     if (entry.type === "marketplace") {
-      if (entry.targetNos.length > 0) {
-        setOrdersFilter({ marketplace_product_order_no: entry.targetNos });
-      }
+      setOrdersFilter(entry.targetNos.length > 0 ? { marketplace_product_order_no: entry.targetNos } : {});
       router.push("/workspace/orders?tab=orders");
       return;
     }

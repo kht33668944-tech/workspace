@@ -102,7 +102,7 @@ export interface MarketplaceLogEntry {
 
 /** 같은 작업(action)이 5분 안에 남긴 행들을 한 활동으로 묶는다 (실행 단위 근사) */
 export function groupMarketplaceLogs(
-  rows: Array<{ action: string; status: string; platform: string; target_id: string | null; new_value: string | null; created_at: string }>
+  rows: Array<{ action: string; status: string; platform: string; target_id: string | null; new_value: string | null; created_at: string; response_payload?: unknown }>
 ): MarketplaceLogEntry[] {
   const map = new Map<string, MarketplaceLogEntry>();
   for (const r of rows) {
@@ -125,6 +125,11 @@ export function groupMarketplaceLogs(
     if (r.created_at < entry.startedAt) entry.startedAt = r.created_at;
     if (entry.platform !== r.platform) entry.platform = "all";
     if (r.target_id && !entry.targetNos.includes(r.target_id)) entry.targetNos.push(r.target_id);
+    // 주문수집은 실행형 로그라 target_id 가 없다 — payload 의 수집 주문번호 목록으로 필터 대상을 채운다
+    const payloadNos = (r.response_payload as { newProductOrderNos?: unknown } | null)?.newProductOrderNos;
+    if (Array.isArray(payloadNos)) {
+      for (const no of payloadNos) if (typeof no === "string" && no && !entry.targetNos.includes(no)) entry.targetNos.push(no);
+    }
     if (syncDetail) entry.detail = entry.detail ? `${entry.detail} · ${syncDetail}` : syncDetail;
     if (r.status === "success") entry.successCount++;
     else entry.failedCount++;

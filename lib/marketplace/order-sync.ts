@@ -416,6 +416,8 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
       action: dryRun ? "sync-orders:dry" : "sync-orders",
       status: "success",
       new_value: `remote=${result.remoteCount} new=${toInsert.length} existing=${result.skippedExisting}`,
+      // 대시보드 활동 로그 클릭 시 이번에 수집된 주문만 필터하기 위한 마켓주문번호 목록
+      response_payload: toInsert.length > 0 ? { newProductOrderNos: toInsert.map((o) => o.marketplace_product_order_no).filter(Boolean).slice(0, 200) } : null,
     });
 
     // ── 4. 발주확인 (미확인 건만)

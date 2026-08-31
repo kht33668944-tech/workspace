@@ -478,7 +478,7 @@ export function useDashboard() {
           // 8. 최근 마켓 API 활동 150건 (주문수집·취소승인·송장전송 등)
           supabase
             .from("marketplace_api_logs")
-            .select("action,status,platform,target_id,new_value,created_at")
+            .select("action,status,platform,target_id,new_value,created_at,response_payload")
             .eq("user_id", uid)
             .in("action", Object.keys(MARKETPLACE_ACTIVITY_LABELS))
             .order("created_at", { ascending: false })
@@ -493,7 +493,7 @@ export function useDashboard() {
 
       // 구매/운송장 배치 + 마켓 API 활동을 시간순 병합 (최신 20개)
       type LogRow = { batch_id: string; platform: string; status: string; created_at: string; order_id: string | null };
-      type ApiLogRow = { action: string; status: string; platform: string; target_id: string | null; new_value: string | null; created_at: string };
+      type ApiLogRow = { action: string; status: string; platform: string; target_id: string | null; new_value: string | null; created_at: string; response_payload: unknown };
       const purchaseBatches = groupIntoBatches((c7.data ?? []) as LogRow[], "purchase");
       const trackingBatches = groupIntoBatches((c8.data ?? []) as LogRow[], "tracking");
       const marketplaceEntries = groupMarketplaceLogs((c9.data ?? []) as ApiLogRow[]);
