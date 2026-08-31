@@ -107,8 +107,10 @@ async function serverAlive() {
 
 async function ensureServer() {
   if (await serverAlive()) { log("서버 확인: 이미 실행 중"); return; }
-  log("서버가 꺼져 있음 — npm run dev 자동 기동 시도");
-  const child = spawn("cmd.exe", ["/c", "npm run dev"], {
+  // BASE 의 포트에 맞춰 기동해야 헬스체크와 일치한다 (AUTO_BASE_URL=3001 인데 3000을 띄우면 영원히 기동 실패)
+  const basePort = new URL(BASE).port || "3000";
+  log(`서버가 꺼져 있음 — npm run dev (포트 ${basePort}) 자동 기동 시도`);
+  const child = spawn("cmd.exe", ["/c", basePort === "3001" ? "npm run dev:3001" : `npm run dev -- -p ${basePort}`], {
     cwd: ROOT,
     detached: true,
     stdio: "ignore",
