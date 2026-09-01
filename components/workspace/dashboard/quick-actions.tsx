@@ -20,7 +20,7 @@ const ACTIONS: Action[] = [
     icon: "🤖",
     label: "자동구매",
     sub: "구매 가능 건 필터링",
-    filter: { delivery_status: ["결제전"] },
+    filter: { delivery_status: ["구매대기"] },
   },
   {
     icon: "📦",

@@ -20,7 +20,7 @@ const MAX_EXCEL_CELLS = 1_000_000;
 const ALLOWED_EXCEL_EXTENSIONS = new Set(["xlsx", "xls", "csv"]);
 
 // 판매처별 정산 비율 (판매가 × rate = 정산예정금액)
-const SETTLEMENT_RATES: [string, number][] = [
+export const SETTLEMENT_RATES: [string, number][] = [
   ["스마트스토어", 0.93],
   ["쿠팡", 0.88],
   ["옥션", 0.85],
@@ -165,6 +165,7 @@ const ALIASES: Record<string, string[]> = {
   purchase_source: ["구매처"],
   purchase_id: ["아이디", "구매아이디", "구매ID"],
   purchase_url: ["최저가링크", "구매링크", "구매URL", "상품URL", "상품링크"],
+  purchase_detail_url: ["주문상세링크", "주문상세", "구매주문링크"],
   purchase_order_no: ["주문번호", "발주번호"],
   courier: ["택배사", "배송업체"],
   tracking_no: ["운송장", "운송장번호", "송장번호", "송장"],
@@ -439,7 +440,7 @@ export async function parseExcelSheet(file: File, sheetIndex: number): Promise<O
 
 // 주소를 기본주소/상세주소로 분리
 // 규칙: 도로명/지번 + 번지까지 = 기본주소, 나머지(괄호 내용 포함) = 상세주소
-function splitAddress(fullAddress: string): { base: string; detail: string } {
+export function splitAddress(fullAddress: string): { base: string; detail: string } {
   const trimmed = fullAddress.trim();
 
   // 도로명주소: ~대로/~번길/~로/~길 + 번지[-번지]
@@ -565,10 +566,13 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
   if (mapped.purchase_id === undefined) mapped.purchase_id = null;
   if (mapped.purchase_source === undefined) mapped.purchase_source = null;
   if (mapped.purchase_url === undefined) mapped.purchase_url = null;
+  if (mapped.purchase_detail_url === undefined) mapped.purchase_detail_url = null;
   if (mapped.purchase_order_no === undefined) mapped.purchase_order_no = null;
   if (mapped.courier === undefined) mapped.courier = null;
   if (mapped.tracking_no === undefined) mapped.tracking_no = null;
-  if (mapped.delivery_status === undefined) mapped.delivery_status = "결제전";
+  if (mapped.delivery_status === undefined) mapped.delivery_status = "구매대기";
+  if (mapped.delivery_status === "재고부족") mapped.delivery_status = "발송불가"; // 구 명칭 엑셀 호환
+  if (mapped.delivery_status === "결제전") mapped.delivery_status = "구매대기"; // 구 명칭 엑셀 호환
   if (mapped.consultation_logs === undefined) mapped.consultation_logs = [];
   if (mapped.memo === undefined) mapped.memo = null;
 
@@ -756,4 +760,11 @@ export async function exportOrdersToCSV(orders: Record<string, unknown>[], filen
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "발주서");
   XLSX.writeFile(wb, filename);
+}
+
+/** 판매처명으로 정산 비율(추정) — 마켓 API 수집 시 정산예정금액 계산에 사용 */
+export function getSettlementRate(marketplace: string | null | undefined): number {
+  const name = (marketplace ?? "").toLowerCase();
+  for (const [key, rate] of SETTLEMENT_RATES) if (name.includes(key.toLowerCase())) return rate;
+  return 0.9;
 }

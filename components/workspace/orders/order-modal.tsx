@@ -76,7 +76,7 @@ export default function OrderModal({ onSave, onClose }: OrderModalProps) {
       purchase_order_no: form.purchase_order_no || null,
       courier: form.courier || null,
       tracking_no: form.tracking_no || null,
-      delivery_status: form.delivery_status || "결제전",
+      delivery_status: form.delivery_status || "구매대기",
       consultation_logs: [],
       memo: form.memo || null,
     };

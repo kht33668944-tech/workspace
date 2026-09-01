@@ -67,19 +67,20 @@ export const COURIERS = [
 
 // 배송상태 목록 및 색상
 export const DELIVERY_STATUSES = [
-  "결제전", "구매진행중", "구매확인필요", "재고부족", "부분구매", "배송준비", "배송완료", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료",
+  "구매대기", "구매진행중", "구매확인필요", "발송불가", "부분구매", "배송준비", "배송완료", "취소요청", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료",
 ] as const;
 
 export type DeliveryStatus = typeof DELIVERY_STATUSES[number];
 
 export const DELIVERY_STATUS_COLORS: Record<string, string> = {
-  결제전: "bg-gray-500/20 text-gray-400",
+  구매대기: "bg-gray-500/20 text-gray-400",
   구매진행중: "bg-cyan-500/20 text-cyan-400",
   구매확인필요: "bg-yellow-500/20 text-yellow-400",
-  재고부족: "bg-amber-500/20 text-amber-400",
+  발송불가: "bg-amber-500/20 text-amber-400",
   부분구매: "bg-yellow-500/20 text-yellow-400",
   배송준비: "bg-blue-500/20 text-blue-400",
   배송완료: "bg-green-500/20 text-green-400",
+  취소요청: "bg-amber-500/20 text-amber-300",
   취소준비: "bg-red-500/20 text-red-400",
   취소완료: "bg-red-500/20 text-red-400",
   반품준비: "bg-orange-500/20 text-orange-400",
@@ -88,14 +89,28 @@ export const DELIVERY_STATUS_COLORS: Record<string, string> = {
   교환완료: "bg-purple-500/20 text-purple-400",
 };
 
+/** 클레임 동기화·자동 전이가 건드리지 않는 종료 상태.
+ *  발송불가(보류)는 여기 넣지 않는다 — 발송불가 주문에 구매자 취소요청이 오면 취소요청→자동승인으로 흘러야 한다 (품절 주문을 고객이 취소해주는 최선의 경로) */
+export const TERMINAL_STATUSES = new Set<string>(["취소완료", "반품완료", "교환완료"]);
+/** 자동구매 락 중 — 상태는 두고 claim_* 만 기록 */
+export const LOCKED_STATUSES = new Set<string>(["구매진행중"]);
+/** 운송장이 입력돼도 배송완료로 자동 전환하지 않는 클레임 상태 (송장 전송 대상에서도 제외) */
+export const CLAIM_STATUSES = new Set<string>(["취소요청", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료"]);
+
 // 상품 등록 상태
-export const REGISTRATION_STATUSES = ["등록전", "등록완료", "판매중지"] as const;
+// 판매중지 = 일시(품절 등, 재개는 사람이 등록완료로 변경) / 판매종료 = 영구(상품정보 오류·완전 품절 — 자동화가 절대 건드리지 않음)
+export const REGISTRATION_STATUSES = ["등록전", "등록완료", "판매중지", "판매종료"] as const;
+/** 자동화(최저가 수집·가격 반영·판매재개)에서 완전히 제외하는 등록상태 */
+export const AUTOMATION_EXCLUDED_STATUSES = new Set<string>(["판매종료"]);
+/** 마켓 판매재개(resume)를 자동으로 보내지 않는 등록상태 */
+export const NO_AUTO_RESUME_STATUSES = new Set<string>(["판매중지", "판매종료"]);
 export type RegistrationStatus = typeof REGISTRATION_STATUSES[number];
 
 export const REGISTRATION_STATUS_COLORS: Record<string, string> = {
   등록전: "bg-gray-800 text-gray-200",
   등록완료: "bg-green-900 text-green-300",
   판매중지: "bg-red-900 text-red-300",
+  판매종료: "bg-zinc-800 text-zinc-400 line-through",
 };
 
 // 상품 재정비(필수정보·상세페이지) 진행 상태

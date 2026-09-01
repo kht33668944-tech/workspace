@@ -19,7 +19,7 @@ const SmartStoreCategoryTab = dynamic(() => import("@/components/workspace/produ
 const CoupangPriceImportModal = dynamic(() => import("@/components/workspace/products/coupang-price-import-modal"), { ssr: false });
 const EsmPriceImportModal = dynamic(() => import("@/components/workspace/products/esm-price-import-modal"), { ssr: false });
 const SmartstorePriceImportModal = dynamic(() => import("@/components/workspace/products/smartstore-price-import-modal"), { ssr: false });
-const CoupangApiModal = dynamic(() => import("@/components/workspace/products/coupang-api-modal"), { ssr: false });
+const MarketplaceApiModal = dynamic(() => import("@/components/workspace/products/marketplace-api-modal"), { ssr: false });
 const BatchDetailModal = dynamic(() => import("@/components/workspace/products/batch-detail-modal"), { ssr: false });
 const RegistrationResetModal = dynamic(() => import("@/components/workspace/products/registration-reset-modal"), { ssr: false });
 import type { CommissionPlatform, ProductInsert } from "@/types/database";
@@ -121,7 +121,7 @@ export default function ProductsPage() {
   const [coupangImportModalOpen, setCoupangImportModalOpen] = useState(false);
   const [esmImportModalOpen, setEsmImportModalOpen] = useState(false);
   const [smartstoreImportModalOpen, setSmartstoreImportModalOpen] = useState(false);
-  const [coupangApiModalOpen, setCoupangApiModalOpen] = useState(false);
+  const [marketplaceApiModal, setMarketplaceApiModal] = useState<"coupang" | "smartstore" | null>(null);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [priceChangeFilter, setPriceChangeFilter] = useState<PriceChangeFilter | null>(initialView.priceChangeFilter);
   const [scrapeResults, setScrapeResults] = useState<Array<{ id: string; name: string; previous: number; price: number }>>([]);
@@ -316,10 +316,10 @@ export default function ProductsPage() {
     return () => gmarketImport.registerHandler(null);
   });
 
-  // 품절 sentinel 마진(35%) / 재입고 복원 기본 마진(7%)
+  // 품절 sentinel 마진(35%) / 재입고 복원 기본 마진(8%)
   const SOLDOUT_MARGIN = 35;
-  const DEFAULT_MARGIN = 7;
-  // 최저가 갱신 결과에 따라 품절 상품은 마진 35%, 재입고(정상가 재수집) 상품은 7%로 자동 세팅
+  const DEFAULT_MARGIN = 8;
+  // 최저가 갱신 결과에 따라 품절 상품은 마진 35%, 재입고(정상가 재수집) 상품은 8%로 자동 세팅
   const applySoldOutMargins = (inStockIds: string[], soldOutIds: string[]) => {
     const inStock = new Set(inStockIds);
     const sold = new Set(soldOutIds);
@@ -1025,11 +1025,18 @@ export default function ProductsPage() {
                     {batchActive ? "생성 중..." : `${selectedIds.size}개 상세페이지 생성`}
                   </button>
                   <button
-                    onClick={() => setCoupangApiModalOpen(true)}
+                    onClick={() => setMarketplaceApiModal("coupang")}
                     className="flex items-center gap-1.5 px-3 py-2 text-sm bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg transition-colors"
                   >
                     <PlugZap className="w-4 h-4" />
                     쿠팡 API 반영
+                  </button>
+                  <button
+                    onClick={() => setMarketplaceApiModal("smartstore")}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm bg-green-600/20 text-green-400 hover:bg-green-600/30 rounded-lg transition-colors"
+                  >
+                    <PlugZap className="w-4 h-4" />
+                    스토어 API 반영
                   </button>
                   <div className="relative">
                     <button
@@ -1479,8 +1486,8 @@ export default function ProductsPage() {
         <SmartstorePriceImportModal onClose={() => setSmartstoreImportModalOpen(false)} />
       )}
 
-      {coupangApiModalOpen && (
-        <CoupangApiModal productIds={[...selectedIds]} onClose={() => setCoupangApiModalOpen(false)} />
+      {marketplaceApiModal && (
+        <MarketplaceApiModal platform={marketplaceApiModal} productIds={[...selectedIds]} onClose={() => setMarketplaceApiModal(null)} />
       )}
 
       {/* 등록정보 초기화 모달 */}

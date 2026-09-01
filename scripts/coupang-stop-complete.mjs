@@ -10,12 +10,13 @@
 // 이미 출고된 건([이미출고] 대상)은 건드리지 않는다.
 import { chromium } from "playwright";
 import fs from "fs";
+import { wingDateRange } from "./_date.mjs";
 
 const OUT = "./.cancel-shots";
 fs.mkdirSync(OUT, { recursive: true });
 const DRY = process.argv.includes("--dry");
-const d = (t) => new Date(t).toISOString().slice(0, 10);
-const URL = `https://wing.coupang.com/tenants/sfl-portal/stop-shipment/list?shipmentStopSearchType=SHIPMENT_STOP_REQUEST&from=${d(Date.now() - 30 * 86400000)}&to=${d(Date.now())}`;
+const range = wingDateRange();
+const URL = `https://wing.coupang.com/tenants/sfl-portal/stop-shipment/list?shipmentStopSearchType=SHIPMENT_STOP_REQUEST&from=${range.from}&to=${range.to}`;
 
 const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
 const page = browser.contexts()[0].pages().find((p) => p.url().includes("coupang.com"));

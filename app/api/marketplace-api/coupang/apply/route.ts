@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { buildCoupangPreview, getCoupangClientFromCredential } from "@/lib/marketplace-api-helpers";
+import { isDryRun, sleep } from "@/lib/marketplace/common";
 import type { MarketplaceApiAction } from "@/types/database";
 
 export const maxDuration = 300;
 
 const ACTIONS = new Set(["price", "stock", "stop", "resume"]);
-const BATCH_DELAY_MS = 150;
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// 쿠팡 초당 5건 한도를 플레이오토와 공유하므로 넉넉히 300ms
+const BATCH_DELAY_MS = 300;
 
 export async function POST(request: NextRequest) {
   const token = getAccessToken(request);
@@ -36,12 +34,13 @@ export async function POST(request: NextRequest) {
 
     const { client } = await getCoupangClientFromCredential(supabase, body.credentialId);
     const preview = await buildCoupangPreview(supabase, productIds, body.action, body.stockQuantity ?? null);
+    const dry = isDryRun();
 
     const results: Array<{
       productId: string;
       productName: string;
       vendorItemId: string;
-      status: "success" | "failed";
+      status: "success" | "failed" | "dry";
       message: string;
       previousValue: string | null;
       newValue: string | null;
@@ -62,8 +61,8 @@ export async function POST(request: NextRequest) {
         apiResult = { ok: false, status: 400, body: null, message: "지원하지 않는 작업입니다." };
       }
 
-      const status = apiResult.ok ? "success" : "failed";
-      const message = apiResult.ok ? "반영 완료" : apiResult.message;
+      const status = apiResult.dryRun ? "dry" : apiResult.ok ? "success" : "failed";
+      const message = apiResult.dryRun ? "DRY RUN (실제 전송 안 함)" : apiResult.ok ? "반영 완료" : apiResult.message;
       results.push({
         productId: item.productId,
         productName: item.productName,
@@ -74,7 +73,7 @@ export async function POST(request: NextRequest) {
         newValue: item.newValue,
       });
 
-      if (apiResult.ok) {
+      if (apiResult.ok && !apiResult.dryRun) {
         const updateData: Record<string, unknown> = {};
         if (body.action === "price") updateData.sale_price = newNumber;
         if (body.action === "stock") updateData.stock = newNumber;
@@ -85,7 +84,7 @@ export async function POST(request: NextRequest) {
             .from("coupang_price_inventory")
             .update(updateData)
             .eq("user_id", userData.user.id)
-            .eq("vendor_item_id", item.vendorItemId);
+            .eq("option_id", item.vendorItemId);
         }
       }
 
@@ -93,23 +92,25 @@ export async function POST(request: NextRequest) {
         user_id: userData.user.id,
         platform: "coupang",
         credential_id: body.credentialId,
-        action: body.action,
-        status,
+        action: dry ? `${body.action}:dry` : body.action,
+        status: apiResult.ok ? "success" : "failed",
         product_id: item.productId,
         product_name: item.productName,
         vendor_item_id: item.vendorItemId,
+        target_id: item.vendorItemId,
         previous_value: item.previousValue,
         new_value: item.newValue,
         error_message: apiResult.ok ? null : message,
         response_payload: typeof apiResult.body === "object" ? apiResult.body : { body: apiResult.body },
       });
 
-      await sleep(BATCH_DELAY_MS);
+      if (!dry) await sleep(BATCH_DELAY_MS);
     }
 
-    const successCount = results.filter((r) => r.status === "success").length;
+    const successCount = results.filter((r) => r.status === "success" || r.status === "dry").length;
     const failCount = results.length - successCount;
     return NextResponse.json({
+      dryRun: dry,
       successCount,
       failCount,
       blocked: preview.blocked,

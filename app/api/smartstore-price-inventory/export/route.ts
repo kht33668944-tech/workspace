@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
+import { toKstDateKey } from "@/lib/date-utils";
 import { calcSettlementPrice, calcPlatformPrice, buildRateMap } from "@/lib/product-calculations";
 import { COL, TOTAL_COLS, OUTPUT_DATA_START_ROW_INDEX } from "@/lib/smartstore-price-inventory";
 import type { Product, CommissionRate, SmartstorePriceInventory } from "@/types/database";
@@ -111,7 +112,7 @@ export async function POST(request: NextRequest) {
     const templatePath = path.join(process.cwd(), "lib", "templates", "smartstore-price-inventory.xlsx");
     const templateBuf = await fs.readFile(templatePath);
 
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const today = toKstDateKey().replace(/-/g, "");
     const totalFiles = Math.ceil(rowsWithPrice.length / MAX_ROWS_PER_FILE);
     const files: Array<{ excelBase64: string; filename: string; rowCount: number }> = [];
 

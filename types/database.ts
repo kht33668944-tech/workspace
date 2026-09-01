@@ -35,6 +35,25 @@ export interface Order {
   consultation_logs: ConsultationLog[];
   order_month: string | null; // generated: YYYY-MM
   memo: string | null;
+  // 마켓 API 동기화 (20260831 마이그레이션)
+  source?: string | null;
+  marketplace_status?: string | null;
+  claim_type?: string | null;
+  claim_status?: string | null;
+  confirmed_at?: string | null;
+  ship_by_date?: string | null;
+  marketplace_synced_at?: string | null;
+  canceled_at?: string | null;
+  // 송장 전송·정산 (20260901 마이그레이션)
+  shipped_to_marketplace_at?: string | null;
+  ship_error?: string | null;
+  tracking_exported_at?: string | null;
+  settlement_actual?: number | null;
+  settlement_source?: "estimate" | "api" | "excel" | string | null;
+  settlement_confirmed_at?: string | null;
+  claim_receipt_id?: string | null;
+  // 구매처 주문상세 링크 (add_purchase_detail_url 마이그레이션, 자동구매 시 자동 입력)
+  purchase_detail_url?: string | null;
   created_at: string;
   updated_at: string;
   purchase_log_order_nos?: string[];
@@ -260,7 +279,14 @@ export type CoupangPriceInventoryInsert = Omit<CoupangPriceInventory, "id" | "cr
 export type MarketplaceApiPlatform = "coupang" | "smartstore" | "esm";
 export type MarketplaceApiTestStatus = "success" | "failed";
 export type MarketplaceApiLogStatus = "success" | "failed";
-export type MarketplaceApiAction = "test" | "price" | "stock" | "stop" | "resume";
+export type MarketplaceApiAction =
+  | "test" | "price" | "stock" | "stop" | "resume" | "sync" | "cancel"
+  | "sync-orders" | "confirm" | "claim" | "approve-cancel" | "reject-cancel" | "auto-approve-cancel"
+  | "ship" | "ship-fix"
+  | "return-approve" | "return-receive" | "return-complete" | "return-reject"
+  | "exchange-collect" | "exchange-ship" | "exchange-reject"
+  | "settlement"
+  | "sync-inquiries" | "inquiry_reply";
 
 export interface MarketplaceApiCredential {
   id: string;
@@ -286,11 +312,52 @@ export interface MarketplaceApiLog {
   product_id: string | null;
   product_name: string | null;
   vendor_item_id: string | null;
+  target_id: string | null;
   previous_value: string | null;
   new_value: string | null;
   error_message: string | null;
   response_payload: Record<string, unknown> | null;
   created_at: string;
+}
+
+// ─── 마켓 문의 (쿠팡 상품문의/고객센터, 스토어 상품Q&A/1:1) ───
+export type MarketplaceInquiryType = "coupang_product" | "coupang_cs" | "naver_qna" | "naver_inquiry";
+export type MarketplaceInquiryStatus = "unanswered" | "answered";
+export type MarketplaceInquiryAnswerSource = "sync" | "app" | "auto";
+
+/** 문의 유형 라벨 — 화면(문의 탭)·디스코드 알림·동기화 로그가 공유하는 정본 */
+export const INQUIRY_TYPE_LABEL: Record<MarketplaceInquiryType, string> = {
+  coupang_product: "쿠팡·상품문의",
+  coupang_cs: "쿠팡·고객센터",
+  naver_qna: "스토어·상품Q&A",
+  naver_inquiry: "스토어·1:1",
+};
+
+/** 마켓 API 답변 글자수 제약 (없으면 제약 없음) — 화면 검증·전송 전 검증 공용 */
+export const INQUIRY_REPLY_LIMITS: Partial<Record<MarketplaceInquiryType, { min: number; max: number }>> = {
+  coupang_cs: { min: 2, max: 1000 },
+};
+
+export interface MarketplaceInquiry {
+  id: string;
+  user_id: string;
+  platform: "coupang" | "smartstore";
+  inquiry_type: MarketplaceInquiryType;
+  inquiry_id: string;
+  content: string;
+  product_name: string | null;
+  market_order_ids: string[];
+  order_id: string | null;
+  inquiry_at: string | null;
+  status: MarketplaceInquiryStatus;
+  answer_content: string | null;
+  answered_at: string | null;
+  answer_source: MarketplaceInquiryAnswerSource | null;
+  ai_draft: string | null;
+  ai_draft_at: string | null;
+  raw: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 // ─── 옥션·지마켓(ESM) 가격 인벤토리 ───
@@ -327,6 +394,11 @@ export interface SmartstorePriceInventory {
   product_status: string | null;
   sale_price: number | null;
   option_type: string | null;
+  // 커머스API 직접 연동용 (20260830 마이그레이션)
+  origin_product_no: string | null;
+  channel_product_no: string | null;
+  stock: number | null;
+  api_synced_at: string | null;
   // 94컬럼 전체 raw 값을 보존: { "0": "값A", "1": "값B", ..., "93": "값CP" }
   // 내보내기 시 F열만 우리 시스템 가격으로 교체하고 나머지는 그대로 복원.
   raw_row: Record<string, string>;
@@ -334,7 +406,10 @@ export interface SmartstorePriceInventory {
   updated_at: string;
 }
 
-export type SmartstorePriceInventoryInsert = Omit<SmartstorePriceInventory, "id" | "created_at" | "updated_at">;
+export type SmartstorePriceInventoryInsert = Omit<
+  SmartstorePriceInventory,
+  "id" | "created_at" | "updated_at" | "origin_product_no" | "channel_product_no" | "stock" | "api_synced_at"
+> & Partial<Pick<SmartstorePriceInventory, "origin_product_no" | "channel_product_no" | "stock" | "api_synced_at">>;
 
 // ─── 가격 이력 ───
 export interface PriceHistory {
@@ -427,4 +502,23 @@ export interface SmsLog {
   message_id: string | null;
   provider: "solapi" | "phone" | null;
   created_at: string;
+}
+
+export interface MarketplaceSyncRun {
+  id: string;
+  user_id: string;
+  platform: string;
+  trigger: string;
+  dry_run: boolean;
+  started_at: string;
+  finished_at: string | null;
+  status: "running" | "success" | "partial" | "failed";
+  remote_count: number;
+  new_orders: number;
+  confirmed: number;
+  confirm_failed: number;
+  claims: Record<string, number>;
+  error: string | null;
+  detail: Record<string, unknown> | null;
+  kind?: "orders" | "shipping" | "settlement" | "daily-summary" | "inquiries" | "tracking-collect" | "esm-export" | "price" | "health-alert" | string;
 }

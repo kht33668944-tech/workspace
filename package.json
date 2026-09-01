@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:3001": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -19,6 +20,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.110.1",
+    "bcryptjs": "^3.0.3",
     "exceljs": "^4.4.0",
     "impit": "^0.14.0",
     "lucide-react": "^0.577.0",
@@ -40,6 +42,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4.3.2",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   },
   "overrides": {

@@ -50,7 +50,7 @@ export const EDITABLE_KEYS = new Set([
   "bundle_no", "order_date", "marketplace", "marketplace_order_no", "marketplace_product_order_no", "marketplace_orderer_name", "recipient_name", "product_name",
   "quantity", "recipient_phone", "orderer_phone", "postal_code", "address", "address_detail",
   "delivery_memo", "revenue", "settlement", "cost", "payment_method",
-  "purchase_id", "purchase_source", "purchase_url", "purchase_order_no", "courier", "tracking_no", "delivery_status", "memo",
+  "purchase_id", "purchase_source", "purchase_url", "purchase_detail_url", "purchase_order_no", "courier", "tracking_no", "delivery_status", "memo",
 ]);
 export const NUMERIC_KEYS = new Set(["quantity", "revenue", "settlement", "cost"]);
 export const FORMULA_KEYS = new Set(["settlement"]);
@@ -82,6 +82,7 @@ export const COLUMNS: Col[] = [
   { key: "courier", label: "택배사", minWidth: 85 },
   { key: "tracking_no", label: "운송장", minWidth: 130 },
   { key: "purchase_url", label: "최저가링크", minWidth: 130 },
+  { key: "purchase_detail_url", label: "주문상세링크", minWidth: 130 },
 ];
 export const COL_COUNT = COLUMNS.length;
 
@@ -160,7 +161,7 @@ export function formatCell(key: string, val: unknown, order?: { courier?: string
       }, trackingNo);
     }
   }
-  if (key === "purchase_url") {
+  if (key === "purchase_url" || key === "purchase_detail_url") {
     const url = String(val);
     return React.createElement("a", {
       href: url, target: "_blank", rel: "noopener noreferrer",

@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
-import { groupIntoBatches } from "@/lib/log-format";
+import { groupIntoBatches, groupMarketplaceLogs, MARKETPLACE_ACTIVITY_LABELS } from "@/lib/log-format";
 import { getKoreanDateKey } from "@/lib/date-utils";
-import type { BatchLogEntry } from "@/lib/log-format";
+import type { BatchLogEntry, MarketplaceLogEntry } from "@/lib/log-format";
 
 export interface DashboardRecentOrder {
   id: string;
@@ -49,6 +49,8 @@ export interface DashboardMonthlyProfitSummary extends Omit<DashboardDailyProfit
 
 // backwards-compat alias
 export type ActivityLogBatch = BatchLogEntry;
+/** 활동 로그 항목 — 구매/운송장 배치 + 마켓 API 활동 */
+export type ActivityEntry = BatchLogEntry | MarketplaceLogEntry;
 
 export interface DashboardData {
   // KPI
@@ -66,10 +68,14 @@ export interface DashboardData {
   deliveredCount: number;       // 이번달만
   csCount: number;              // 교환준비 + 반품준비
   cancelPendingCount: number;   // 취소준비
+  reviewCount: number;          // 구매확인필요 (자동구매 이상)
+  cancelRequestCount: number;   // 취소요청 (승인/거절 판단 대기)
+  shipDeadlineCount: number;    // 발송불가 중 발송기한 임박(내일까지)
+  inquiryCount: number;         // 미답변 마켓 문의
   // 손익/로그
   dailyProfitRows: DashboardDailyProfitRow[];
   monthlyProfitSummary: DashboardMonthlyProfitSummary;
-  activityLogs: ActivityLogBatch[];
+  activityLogs: ActivityEntry[];
 }
 
 function emptyMonthlySummary(month = ""): DashboardMonthlyProfitSummary {
@@ -109,6 +115,10 @@ const EMPTY_DATA: DashboardData = {
   deliveredCount: 0,
   csCount: 0,
   cancelPendingCount: 0,
+  reviewCount: 0,
+  cancelRequestCount: 0,
+  shipDeadlineCount: 0,
+  inquiryCount: 0,
   dailyProfitRows: [],
   monthlyProfitSummary: emptyMonthlySummary(),
   activityLogs: [],
@@ -244,7 +254,7 @@ function localDateFromIso(value: string | null): string | null {
 function isActivePurchase(order: { purchase_order_no: string | null; delivery_status: string | null }): boolean {
   const purchaseOrderNo = order.purchase_order_no?.trim();
   if (!purchaseOrderNo) return false;
-  return !["취소완료", "재고부족", "반품완료", "교환완료"].includes(order.delivery_status ?? "");
+  return !["취소완료", "발송불가", "반품완료", "교환완료"].includes(order.delivery_status ?? "");
 }
 
 async function fetchMonthlyProfit(uid: string, month: string): Promise<{
@@ -402,12 +412,12 @@ export function useDashboard() {
             .eq("user_id", uid)
             .is("tracking_no", null)
             .not("delivery_status", "in", "(취소완료,반품완료,교환완료)"),
-          // 1. 결제 전 (미구매)
+          // 1. 구매대기 (미구매)
           supabase
             .from("orders")
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
-            .eq("delivery_status", "결제전"),
+            .eq("delivery_status", "구매대기"),
           // 2. 배송준비중 (운송장 미수집)
           supabase
             .from("orders")
@@ -426,41 +436,78 @@ export function useDashboard() {
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
             .eq("delivery_status", "취소준비"),
-          // 5. 재고부족
+          // 5. 발송불가
           supabase
             .from("orders")
             .select("*", { count: "exact", head: true })
             .eq("user_id", uid)
-            .eq("delivery_status", "재고부족"),
+            .eq("delivery_status", "발송불가"),
+          // 5-1. 구매 확인 (자동구매 이상 + 부분구매)
+          supabase
+            .from("orders")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", uid)
+            .in("delivery_status", ["구매확인필요", "부분구매"]),
+          // 5-2. 취소요청 (승인/거절 판단 대기)
+          supabase
+            .from("orders")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", uid)
+            .eq("delivery_status", "취소요청"),
+          // 5-3. 미발송 주문 중 발송기한 임박(내일까지) — 구매대기·확인·부분구매·발송불가·배송준비
+          supabase
+            .from("orders")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", uid)
+            .in("delivery_status", ["구매대기", "구매확인필요", "부분구매", "발송불가", "배송준비"])
+            .is("tracking_no", null)
+            .not("ship_by_date", "is", null)
+            .lte("ship_by_date", new Date(Date.now() + 9 * 3600000 + 86400000).toISOString().slice(0, 10)),
           // 6. 최근 구매 로그 150건 (배치 집계용, 15배치 보장)
           supabase
             .from("purchase_logs")
-            .select("batch_id,platform,status,created_at")
+            .select("batch_id,platform,status,created_at,order_id")
             .eq("user_id", uid)
             .order("created_at", { ascending: false })
             .limit(150),
           // 7. 최근 운송장 로그 150건 (배치 집계용, 15배치 보장)
           supabase
             .from("tracking_logs")
-            .select("batch_id,platform,status,created_at")
+            .select("batch_id,platform,status,created_at,order_id")
             .eq("user_id", uid)
             .order("created_at", { ascending: false })
             .limit(150),
+          // 8. 최근 마켓 API 활동 150건 (주문수집·취소승인·송장전송 등)
+          supabase
+            .from("marketplace_api_logs")
+            .select("action,status,platform,target_id,new_value,created_at,response_payload")
+            .eq("user_id", uid)
+            .in("action", Object.keys(MARKETPLACE_ACTIVITY_LABELS))
+            .order("created_at", { ascending: false })
+            .limit(150),
+          // 9. 미답변 마켓 문의
+          supabase
+            .from("marketplace_inquiries")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", uid)
+            .eq("status", "unanswered"),
         ]),
         fetchMonthStats(uid, currentMonth),
         fetchMonthStats(uid, lastMonth),
         fetchMonthlyProfit(uid, currentMonth),
       ]);
 
-      const [c0, c1, c2, c4, c5, c6, c7, c8] = counts;
+      const [c0, c1, c2, c4, c5, c6, c6a, c6b, c6c, c7, c8, c9, c10] = counts;
 
-      // 구매/운송장 배치 집계 후 시간순 병합 (최신 15개)
-      type LogRow = { batch_id: string; platform: string; status: string; created_at: string };
+      // 구매/운송장 배치 + 마켓 API 활동을 시간순 병합 (최신 20개)
+      type LogRow = { batch_id: string; platform: string; status: string; created_at: string; order_id: string | null };
+      type ApiLogRow = { action: string; status: string; platform: string; target_id: string | null; new_value: string | null; created_at: string; response_payload: unknown };
       const purchaseBatches = groupIntoBatches((c7.data ?? []) as LogRow[], "purchase");
       const trackingBatches = groupIntoBatches((c8.data ?? []) as LogRow[], "tracking");
-      const activityLogs = [...purchaseBatches, ...trackingBatches]
+      const marketplaceEntries = groupMarketplaceLogs((c9.data ?? []) as ApiLogRow[]);
+      const activityLogs: ActivityEntry[] = [...purchaseBatches, ...trackingBatches, ...marketplaceEntries]
         .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-        .slice(0, 15);
+        .slice(0, 20);
 
       setData({
         currentMonthCount: currentStats.count,
@@ -476,6 +523,10 @@ export function useDashboard() {
         csCount: c4.count ?? 0,
         cancelPendingCount: c5.count ?? 0,
         outOfStockCount: c6.count ?? 0,
+        reviewCount: c6a.count ?? 0,
+        cancelRequestCount: c6b.count ?? 0,
+        shipDeadlineCount: c6c.count ?? 0,
+        inquiryCount: c10.count ?? 0,
         dailyProfitRows: profitStats.rows,
         monthlyProfitSummary: profitStats.summary,
         activityLogs,

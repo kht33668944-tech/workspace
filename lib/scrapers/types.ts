@@ -29,6 +29,17 @@ export interface BulkUpdateTrackingRequest {
   }[];
 }
 
+// 구매처 주문상세 페이지 URL — 자동구매 완료 시 발주서에 저장해 반품/문의 때 바로 진입한다.
+// 새 구매처(옥션, 11번가 등) 자동구매를 붙일 때 여기에 패턴만 추가하면 된다.
+// 지마켓 상세페이지는 주문번호(orderNo)가 아니라 결제번호(payNo) 기준 — orderNo로 만들면 에러 페이지로 이동한다
+export function purchaseDetailUrl(platform: string, orderNo: string, payNo?: string): string | null {
+  switch (platform) {
+    case "gmarket": return payNo ? `https://my.gmarket.co.kr/ko/pc/detail/basic/${payNo}` : null;
+    case "ohouse": return orderNo ? `https://ohou.se/orders/${orderNo}` : null;
+    default: return null;
+  }
+}
+
 // 상세주소 특수문자 정리: 한글/영문/숫자/공백/하이픈만 남기고 나머지(·, /, 괄호 등)는 공백 치환
 // 일부 마켓 배송지 폼이 특수문자가 포함된 상세주소 저장을 거부한다
 export function sanitizeAddressDetail(detail: string): string {
@@ -55,8 +66,8 @@ export interface PurchaseOrderInfo {
 }
 
 export interface PurchaseResult {
-  success: { orderId: string; purchaseOrderNo: string; cost?: number; paymentMethod?: string }[];
-  failed: { orderId: string; reason: string; purchaseOrderNo?: string; cost?: number; paymentMethod?: string }[];
+  success: { orderId: string; purchaseOrderNo: string; cost?: number; paymentMethod?: string; payNo?: string }[];
+  failed: { orderId: string; reason: string; purchaseOrderNo?: string; cost?: number; paymentMethod?: string; payNo?: string }[];
 }
 
 export interface AutoPurchaseRequest {

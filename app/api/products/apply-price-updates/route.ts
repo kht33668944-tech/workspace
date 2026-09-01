@@ -48,13 +48,22 @@ export async function POST(request: NextRequest) {
     const supabase = getServiceSupabaseClient();
 
     // 소유권 검증: 요청된 상품이 모두 본인 소유인지 확인
+    // .in() 에 수백 개 UUID 를 한 번에 넣으면 요청 URL 이 너무 길어 빈 결과가 오므로 100개씩 나눠 조회
     const ids = changed.map(u => u.id);
-    const { data: owned } = await supabase
-      .from("products")
-      .select("id")
-      .eq("user_id", user.id)
-      .in("id", ids);
-    const ownedIds = new Set((owned ?? []).map(p => p.id));
+    const ownedIds = new Set<string>();
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data: owned, error: ownedErr } = await supabase
+        .from("products")
+        .select("id")
+        .eq("user_id", user.id)
+        .in("id", ids.slice(i, i + 100));
+      if (ownedErr) {
+        console.error("[apply-price-updates] 소유권 조회 실패:", ownedErr.message);
+        return NextResponse.json({ error: `소유권 조회 실패: ${ownedErr.message}` }, { status: 500 });
+      }
+      for (const p of owned ?? []) ownedIds.add(p.id);
+    }
+    if (ownedIds.size < ids.length) console.warn(`[apply-price-updates] 소유 아님/미존재 ${ids.length - ownedIds.size}개 제외`);
     const validUpdates = changed.filter(u => ownedIds.has(u.id));
 
     // 병렬 업데이트 (10개씩 배치)

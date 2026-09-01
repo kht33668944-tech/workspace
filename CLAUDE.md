@@ -9,14 +9,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 명령어
 
 ```bash
-npm run dev      # 개발 서버
-npm run build    # 프로덕션 빌드
-npm run start    # 프로덕션 서버
-npm run lint     # ESLint
-npx tsc --noEmit # 타입 체크
+npm run dev       # 개발 서버 (운영 체크아웃, 3000)
+npm run dev:3001  # 개발 worktree용 (workspace-dev — DEV-ENV.md 참조)
+npm run build     # 프로덕션 빌드
+npm run lint      # ESLint
+npm run typecheck # 타입 체크 (tsc --noEmit)
+npm run verify    # lint + typecheck
+npm run coupang:cancel / esm:cancel / ss:cancel  # 취소 자동화 (드라이런 먼저 — .claude/skills/*-cancel/SKILL.md)
 ```
 
 테스트 프레임워크 없음(jest/vitest/playwright test 설정 없음). 검증은 수동/E2E.
+`tsc`는 `**/*.ts`만 검사 — `scripts/*.mts`는 프로젝트 타입체크에 안 잡힌다(검증하려면 임시 tsconfig extends 필요).
+개발은 git worktree `workspace-dev`(브랜치 feature/*)에서, 운영 DB 공유 — 상세 규칙은 `DEV-ENV.md`.
 
 ## 기술 스택
 
@@ -44,6 +48,25 @@ npx tsc --noEmit # 타입 체크
 - `browser-pool.ts` — 세마포어 기반 동시 실행 제한 (`MAX_BROWSER_INSTANCES`, 기본 2)
 - `session-manager.ts` — 로그인 세션 DB 캐시 (재로그인 최소화)
 - 플랫폼별: `gmarket.ts`, `auction.ts`, `ohouse.ts` (운송장 수집), `gmarket-purchase.ts`, `ohouse-purchase.ts` (자동구매)
+
+### 마켓 공식 API 직접 연동 (lib/marketplace/)
+- 클라이언트: `lib/coupang-api.ts`(HMAC 서명), `lib/naver-commerce-api.ts`(OAuth, 초당 2회·form-urlencoded). 계정은 `marketplace_api_credentials`(암호화), 조립 헬퍼는 `lib/marketplace-api-helpers.ts`
+- 도메인 로직: `lib/marketplace/` — `order-sync`(수집·발주확인·클레임·취소요청 승인), `order-ship`(송장 전송), `order-cancel`, `order-claims`(반품/교환), `settlement-sync`(정산), `inquiry-sync`+`inquiry-ai`(문의 수집·Gemini 답변 초안), `daily-summary`, `sync-run`(실행 기록 공용 헬퍼)
+- `MARKETPLACE_API_DRY_RUN=true`면 쓰기(가격/재고/취소/송장)는 미리보기만, 읽기는 항상 실호출. 로그 action에 `:dry` 접미
+- 실행 기록은 `marketplace_sync_runs`(kind: orders/shipping/price/inquiries/settlement/...) → `/workspace/automation` 페이지 타임라인이 읽는다. 기록 실패는 warn만 — 본작업을 막지 않는다
+- **쿠팡 ID 함정**: 가격/재고 API 키(vendorItemId)는 `coupang_price_inventory.option_id` 컬럼. `vendor_item_id` 컬럼은 sellerProductId라 다른 값
+- **날짜는 반드시 KST 기준**(`lib/date-utils.ts`의 `toKstDateKey`): UTC로 자르면 KST 새벽 주문·정산이 조회에서 빠진다 (2026-08-31 실제 버그)
+- 방향 규칙: 마켓→발주서는 클레임·배송 상태만, 발주서→마켓은 발주확인·취소승인·판매자취소·송장만
+
+### 자동화 크론 (Windows 작업 스케줄러 — 로컬 전용, Railway 미사용)
+- 3종: `OnliveOrderSync`(매시 :00, `scripts/marketplace-order-sync.mts` — 주문·문의·정산 1회/일·21시 하루요약·헬스체크), `OnliveTrackingShip`(3시간, 02:30 앵커, `scripts/tracking-and-ship.mts` — 운송장 수집→송장 전송→ESM 엑셀), `OnliveAutoPrice`(4시간, 00:15 앵커, `scripts/auto-price-refresh.mjs` — 최저가 수집→가격 적용→마켓 반영)
+- 등록/해제: `scripts/register-*-task.ps1` (`-Remove`). **시작 앵커는 `lib/automation-schedule.ts`와 일치가 계약** — 자동화 페이지 타임라인·헬스체크가 이 앵커를 가정하므로 임의 변경 금지
+- 주문수집과 운송장 작업은 `logs/.marketplace.lock`으로 동시 실행 방지(쿠팡 API 초당 한도 합산). 스크립트 전용 env `SYNC_USER_ID`
+- 디스코드 알림: `lib/discord-notifier.ts` — 채널별 웹훅 `DISCORD_WEBHOOK_ORDERS/TRACKING/PURCHASE/PRICE/AI/INQUIRY` (없으면 `DISCORD_WEBHOOK_URL`로 통합)
+
+### 셀러센터 브라우저 자동화 (취소 처리 등)
+- 전용 크롬을 CDP(포트 9222)로 제어: 프로필 `.browser-profiles/coupang-wing`(운영 체크아웃 폴더의 것만 사용, 로그인 세션 유지)
+- 취소 파이프라인: `.claude/skills/{coupang,esm,smartstore}-cancel/SKILL.md` — 반드시 드라이런 → 보고 → 승인 → `--go`
 
 ### SSE 스트리밍 패턴
 자동구매/가격수집 등 장시간 API는 `ReadableStream` + `text/event-stream` 사용:
@@ -74,7 +97,7 @@ npx tsc --noEmit # 타입 체크
 
 ### DB 스키마 (supabase/migrations/)
 - 마이그레이션 SQL은 `supabase/migrations/`에 위치 (수동 적용)
-- 핵심 테이블: `products`, `orders`, `purchase_credentials`(암호화), `purchase_logs`, `tracking_logs`, `finance`, `gemini_usage`(AI 토큰 비용 추적), `*_price_inventory`, `forbidden_words`
+- 핵심 테이블: `products`, `orders`, `purchase_credentials`(암호화), `purchase_logs`, `tracking_logs`, `finance`, `gemini_usage`(AI 토큰 비용 추적), `*_price_inventory`, `forbidden_words`, `marketplace_api_credentials`(마켓 API 키, 암호화), `marketplace_sync_runs`(자동화 실행 기록), `marketplace_inquiries`(문의), `app_settings`(자동승인 등 토글)
 - Gemini 호출은 `gemini_usage`에 fire-and-forget으로 사용량 기록
 
 ### Next 빌드 설정 (next.config.ts)
@@ -88,6 +111,8 @@ npx tsc --noEmit # 타입 체크
 ## 환경변수 (`.env.local`)
 
 **필수:** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CREDENTIAL_ENCRYPTION_KEY`, `GEMINI_API_KEY`
+
+**마켓 API·자동화:** `MARKETPLACE_API_DRY_RUN`(true=쓰기 미리보기), `SYNC_USER_ID`(크론 스크립트용 사용자 UUID), `AUTO_BASE_URL`(가격 자동화가 호출할 서버), `MFDS_API_KEY`(식약처), `DISCORD_WEBHOOK_*`
 
 **선택 (로컬 개발):** `BROWSER_HEADLESS=false`, `BROWSER_CHANNEL=chrome`, `MAX_BROWSER_INSTANCES=2`
 
@@ -111,6 +136,7 @@ npx tsc --noEmit # 타입 체크
 - **쿠팡 GTIN은 상품 1개당 유일해야 함**: 같은 제품의 묶음수량 변형(210ml 30개/60개)은 단품 바코드가 같아 두 번째부터 "GTIN/MPN이 이미 등록된 상품과 중복" 반려. 식약처에는 박스 바코드가 없으므로 ①묶음수량을 한 상품의 옵션으로 합치거나 ②쿠팡엔 한 용량만 등록해야 함
 - **쿠팡 수량 단위**: 대부분 카테고리는 "30개"를 받지만 에너지/비타민음료·녹차티백·커피믹스는 **"30개입"만** 허용 (`GAEIP_CATS`)
 - **모델명**: 특수문자(•, ·, - 등) 포함 시 쿠팡 "모델명을 정확하게 입력해주세요" 반려 → 한글/영문/숫자/공백만 허용
+- **브랜드 ≠ 제조사**: 브랜드 칸에는 소비자 브랜드(상품명 첫 단어 — 코카콜라, 환타, 웰치스)를 넣는다. 판매원/제조원(코카콜라음료, 세림향료 등)을 브랜드에 넣으면 쿠팡윙이 "브랜드 정보 수정" 대상으로 잡는다 (2026-09-01 319건 일괄 정정, `scripts/dev/wing-brand-fix.mjs`). `build-playauto-excel.mjs`는 브랜드=상품명 첫 단어, 제조사=판매원으로 분리됨. 등록 후 쿠팡윙 상품관리 대시보드 BRAND 필터로 잔여 제안 주기 확인
 - **기본이미지**: 플레이오토 S3(`s3-ap-northeast-2.amazonaws.com/gmp01/...`) 썸네일은 만료되어 403이 날 수 있다. 업로드 전 HEAD 체크 필수
 - **등록 전 검수**: `node scripts/rebuild-qa-check.mjs` 실행해 반려 요인 사전 확인. item_info의 `[검수필요]` 태그는 내보내기 시 자동 제거됨
 

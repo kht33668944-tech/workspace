@@ -47,6 +47,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
   const [showPw, setShowPw] = useState(false);
 
   const [progress, setProgress] = useState("");
+  const [postCollect, setPostCollect] = useState<{ running: boolean; text: string[]; error?: string } | null>(null);
   const [progressDetail, setProgressDetail] = useState("");
   const [results, setResults] = useState<ScrapeResult[]>([]);
   const [error, setError] = useState("");
@@ -242,6 +243,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     setResults(allResults);
     setStep("result");
     setIsStopping(false); // 중단 버튼 상태 복원 — "중단 중..." 고착 방지
+    void runPostCollect(allResults.reduce((n, r) => n + r.success.length, 0));
 
     // 모든 계정 수집 완료 후 합산 결과로 디스코드 1회 발송 (개별 계정 알림은 서버에서 억제됨)
     const successCount = allResults.reduce((sum, r) => sum + r.success.length, 0);
@@ -324,6 +326,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
 
       setResults([data as ScrapeResult]);
       setStep("result");
+      void runPostCollect((data as ScrapeResult).success?.length ?? 0);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         setWasCancelled(true);
@@ -340,6 +343,27 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     } finally {
       // 중단 버튼 상태 복원 — "중단 중..." 고착 방지
       setIsStopping(false);
+    }
+  };
+
+  // 수집 완료 후: 새 운송장을 쿠팡·스토어 API로 전송 + ESM 운송장 엑셀 바탕화면 저장
+  const runPostCollect = async (successCount: number) => {
+    if (successCount === 0 || !session?.access_token) return;
+    setPostCollect({ running: true, text: [] });
+    try {
+      const res = await fetch("/api/marketplace-api/orders/post-collect", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` } });
+      const data = (await res.json()) as { dryRun?: boolean; results?: Array<{ platform: string; sent: number; alreadySent: number; failed: number; rows: Array<{ status: string; recipientName: string | null; productName: string | null; message: string }> }>; esm?: { count: number; file: string | null } | null; errors?: string[]; error?: string };
+      if (!res.ok) return setPostCollect({ running: false, text: [], error: data.error ?? "송장 전송 실패" });
+      const text: string[] = [];
+      for (const r of data.results ?? []) {
+        text.push(`${r.platform === "coupang" ? "쿠팡" : "스마트스토어"} 송장 전송: ${r.sent}건${r.alreadySent ? ` (이미 전송 ${r.alreadySent})` : ""}${r.failed ? ` · 실패 ${r.failed}` : ""}${data.dryRun ? " [DRY]" : ""}`);
+        for (const row of r.rows.filter((x) => x.status === "failed").slice(0, 5)) text.push(`  ✗ ${row.recipientName} · ${row.productName}: ${row.message}`);
+      }
+      text.push(data.esm && data.esm.count > 0 ? `ESM 운송장 엑셀 ${data.esm.count}건 → ${data.esm.file}` : "ESM 운송장: 새 건 없음");
+      for (const e of data.errors ?? []) text.push(`⚠ ${e}`);
+      setPostCollect({ running: false, text });
+    } catch {
+      setPostCollect({ running: false, text: [], error: "송장 전송 중 오류" });
     }
   };
 
@@ -725,6 +749,17 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                     <p className="text-xs text-yellow-400/60">미발견</p>
                   </div>
                 </div>
+
+                {/* 마켓 송장 전송 + ESM 엑셀 결과 */}
+                {postCollect && (
+                  <div className="text-xs bg-sky-500/10 border border-sky-500/20 rounded-lg px-3 py-2 space-y-0.5">
+                    {postCollect.running ? (
+                      <p className="text-sky-400 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> 쿠팡·스마트스토어 송장 전송 및 ESM 엑셀 저장 중...</p>
+                    ) : postCollect.error ? (
+                      <p className="text-red-400">{postCollect.error}</p>
+                    ) : postCollect.text.map((t, i) => <p key={i} className={t.startsWith("  ✗") || t.startsWith("⚠") ? "text-red-400" : "text-sky-300"}>{t}</p>)}
+                  </div>
+                )}
 
                 {/* 성공 목록 */}
                 {mergedResult.success.length > 0 && (

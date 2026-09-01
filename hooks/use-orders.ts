@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import { getKoreanDateKey, getKoreanMonthKey } from "@/lib/date-utils";
 import type { Order, OrderInsert, OrderUpdate } from "@/types/database";
+import { CLAIM_STATUSES } from "@/lib/constants";
 
 interface UseOrdersOptions {
   month?: string | null;
@@ -491,14 +492,16 @@ export function useOrders(options: UseOrdersOptions = {}) {
 
       // 운송장번호 입력 → 배송완료 (취소/반품/교환 상태가 아닐 때만)
       if (hasText(autoStatusUpdates.tracking_no) && autoStatusUpdates.tracking_no !== currentOrder.tracking_no) {
-        const noAutoChange = ["취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료"];
-        if (!noAutoChange.includes(merged.delivery_status)) {
+        if (!CLAIM_STATUSES.has(merged.delivery_status)) {
           autoStatusUpdates.delivery_status = "배송완료";
         }
+        // 운송장이 바뀌면 마켓에 다시 전송해야 한다
+        autoStatusUpdates.shipped_to_marketplace_at = null;
+        autoStatusUpdates.ship_error = null;
       }
-      // 주문번호 입력 → 배송준비 (결제전 상태일 때만)
+      // 주문번호 입력 → 배송준비 (구매대기 상태일 때만)
       else if (hasText(autoStatusUpdates.purchase_order_no) && autoStatusUpdates.purchase_order_no !== currentOrder.purchase_order_no) {
-        if (merged.delivery_status === "결제전") {
+        if (merged.delivery_status === "구매대기") {
           autoStatusUpdates.delivery_status = "배송준비";
         }
       }

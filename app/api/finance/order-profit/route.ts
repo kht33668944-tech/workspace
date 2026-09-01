@@ -64,7 +64,7 @@ interface CardBucket {
 function isActivePurchase(order: Pick<OrderProfitOrder, "purchase_order_no" | "delivery_status">): boolean {
   const purchaseOrderNo = order.purchase_order_no?.trim();
   if (!purchaseOrderNo) return false;
-  return !["취소완료", "재고부족", "반품완료", "교환완료"].includes(order.delivery_status);
+  return !["취소완료", "발송불가", "반품완료", "교환완료"].includes(order.delivery_status);
 }
 
 interface MarketplaceBucket extends MoneyBucket {

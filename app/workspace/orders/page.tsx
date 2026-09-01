@@ -3,9 +3,10 @@
 import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
-import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban } from "lucide-react";
+import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban, Send, Globe } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
+import InquiryTab from "@/components/workspace/orders/inquiry-tab";
 import { useOrders } from "@/hooks/use-orders";
 import { useAuth } from "@/context/AuthContext";
 import { exportOrdersToCSV } from "@/lib/excel-parser";
@@ -15,6 +16,7 @@ import { formatKoreanDateTime, getKoreanMonthKey } from "@/lib/date-utils";
 import { rememberWorkspaceHref, replaceUrlParams } from "@/lib/view-state";
 import { supabase } from "@/lib/supabase";
 import { exportPriceV2All } from "@/lib/price-update-v2-export";
+import { applyPriceChangesToMarketplaces, summarizeMarketApply, type MarketApplyResult } from "@/lib/marketplace-apply-client";
 import OrderTable from "@/components/workspace/orders/order-table";
 import OrderModal from "@/components/workspace/orders/order-modal";
 import OrderSidePanel, { OrderSidePanelContent } from "@/components/workspace/orders/order-side-panel";
@@ -28,6 +30,9 @@ import dynamic from "next/dynamic";
 const ExcelImport = dynamic(() => import("@/components/workspace/orders/excel-import"), { ssr: false });
 const SettlementImportModal = dynamic(() => import("@/components/workspace/orders/settlement-import-modal"), { ssr: false });
 const BulkSmsModal = dynamic(() => import("@/components/workspace/orders/bulk-sms-modal"), { ssr: false });
+const MarketplaceCancelModal = dynamic(() => import("@/components/workspace/orders/marketplace-cancel-modal"), { ssr: false });
+const OrderSyncModal = dynamic(() => import("@/components/workspace/orders/order-sync-modal"), { ssr: false });
+const MarketplaceShipModal = dynamic(() => import("@/components/workspace/orders/marketplace-ship-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
 import { useAutoPurchaseController, useTrackingCollectController } from "@/context/modal-controllers";
 import { PLATFORM_LABELS } from "@/types/database";
@@ -37,7 +42,7 @@ import type { PurchaseCancelMode, PurchaseCancelReason } from "@/lib/purchase-ca
 const MARKETPLACE_OPTIONS = ["전체", "쿠팡", "스마트스토어", "지마켓", "옥션", "11번가"];
 
 const FILTER_STORAGE_KEY = "orders-filter-state";
-type OrdersTab = "orders" | "logs" | "tracking-logs";
+type OrdersTab = "orders" | "logs" | "tracking-logs" | "inquiries";
 type ProductCostRow = {
   id: string;
   product_name: string | null;
@@ -48,7 +53,21 @@ type ProductCostRow = {
 
 // 상품소싱 페이지와 동일한 품절 마진 규칙 (margin_rate 35 = 품절 상태로 취급)
 const COST_REFRESH_SOLDOUT_MARGIN = 35;
-const COST_REFRESH_DEFAULT_MARGIN = 7;
+const COST_REFRESH_DEFAULT_MARGIN = 8;
+
+/** 원가갱신 적용 결과 (마켓 반영·엑셀·디스코드 알림·결과 팝업 공용) */
+interface CostApplyOutcome {
+  productCount: number;
+  orderCount: number;
+  exportProductIds: string[];
+  changedItems: { id: string; name: string; previous: number; price: number }[];
+  soldOut: { id: string; name: string }[];
+  restocked: { id: string; name: string }[];
+}
+
+const EMPTY_COST_APPLY: CostApplyOutcome = {
+  productCount: 0, orderCount: 0, exportProductIds: [], changedItems: [], soldOut: [], restocked: [],
+};
 
 type CostRefreshResult = {
   productId: string;
@@ -251,6 +270,9 @@ function OrdersPageInner() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showPurchaseCancelModal, setShowPurchaseCancelModal] = useState(false);
+  const [showMarketplaceShip, setShowMarketplaceShip] = useState(false);
+  const [showMarketplaceCancel, setShowMarketplaceCancel] = useState(false);
+  const [showOrderSync, setShowOrderSync] = useState(false);
   const [purchaseCredentials, setPurchaseCredentials] = useState<PurchaseCredential[]>([]);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(saved?.columnFilters ?? {});
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -260,6 +282,7 @@ function OrdersPageInner() {
   const trackingCollect = useTrackingCollectController();
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showAutoMenu, setShowAutoMenu] = useState(false);
+  const [showApiMenu, setShowApiMenu] = useState(false);
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
   const [refreshingCosts, setRefreshingCosts] = useState(false);
   const [costRefreshLog, setCostRefreshLog] = useState<string[]>([]);
@@ -272,13 +295,20 @@ function OrdersPageInner() {
   const [costRefreshResults, setCostRefreshResults] = useState<CostRefreshResult[]>([]);
   const [costRefreshResultOpen, setCostRefreshResultOpen] = useState(false);
   const [applyingCostRefresh, setApplyingCostRefresh] = useState(false);
+  // 적용하기 결과 팝업 — 마켓에 실제로 어떻게 반영됐는지 확인용
+  const [marketApplyReport, setMarketApplyReport] = useState<{
+    applied: CostApplyOutcome;
+    market: MarketApplyResult | null; // null = 마켓 반영 대상 없음
+    marketError: string | null;
+  } | null>(null);
   const [exportingCostExcel, setExportingCostExcel] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const autoMenuRef = useRef<HTMLDivElement>(null);
+  const apiMenuRef = useRef<HTMLDivElement>(null);
   const importMenuRef = useRef<HTMLDivElement>(null);
   const urlTab = searchParams.get("tab") as OrdersTab | null;
   const activeBatchId = searchParams.get("batch");
-  const initialTab: OrdersTab = urlTab === "orders" || urlTab === "logs" || urlTab === "tracking-logs"
+  const initialTab: OrdersTab = urlTab === "orders" || urlTab === "logs" || urlTab === "tracking-logs" || urlTab === "inquiries"
     ? urlTab
     : saved?.tab ?? "orders";
   const [activeTab, setActiveTab] = useState<OrdersTab>(initialTab);
@@ -343,13 +373,16 @@ function OrdersPageInner() {
       if (autoMenuRef.current && !autoMenuRef.current.contains(e.target as Node)) {
         setShowAutoMenu(false);
       }
+      if (apiMenuRef.current && !apiMenuRef.current.contains(e.target as Node)) {
+        setShowApiMenu(false);
+      }
       if (importMenuRef.current && !importMenuRef.current.contains(e.target as Node)) {
         setShowImportMenu(false);
       }
     };
-    if (showExportMenu || showAutoMenu || showImportMenu) document.addEventListener("mousedown", handleClick);
+    if (showExportMenu || showAutoMenu || showApiMenu || showImportMenu) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [showExportMenu, showAutoMenu, showImportMenu]);
+  }, [showExportMenu, showAutoMenu, showApiMenu, showImportMenu]);
 
   const handleSearchClear = () => {
     setSearch("");
@@ -519,7 +552,8 @@ function OrdersPageInner() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ productIds }),
+        // 라운드마다 디스코드 알림을 보내지 않는다 — 적용하기 완료 시 합산 1회만 발송
+        body: JSON.stringify({ productIds, notify: false }),
         signal: abortController.signal,
       });
 
@@ -571,7 +605,7 @@ function OrdersPageInner() {
               const priceText = event.bot_blocked
                 ? "봇 감지"
                 : event.fail_reason === "sold_out"
-                  ? "품절/판매종료 → 원가 0원·재고부족 예정"
+                  ? "품절/판매종료 → 원가 0원·발송불가 예정"
                   : event.price > 0
                     ? event.price !== event.previous_price
                       ? `${event.previous_price.toLocaleString()}→${event.price.toLocaleString()}원`
@@ -665,8 +699,8 @@ function OrdersPageInner() {
   const applyCostRefreshResults = useCallback(async (
     results: CostRefreshResult[],
     groups: Map<string, { product: ProductCostRow; orders: Order[] }>,
-  ) => {
-    if (results.length === 0) return { productCount: 0, orderCount: 0, exportProductIds: [] as string[] };
+  ): Promise<CostApplyOutcome> => {
+    if (results.length === 0) return EMPTY_COST_APPLY;
 
     const changed = results.filter((r) => r.status === "priced" && r.price !== r.previous);
     for (let i = 0; i < changed.length; i += 500) {
@@ -689,16 +723,16 @@ function OrdersPageInner() {
     // 품절 마진 동기화 (상품소싱 최저가 갱신과 동일 규칙)
     // - 신규 품절(마진 ≠ 35)만 35%로 변경. 이미 품절이던 상품은 변동 없음
     // - 품절이었다가 정상가로 재수집된 상품은 7%로 복귀
-    const newlySoldOutIds: string[] = [];
-    const restockedIds: string[] = [];
+    const soldOut: CostApplyOutcome["soldOut"] = [];
+    const restocked: CostApplyOutcome["restocked"] = [];
     for (const r of results) {
       const margin = groups.get(r.productId)?.product.margin_rate;
-      if (r.status === "sold_out" && margin !== COST_REFRESH_SOLDOUT_MARGIN) newlySoldOutIds.push(r.productId);
-      if (r.status === "priced" && margin === COST_REFRESH_SOLDOUT_MARGIN) restockedIds.push(r.productId);
+      if (r.status === "sold_out" && margin !== COST_REFRESH_SOLDOUT_MARGIN) soldOut.push({ id: r.productId, name: r.productName });
+      if (r.status === "priced" && margin === COST_REFRESH_SOLDOUT_MARGIN) restocked.push({ id: r.productId, name: r.productName });
     }
     const marginUpdates = [
-      ...newlySoldOutIds.map((id) => ({ id, margin: COST_REFRESH_SOLDOUT_MARGIN })),
-      ...restockedIds.map((id) => ({ id, margin: COST_REFRESH_DEFAULT_MARGIN })),
+      ...soldOut.map(({ id }) => ({ id, margin: COST_REFRESH_SOLDOUT_MARGIN })),
+      ...restocked.map(({ id }) => ({ id, margin: COST_REFRESH_DEFAULT_MARGIN })),
     ];
     if (marginUpdates.length > 0) {
       const settled = await Promise.allSettled(
@@ -715,8 +749,8 @@ function OrdersPageInner() {
     // 가격수정 엑셀 다운로드 대상: 가격 변동 + 신규 품절 + 재입고 복귀
     const exportProductIds = [...new Set([
       ...changed.map((r) => r.productId),
-      ...newlySoldOutIds,
-      ...restockedIds,
+      ...soldOut.map(({ id }) => id),
+      ...restocked.map(({ id }) => id),
     ])];
 
     let updatedOrders = 0;
@@ -742,8 +776,9 @@ function OrdersPageInner() {
             updates.purchase_url = group.product.purchase_url;
           }
           if (purchaseSource) updates.purchase_source = purchaseSource;
-          if (result.status === "sold_out" && order.delivery_status !== "재고부족") {
-            updates.delivery_status = "재고부족";
+          if (result.status === "sold_out" && order.delivery_status !== "발송불가") {
+            updates.delivery_status = "발송불가";
+            if (!order.memo) updates.memo = "품절 자동감지 (원가갱신)"; // 발송불가 사유 기록
           }
           if (Object.keys(updates).length === 0) continue;
           updatedOrders++;
@@ -757,7 +792,14 @@ function OrdersPageInner() {
       throw err;
     }
 
-    return { productCount: results.length, orderCount: updatedOrders, exportProductIds };
+    return {
+      productCount: results.length,
+      orderCount: updatedOrders,
+      exportProductIds,
+      changedItems: changed.map((r) => ({ id: r.productId, name: r.productName, previous: r.previous, price: r.price })),
+      soldOut,
+      restocked,
+    };
   }, [endBatchUndo, session?.access_token, startBatchUndo, updateOrder]);
 
   const handleStopCostRefresh = useCallback(() => {
@@ -927,6 +969,57 @@ function OrdersPageInner() {
       await refetch();
       pushCostRefreshLog(`적용 완료: 상품 ${applied.productCount}개 확인, 발주서 ${applied.orderCount}건 수정`);
       showToast(`원가 적용 완료: 발주서 ${applied.orderCount}건 수정`, "success");
+
+      // 쿠팡·스마트스토어 API 즉시 반영 (변동가·품절·재입고) — 실패해도 로컬 적용은 유지
+      const report: { applied: CostApplyOutcome; market: MarketApplyResult | null; marketError: string | null } = {
+        applied, market: null, marketError: null,
+      };
+      if (applied.changedItems.length || applied.soldOut.length || applied.restocked.length) {
+        try {
+          pushCostRefreshLog("쿠팡·스마트스토어 API 반영 중...");
+          const marketResult = await applyPriceChangesToMarketplaces(session?.access_token ?? "", {
+            changedIds: applied.changedItems.map(({ id }) => id),
+            soldOutIds: applied.soldOut.map(({ id }) => id),
+            restoredIds: applied.restocked.map(({ id }) => id),
+          });
+          const summary = summarizeMarketApply(marketResult);
+          pushCostRefreshLog(`마켓 API 반영: ${summary}`);
+          report.market = marketResult;
+
+          // 디스코드 합산 알림 1회 — 어떤 상품이 얼마에서 얼마로 바뀌었고 어떤 마켓에 반영됐는지
+          const failedCount = (marketResult.coupang?.failed ?? 0) + (marketResult.smartstore?.failed ?? 0);
+          const fmt = (n: number) => n.toLocaleString();
+          const listSection = (heading: string, items: string[]) => {
+            if (items.length === 0) return [];
+            return [heading, ...items.slice(0, 10).map((l) => `· ${l}`), ...(items.length > 10 ? [`· 외 ${items.length - 10}건`] : []), ""];
+          };
+          const lines = [
+            ...listSection(`📈 가격 변동 ${applied.changedItems.length}건`, applied.changedItems.map((it) => {
+              const diff = it.price - it.previous;
+              return `${it.name}: ${fmt(it.previous)}원 → **${fmt(it.price)}원** (${diff > 0 ? "▲" : "▼"}${fmt(Math.abs(diff))})`;
+            })),
+            ...listSection(`🚫 품절 → 판매중지 ${applied.soldOut.length}건`, applied.soldOut.map(({ name }) => name)),
+            ...listSection(`🔄 재입고 → 판매재개 ${applied.restocked.length}건`, applied.restocked.map(({ name }) => name)),
+            `🛒 마켓 반영: ${summary}`,
+            ...(applied.orderCount > 0 ? [`📋 발주서 ${applied.orderCount}건 수정`] : []),
+          ];
+          fetch("/api/notifications/automation-result", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+            body: JSON.stringify({
+              title: "원가 갱신 → 마켓 수정",
+              status: failedCount > 0 ? "partial" : "success",
+              summary: lines.join("\n"),
+              channel: "price", // 가격재고-자동화 채널
+            }),
+          }).catch(() => {});
+        } catch (marketErr) {
+          const msg = marketErr instanceof Error ? marketErr.message : String(marketErr);
+          pushCostRefreshLog(`마켓 API 반영 실패: ${msg} — 상품목록은 갱신됐으니 가격수정 엑셀 또는 API 반영 버튼으로 재시도하세요.`);
+          report.marketError = msg;
+        }
+      }
+      setMarketApplyReport(report);
       setCostRefreshResultOpen(false);
       setCostRefreshResults([]);
 
@@ -972,7 +1065,7 @@ function OrdersPageInner() {
         settlement: order.settlement || 0,
         nextCost,
       });
-      const statusChanged = result.status === "sold_out" && order.delivery_status !== "재고부족";
+      const statusChanged = result.status === "sold_out" && order.delivery_status !== "발송불가";
       return {
         id: order.id,
         recipient: order.recipient_name || "-",
@@ -1170,10 +1263,10 @@ function OrdersPageInner() {
     const ids = [...selectedIds];
     const selectedOrders = orders.filter((order) => selectedIds.has(order.id));
 
-    // 취소완료는 '주문 종료' 최종상태이므로 구매정보 유무와 무관하게 허용. 결제전 되돌리기만 차단한다.
-    if (status === "결제전" && selectedOrders.some(hasPurchaseEvidence)) {
+    // 취소완료는 '주문 종료' 최종상태이므로 구매정보 유무와 무관하게 허용. 구매대기 되돌리기만 차단한다.
+    if (status === "구매대기" && selectedOrders.some(hasPurchaseEvidence)) {
       showToast(
-        "구매정보가 있는 주문은 결제전으로 바로 되돌릴 수 없습니다. 구매취소/정리 버튼을 이용해주세요.",
+        "구매정보가 있는 주문은 구매대기로 바로 되돌릴 수 없습니다. 구매취소/정리 버튼을 이용해주세요.",
         "error",
       );
       return;
@@ -1311,6 +1404,17 @@ function OrdersPageInner() {
           <Truck className="w-4 h-4" />
           운송장 로그
         </button>
+        <button
+          onClick={() => handleTabChange("inquiries")}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "inquiries"
+              ? "border-blue-500 text-blue-400"
+              : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" />
+          문의
+        </button>
       </div>
 
       {/* 구매 로그 탭 */}
@@ -1318,6 +1422,9 @@ function OrdersPageInner() {
 
       {/* 운송장 로그 탭 */}
       {activeTab === "tracking-logs" && <TrackingLogTab initialBatchId={activeBatchId} />}
+
+      {/* 문의 탭 */}
+      {activeTab === "inquiries" && <InquiryTab />}
 
       {/* 발주서 탭 */}
       {activeTab === "orders" && (<>
@@ -1442,6 +1549,49 @@ function OrdersPageInner() {
               구매취소/정리 ({selectedIds.size})
             </button>
           )}
+          <div className="relative" ref={apiMenuRef}>
+            <button
+              onClick={() => setShowApiMenu(!showApiMenu)}
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] md:min-h-0 bg-blue-600 text-white border border-blue-700 hover:bg-blue-700 text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Globe className="w-4 h-4" />
+              <span className="hidden sm:inline">마켓 API</span>
+              {allOrders.filter((o) => o.delivery_status === "취소요청").length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-xs leading-none">
+                  {allOrders.filter((o) => o.delivery_status === "취소요청").length}
+                </span>
+              )}
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+            {showApiMenu && (
+              <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl py-1 min-w-44">
+                <button
+                  onClick={() => { setShowApiMenu(false); setShowOrderSync(true); }}
+                  title="쿠팡·스마트스토어 새 주문을 API로 가져와 발주서에 등록하고 발주확인합니다"
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Download className="w-4 h-4 text-blue-400" />
+                  주문 수집{allOrders.filter((o) => o.delivery_status === "취소요청").length > 0 ? ` · 취소요청 ${allOrders.filter((o) => o.delivery_status === "취소요청").length}` : ""}
+                </button>
+                <button
+                  onClick={() => { setShowApiMenu(false); setShowMarketplaceCancel(true); }}
+                  title="취소준비 상태의 쿠팡·스마트스토어 주문을 공식 API로 판매자 취소"
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Ban className="w-4 h-4 text-rose-400" />
+                  마켓 취소
+                </button>
+                <button
+                  onClick={() => { setShowApiMenu(false); setShowMarketplaceShip(true); }}
+                  title="운송장이 있는 쿠팡·스마트스토어 주문을 공식 API로 발송처리(송장 전송). 선택이 없으면 미전송 전체"
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Send className="w-4 h-4 text-sky-400" />
+                  송장 전송{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+                </button>
+              </div>
+            )}
+          </div>
           <div className="relative" ref={autoMenuRef}>
             <button
               onClick={() => setShowAutoMenu(!showAutoMenu)}
@@ -1667,7 +1817,7 @@ function OrdersPageInner() {
                     <div className="min-w-0 truncate">
                       <span className="font-medium text-[var(--text-primary)]">{order.productName}</span>
                       <span className="text-[var(--text-muted)]"> · {order.recipient} · 수량 {order.quantity}</span>
-                      {order.status === "sold_out" ? <span className="text-amber-400"> · 품절 → 재고부족</span> : !productChanged && <span className="text-[var(--text-muted)]"> · 상품소싱 변동없음</span>}
+                      {order.status === "sold_out" ? <span className="text-amber-400"> · 품절 → 발송불가</span> : !productChanged && <span className="text-[var(--text-muted)]"> · 상품소싱 변동없음</span>}
                       {order.purchaseSource && <span className="text-emerald-400"> · 구매처 → {order.purchaseSource}</span>}
                     </div>
                     <div className="shrink-0 tabular-nums text-right">
@@ -1708,6 +1858,79 @@ function OrdersPageInner() {
                 {exportingCostExcel ? "엑셀 생성 중..." : "적용 + 엑셀 다운로드"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {marketApplyReport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMarketApplyReport(null)} />
+          <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-md p-6 mx-3">
+            <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">원가 갱신 적용 결과</h3>
+            <p className="text-xs text-[var(--text-muted)] mb-4">
+              상품 {marketApplyReport.applied.productCount}개 확인 · 발주서 {marketApplyReport.applied.orderCount}건 수정
+              {" · "}가격 변동 {marketApplyReport.applied.changedItems.length} · 품절 {marketApplyReport.applied.soldOut.length} · 재입고 {marketApplyReport.applied.restocked.length}
+            </p>
+
+            <div className="space-y-2 mb-4">
+              {marketApplyReport.marketError ? (
+                <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2.5 text-xs text-red-400">
+                  마켓 API 반영 실패: {marketApplyReport.marketError}
+                  <p className="mt-1 text-[var(--text-muted)]">상품목록·발주서는 수정됐습니다. 가격수정 엑셀 또는 API 반영 버튼으로 다시 시도하세요.</p>
+                </div>
+              ) : !marketApplyReport.market ? (
+                <div className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2.5 text-xs text-[var(--text-muted)]">
+                  가격 변동·품절·재입고가 없어 마켓에 보낼 변경사항이 없습니다.
+                </div>
+              ) : marketApplyReport.market.skipped ? (
+                <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-400">
+                  {marketApplyReport.market.skipped}
+                </div>
+              ) : !marketApplyReport.market.coupang && !marketApplyReport.market.smartstore ? (
+                <div className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2.5 text-xs text-[var(--text-muted)]">
+                  연동된 마켓 API 계정이 없어 마켓 반영을 건너뛰었습니다.
+                </div>
+              ) : (
+                ([["coupang", "쿠팡"], ["smartstore", "스마트스토어"]] as const).map(([platform, label]) => {
+                  const r = marketApplyReport.market![platform];
+                  if (!r) return null;
+                  return (
+                    <div key={platform} className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2.5 text-xs">
+                      <p className="font-medium text-[var(--text-primary)] mb-1">
+                        {label}
+                        {r.dry && <span className="text-amber-400 ml-1">[테스트 모드 — 실제 반영 안 됨]</span>}
+                      </p>
+                      <p className="text-[var(--text-secondary)]">
+                        가격 변경 <span className="text-emerald-400 font-medium">{r.price}건</span>
+                        {" · "}판매중지 <span className="text-amber-400 font-medium">{r.stop}건</span>
+                        {" · "}판매재개 <span className="text-blue-400 font-medium">{r.resume}건</span>
+                        {r.failed > 0 && <> · 실패 <span className="text-red-400 font-medium">{r.failed}건</span></>}
+                        {r.blocked > 0 && <> · 미연동 <span className="text-[var(--text-muted)]">{r.blocked}건</span></>}
+                      </p>
+                      {r.errors.length > 0 && (
+                        <ul className="mt-1.5 space-y-0.5 text-red-400">
+                          {r.errors.slice(0, 3).map((err, i) => (
+                            <li key={i} className="truncate">· {err}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+              {marketApplyReport.market && !marketApplyReport.market.skipped && (
+                <p className="text-[11px] text-[var(--text-muted)] px-1">
+                  지마켓·옥션·11번가는 API가 없어 가격수정 엑셀로 올려야 반영됩니다. 미연동은 마켓 상품번호가 연결 안 된 상품입니다.
+                </p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setMarketApplyReport(null)}
+              className="w-full px-4 py-2.5 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+            >
+              확인
+            </button>
           </div>
         </div>
       )}
@@ -1783,6 +2006,27 @@ function OrdersPageInner() {
           count={selectedIds.size}
           onChangeStatus={handleBulkStatusChange}
           onClearSelection={handleClearSelection}
+        />
+      )}
+      {showOrderSync && (
+        <OrderSyncModal
+          cancelRequests={allOrders.filter((o) => o.delivery_status === "취소요청").map((o) => ({ id: o.id, marketplace: o.marketplace, recipient_name: o.recipient_name, product_name: o.product_name, quantity: o.quantity, claim_status: o.claim_status ?? null, tracking_no: o.tracking_no ?? null }))}
+          onClose={() => setShowOrderSync(false)}
+          onDone={() => refetch()}
+        />
+      )}
+      {showMarketplaceShip && (
+        <MarketplaceShipModal
+          selectedIds={[...selectedIds]}
+          onClose={() => setShowMarketplaceShip(false)}
+          onDone={() => refetch()}
+        />
+      )}
+      {showMarketplaceCancel && (
+        <MarketplaceCancelModal
+          selectedOrders={allOrders.filter((o) => selectedIds.has(o.id)).map((o) => ({ id: o.id, marketplace: o.marketplace }))}
+          onClose={() => setShowMarketplaceCancel(false)}
+          onDone={() => refetch()}
         />
       )}
       {showPurchaseCancelModal && (

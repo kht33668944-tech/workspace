@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
         .select("id, product_name, purchase_url, lowest_price")
         .eq("user_id", authUser.id)
         .gt("purchase_url", "")
+        .neq("registration_status", "판매종료")
         .in("id", chunk)
         .order("sort_order", { ascending: true });
       if (error) {
@@ -62,6 +63,7 @@ export async function POST(request: NextRequest) {
       .select("id, product_name, purchase_url, lowest_price")
       .eq("user_id", authUser.id)
       .gt("purchase_url", "")
+      .neq("registration_status", "판매종료")
       .order("sort_order", { ascending: true });
     if (error) {
       console.error("[scrape-prices-v2] 전체 조회 실패:", error.message);

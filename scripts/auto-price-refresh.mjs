@@ -24,6 +24,7 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { kstYmd } from "./_date.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOG_DIR = path.join(ROOT, "scripts", "logs");
@@ -42,7 +43,7 @@ const MAX_RETRY = 10;
 
 // ---------- 로그 ----------
 mkdirSync(LOG_DIR, { recursive: true });
-const logFile = path.join(LOG_DIR, `auto-price-${new Date().toISOString().slice(0, 10)}.log`);
+const logFile = path.join(LOG_DIR, `auto-price-${kstYmd()}.log`);
 function log(msg) {
   const line = `[${new Date().toLocaleTimeString("ko-KR", { hour12: false })}] [auto-price:${LABEL}] ${msg}`;
   console.log(line);
@@ -77,7 +78,7 @@ const BASE = (env.AUTO_BASE_URL ?? "http://localhost:3000").replace(/\/+$/, "");
 if (!SUPA || !ANON || !SERVICE) throw new Error("Supabase 환경변수 누락 (.env.local 확인)");
 
 const SOLDOUT_MARGIN = 35;
-const DEFAULT_MARGIN = 7;
+const DEFAULT_MARGIN = 8;
 
 // ---------- 디스코드 직통 (서버가 죽어 알림 API도 못 쓸 때 최후 수단) ----------
 async function discordDirect(message) {
@@ -94,6 +95,43 @@ async function discordDirect(message) {
   }
 }
 
+// ---------- 실행 기록 (marketplace_sync_runs, kind="price" — 자동화 페이지 타임라인·진행중 카드용) ----------
+// 기록 실패는 log만 남기고 본작업(가격 갱신)을 절대 막지 않는다.
+const runHeaders = { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "Content-Type": "application/json" };
+let runId = null;
+const runDetail = { label: LABEL, phase: "init" };
+
+async function insertRun(userId) {
+  try {
+    const res = await fetch(`${SUPA}/rest/v1/marketplace_sync_runs`, {
+      method: "POST",
+      headers: { ...runHeaders, Prefer: "return=representation" },
+      body: JSON.stringify({ user_id: userId, platform: "all", kind: "price", trigger: "scheduler", dry_run: false, detail: runDetail }),
+    });
+    const rows = await res.json().catch(() => null);
+    runId = Array.isArray(rows) && rows[0]?.id ? rows[0].id : null;
+  } catch (e) {
+    log(`실행 기록 생성 실패: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function patchRun(patch) {
+  if (!runId) return;
+  try {
+    await fetch(`${SUPA}/rest/v1/marketplace_sync_runs?id=eq.${runId}`, {
+      method: "PATCH", headers: runHeaders, body: JSON.stringify(patch),
+    });
+  } catch (e) {
+    log(`실행 기록 갱신 실패: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function step(phase, data) {
+  runDetail.phase = phase;
+  if (data !== undefined) runDetail[phase] = data;
+  await patchRun({ detail: runDetail });
+}
+
 // ---------- 서버 살아있는지 확인, 죽어 있으면 기동 ----------
 async function serverAlive() {
   try {
@@ -106,8 +144,10 @@ async function serverAlive() {
 
 async function ensureServer() {
   if (await serverAlive()) { log("서버 확인: 이미 실행 중"); return; }
-  log("서버가 꺼져 있음 — npm run dev 자동 기동 시도");
-  const child = spawn("cmd.exe", ["/c", "npm run dev"], {
+  // BASE 의 포트에 맞춰 기동해야 헬스체크와 일치한다 (AUTO_BASE_URL=3001 인데 3000을 띄우면 영원히 기동 실패)
+  const basePort = new URL(BASE).port || "3000";
+  log(`서버가 꺼져 있음 — npm run dev (포트 ${basePort}) 자동 기동 시도`);
+  const child = spawn("cmd.exe", ["/c", basePort === "3001" ? "npm run dev:3001" : `npm run dev -- -p ${basePort}`], {
     cwd: ROOT,
     detached: true,
     stdio: "ignore",
@@ -179,7 +219,7 @@ async function fetchProductIds(userId) {
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
     const res = await fetch(
-      `${SUPA}/rest/v1/products?select=id&user_id=eq.${userId}&purchase_url=neq.&order=sort_order.asc`,
+      `${SUPA}/rest/v1/products?select=id&user_id=eq.${userId}&purchase_url=neq.&registration_status=neq.${encodeURIComponent("판매종료")}&order=sort_order.asc`,
       { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, Range: `${from}-${from + PAGE - 1}` } },
     );
     if (!res.ok) throw new Error(`상품 조회 실패 (${res.status})`);
@@ -259,7 +299,7 @@ async function scrapeOnce(token, productIds) {
 }
 
 // ---------- 수집 + 자동 재시도 ----------
-async function scrapeWithRetry(token, initialIds) {
+async function scrapeWithRetry(token, initialIds, onRound) {
   const byId = new Map(); // id -> 마지막 성공 결과
   const allSoldOut = new Set();
   let skipped = 0;
@@ -271,7 +311,18 @@ async function scrapeWithRetry(token, initialIds) {
       log(`CF차단/실패 ${currentIds.length}개 자동 재시도 (${round}/${MAX_RETRY})...`);
       await sleep(3000);
     }
-    const r = await scrapeOnce(token, currentIds);
+    let r;
+    try {
+      r = await scrapeOnce(token, currentIds);
+    } catch (e) {
+      // 서버 재컴파일·일시 네트워크 단절로 SSE 연결이 끊겨도 수집분을 버리지 않는다.
+      // 첫 라운드(수집분 없음)만 치명적, 이후엔 30초 쉬고 같은 대상으로 재시도.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (round === 0 && byId.size === 0) throw e;
+      log(`라운드 ${round} 연결 오류 (${msg}) — 30초 후 재시도 계속`);
+      await sleep(30000);
+      continue;
+    }
     for (const c of r.changes) byId.set(c.id, c);
     for (const id of r.soldOut) allSoldOut.add(id);
     if (round === 0) skipped = r.skipped;
@@ -279,6 +330,7 @@ async function scrapeWithRetry(token, initialIds) {
     const retryMap = new Map();
     for (const item of r.retryItems) retryMap.set(item.id, item);
     remaining = [...retryMap.values()];
+    if (onRound) await onRound({ round, collected: byId.size, soldOut: allSoldOut.size, retry: remaining.length });
     if (remaining.length === 0) break;
     currentIds = remaining.map((b) => b.id);
   }
@@ -290,7 +342,7 @@ async function applyChanges(token, results) {
   const changed = results.filter((r) => r.price !== r.previous);
   if (changed.length === 0) return 0;
   let applied = 0;
-  const BATCH = 500;
+  const BATCH = 100;
   for (let i = 0; i < changed.length; i += BATCH) {
     const batch = changed.slice(i, i + BATCH);
     const res = await fetch(`${BASE}/api/products/apply-price-updates`, {
@@ -305,7 +357,7 @@ async function applyChanges(token, results) {
     if (!res.ok) throw new Error(`가격 적용 실패: ${json.error ?? res.status}`);
     applied += json.applied ?? 0;
   }
-  log(`가격 적용 완료: ${applied}건`);
+  log(`가격 적용 완료: ${applied}건${applied < changed.length ? ` (변동 ${changed.length}건 중 미적용 ${changed.length - applied}건!)` : ""}`);
   return applied;
 }
 
@@ -336,7 +388,7 @@ async function applySoldOutMargins(userId, inStockIds, soldOutIds) {
   let restoreTargets = [];
   if (inStockIds.length) {
     const res = await fetch(
-      `${SUPA}/rest/v1/products?select=id&user_id=eq.${userId}&margin_rate=eq.${SOLDOUT_MARGIN}&limit=5000`,
+      `${SUPA}/rest/v1/products?select=id&user_id=eq.${userId}&margin_rate=eq.${SOLDOUT_MARGIN}&registration_status=neq.${encodeURIComponent("판매종료")}&limit=5000`,
       { headers: svcHeaders },
     );
     if (res.ok) {
@@ -350,6 +402,53 @@ async function applySoldOutMargins(userId, inStockIds, soldOutIds) {
   const soldCount = soldOutIds.length ? await patch(soldOutIds, SOLDOUT_MARGIN) : 0;
   const restoredCount = restoreTargets.length ? await patch(restoreTargets, DEFAULT_MARGIN) : 0;
   if (soldCount || restoredCount) log(`마진 처리: 품절 ${soldCount}건 → ${SOLDOUT_MARGIN}, 재입고 복원 ${restoredCount}건 → ${DEFAULT_MARGIN}`);
+  return { soldCount, restoredIds: restoreTargets };
+}
+
+// ---------- 쿠팡·스마트스토어 API 반영 (변동가 price / 품절 stop / 재입고 resume) ----------
+// 사이트의 "쿠팡 API 반영 / 스토어 API 반영" 버튼과 동일 경로. ESM(지마켓·옥션·11번가)은 API 없음 → 엑셀.
+async function applyToMarketplaces(token, { changedIds, soldOutIds, restoredIds }) {
+  const out = { coupang: null, smartstore: null, skipped: null };
+  if (String(env.AUTO_MARKET_APPLY ?? "true").toLowerCase() === "false") { out.skipped = "AUTO_MARKET_APPLY=false"; return out; }
+  let creds = [];
+  try {
+    const res = await fetch(`${BASE}/api/marketplace-api/credentials`, { headers: { Authorization: `Bearer ${token}` } });
+    creds = res.ok ? await res.json() : [];
+  } catch (e) { out.skipped = `자격증명 조회 실패: ${e instanceof Error ? e.message : String(e)}`; return out; }
+  const jobs = [
+    { action: "price", ids: [...new Set([...changedIds, ...restoredIds])] },
+    { action: "stop", ids: soldOutIds },
+    { action: "resume", ids: restoredIds },
+  ];
+  for (const platform of ["coupang", "smartstore"]) {
+    const cred = creds.find((c) => c.platform === platform);
+    if (!cred) continue;
+    const r = { price: 0, stop: 0, resume: 0, failed: 0, blocked: 0, dry: false, errors: [] };
+    out[platform] = r;
+    for (const job of jobs) {
+      if (job.ids.length === 0) continue;
+      for (let i = 0; i < job.ids.length; i += 200) {
+        const chunk = job.ids.slice(i, i + 200);
+        try {
+          const res = await fetch(`${BASE}/api/marketplace-api/${platform}/apply`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ credentialId: cred.id, productIds: chunk, action: job.action }),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok) { r.errors.push(`${job.action}: ${json.error ?? res.status}`); continue; }
+          r[job.action] += json.successCount ?? 0;
+          r.failed += json.failCount ?? 0;
+          r.blocked += Array.isArray(json.blocked) ? json.blocked.length : 0;
+          if (json.dryRun) r.dry = true;
+          for (const x of (json.results ?? []).filter((x) => x.status === "failed").slice(0, 3)) r.errors.push(`${x.productName}: ${x.message}`);
+        } catch (e) { r.errors.push(`${job.action}: ${e instanceof Error ? e.message : String(e)}`); }
+      }
+    }
+    log(`${platform} API 반영: 가격 ${r.price} · 판매중지 ${r.stop} · 재개 ${r.resume} · 실패 ${r.failed} · 미연동 ${r.blocked}${r.dry ? " [DRY]" : ""}`);
+    for (const e of r.errors.slice(0, 3)) log(`  x ${e}`);
+  }
+  return out;
 }
 
 // ---------- 가격수정 v2 엑셀 자동 저장 (변동 + 품절 상품만, 바탕화면 날짜별 폴더) ----------
@@ -365,7 +464,7 @@ async function exportPriceExcel(token, changedIds, soldOutIds) {
   if (ids.length === 0) return [];
 
   const now = new Date();
-  const dateDir = now.toISOString().slice(0, 10);
+  const dateDir = kstYmd(now.getTime());
   const timeTag = `${String(now.getHours()).padStart(2, "0")}시${String(now.getMinutes()).padStart(2, "0")}분`;
   const outDir = path.join(env.AUTO_EXPORT_DIR ?? path.join(homedir(), "Desktop", "가격수정엑셀"), dateDir);
   mkdirSync(outDir, { recursive: true });
@@ -430,6 +529,7 @@ async function main() {
 
   await ensureServer();
   const { token, userId } = await getSession();
+  await insertRun(userId);
 
   let productIds = null;
   let clearedCount = 0;
@@ -440,18 +540,29 @@ async function main() {
     if (DO_RESET) clearedCount = await resetToday(token, allIds);
     if (LIMIT) productIds = allIds.slice(0, LIMIT);
   }
+  await step("reset", { cleared: clearedCount });
 
-  const { results, soldOut, remaining, skipped } = await scrapeWithRetry(token, productIds);
+  runDetail.scrape = { maxRetry: MAX_RETRY, rounds: [] };
+  const { results, soldOut, remaining, skipped } = await scrapeWithRetry(token, productIds, async (round) => {
+    runDetail.scrape.rounds.push(round);
+    await step("scrape");
+  });
+  runDetail.scrape.remaining = remaining.length;
+  runDetail.scrape.skipped = skipped;
   const changed = results.filter((r) => r.price !== r.previous);
   const unchanged = results.length - changed.length;
 
   const applied = await applyChanges(token, results);
-  await applySoldOutMargins(userId, results.map((r) => r.id), soldOut);
+  await step("apply", { changed: changed.length, applied, unchanged });
+  const { restoredIds } = await applySoldOutMargins(userId, results.map((r) => r.id), soldOut);
+  await step("margins", { soldOut: soldOut.length, restored: restoredIds.length });
+  const market = await applyToMarketplaces(token, { changedIds: changed.map((r) => r.id), soldOutIds: soldOut, restoredIds });
+  await step("market", market);
   const excelFiles = await exportPriceExcel(token, changed.map((r) => r.id), soldOut);
+  await step("excel", { files: excelFiles.length });
 
   const elapsed = Math.round((Date.now() - started) / 1000);
   const okCount = results.length + soldOut.length;
-  const status = okCount > 0 && remaining.length > 0 ? "partial" : okCount > 0 ? "success" : "failed";
   const summary = `변동 ${applied}건 적용, 변동없음 ${unchanged}건, 품절 ${soldOut.length}건, 미해결 ${remaining.length}건 (${elapsed}초)`;
   const fields = [
     { name: "가격 변동(적용)", value: applied },
@@ -460,9 +571,24 @@ async function main() {
     { name: "재시도 후 미해결", value: remaining.length },
     ...(skipped ? [{ name: "건너뜀(비지마켓)", value: skipped }] : []),
     ...(DO_RESET ? [{ name: "전일대비 초기화", value: `${clearedCount}건 삭제 후 재수집` }] : []),
-    ...(excelFiles.length ? [{ name: "엑셀 저장", value: `바탕화면\\가격수정엑셀 ${excelFiles.length}개 파일` }] : []),
+    ...(excelFiles.length ? [{ name: "엑셀 저장(ESM용)", value: `바탕화면\\가격수정엑셀 ${excelFiles.length}개 파일` }] : []),
   ];
+  const mk = (p) => p ? `가격 ${p.price} · 중지 ${p.stop} · 재개 ${p.resume}${p.failed ? ` · 실패 ${p.failed}` : ""}${p.blocked ? ` · 미연동 ${p.blocked}` : ""}${p.dry ? " [DRY]" : ""}` : "계정 없음";
+  if (market.skipped) fields.push({ name: "마켓 반영", value: `건너뜀 (${market.skipped})` });
+  else { fields.push({ name: "쿠팡 반영", value: mk(market.coupang) }); fields.push({ name: "스토어 반영", value: mk(market.smartstore) }); }
+  const marketFailed = [market.coupang, market.smartstore].some((p) => p && (p.failed > 0 || p.errors.length > 0));
 
+  const status = okCount === 0 ? "failed" : (remaining.length > 0 || marketFailed) ? "partial" : "success";
+  runDetail.phase = "done";
+  await patchRun({
+    status,
+    finished_at: new Date().toISOString(),
+    remote_count: results.length + soldOut.length,
+    confirmed: applied,
+    confirm_failed: remaining.length,
+    error: status === "failed" ? summary : null,
+    detail: runDetail,
+  });
   await notify(token, { status, summary, fields });
   log(`=== 종료: ${summary} ===`);
   if (status === "failed") process.exitCode = 1;
@@ -471,6 +597,7 @@ async function main() {
 main().catch(async (e) => {
   const msg = e instanceof Error ? e.message : String(e);
   log(`치명적 오류: ${msg}`);
+  await patchRun({ status: "failed", finished_at: new Date().toISOString(), error: msg, detail: runDetail });
   await discordDirect(`**최저가 자동 갱신 (${LABEL}) 실패** — ${msg}`);
   process.exitCode = 1;
 });

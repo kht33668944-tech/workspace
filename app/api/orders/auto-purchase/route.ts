@@ -5,7 +5,7 @@ import { purchaseOhouse } from "@/lib/scrapers/ohouse-purchase";
 import { decrypt } from "@/lib/crypto";
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
-import type { PurchaseOrderInfo } from "@/lib/scrapers/types";
+import { purchaseDetailUrl, type PurchaseOrderInfo } from "@/lib/scrapers/types";
 import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
 
 export const maxDuration = 300;
@@ -248,7 +248,8 @@ export async function POST(request: NextRequest) {
           orderId: string,
           purchaseOrderNo: string,
           cost?: number,
-          paymentMethod?: string
+          paymentMethod?: string,
+          payNo?: string
         ) => {
           completedCallbackOrderIds.add(orderId);
 
@@ -341,6 +342,16 @@ export async function POST(request: NextRequest) {
           console.log(`[auto-purchase] DB 즉시 업데이트 성공 (${orderId}): ${JSON.stringify(updateData)}`);
           sendEvent({ type: "db_updated", orderId, status: "ok", purchaseOrderNo, cost, paymentMethod });
 
+          // 구매처 주문상세 링크 — 컬럼 미적용 환경에서도 구매번호 저장이 깨지지 않게 별도 갱신
+          const detailUrl = purchaseDetailUrl(platform, purchaseOrderNo, payNo);
+          if (detailUrl) {
+            await supabase.from("orders").update({ purchase_detail_url: detailUrl })
+              .eq("id", orderId).eq("user_id", userId)
+              .then(({ error: urlErr }) => {
+                if (urlErr) console.error(`[auto-purchase] 주문상세링크 저장 실패 (${orderId}):`, urlErr.message);
+              });
+          }
+
           // 구매 로그 기록
           await supabase.from("purchase_logs").insert({
             user_id: userId,
@@ -361,7 +372,7 @@ export async function POST(request: NextRequest) {
 
         const releasePurchaseLock = async (orderId: string) => {
           if (!lockedOrderIds.has(orderId)) return;
-          const restoreStatus = lockReleaseStatusByOrderId.get(orderId) || "결제전";
+          const restoreStatus = lockReleaseStatusByOrderId.get(orderId) || "구매대기";
 
           const releaseQuery = supabase
             .from("orders")
@@ -446,10 +457,10 @@ export async function POST(request: NextRequest) {
                 reason = `이미 구매번호(${existingPurchaseNo})가 있는 주문이라 자동구매를 차단했습니다.`;
               } else if (loggedPurchaseNos.length >= expectedQty) {
                 reason = `구매 로그에 이미 구매번호(${loggedPurchaseNos.join(", ")})가 있어 자동구매를 차단했습니다.`;
-              } else if (currentOrder.delivery_status !== "결제전") {
+              } else if (currentOrder.delivery_status !== "구매대기") {
                 reason = currentOrder.delivery_status === purchaseLockStatus
                   ? "이미 다른 자동구매 작업이 진행 중인 주문이라 차단했습니다."
-                  : `현재 상태가 '${currentOrder.delivery_status}'인 주문이라 자동구매를 차단했습니다. 결제전 상태만 구매할 수 있습니다.`;
+                  : `현재 상태가 '${currentOrder.delivery_status}'인 주문이라 자동구매를 차단했습니다. 구매대기 상태만 구매할 수 있습니다.`;
               }
 
               if (!reason) return true;
@@ -483,7 +494,7 @@ export async function POST(request: NextRequest) {
                 .update({ delivery_status: purchaseLockStatus })
                 .eq("id", order.orderId)
                 .eq("user_id", userId)
-                .eq("delivery_status", "결제전")
+                .eq("delivery_status", "구매대기")
                 .or("purchase_order_no.is.null,purchase_order_no.eq.")
                 .select("id");
 
@@ -581,7 +592,7 @@ export async function POST(request: NextRequest) {
           // 성공한 주문 즉시 DB 업데이트 (스크래퍼에서 콜백 안 탄 경우 대비)
           for (const s of result.success) {
             if (!completedCallbackOrderIds.has(s.orderId)) {
-              await onOrderComplete(s.orderId, s.purchaseOrderNo, s.cost, s.paymentMethod);
+              await onOrderComplete(s.orderId, s.purchaseOrderNo, s.cost, s.paymentMethod, s.payNo);
             }
           }
 

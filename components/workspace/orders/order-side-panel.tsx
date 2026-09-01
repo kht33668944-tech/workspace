@@ -5,6 +5,7 @@ import { X, Send, Clock } from "lucide-react";
 import { DELIVERY_STATUSES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
 import { sanitizeText } from "@/lib/sanitize";
 import type { Order, OrderUpdate, ConsultationLog } from "@/types/database";
+import ClaimActions from "@/components/workspace/orders/claim-actions";
 
 function InfoRow({ label, value, highlight }: { label: string; value: string | null | undefined; highlight?: boolean }) {
   if (!value) return null;
@@ -59,18 +60,20 @@ export function OrderSidePanelContent({ order, onUpdate }: OrderSidePanelProps) 
       <div className="px-5 py-3 border-b border-[var(--border)] shrink-0">
         <div className="flex items-center gap-2 mb-1">
           <span className={`px-2 py-0.5 rounded text-xs font-medium shrink-0 ${statusColor}`}>
-            {order.delivery_status || "결제전"}
+            {order.delivery_status || "구매대기"}
           </span>
           <span className="text-xs text-[var(--text-muted)] truncate">{order.recipient_name || "-"}</span>
         </div>
         <h2 className="text-sm font-medium text-[var(--text-primary)] truncate" title={order.product_name || ""}>{order.product_name || "상품명 없음"}</h2>
       </div>
 
+      <ClaimActions order={order} />
+
       {/* 배송상태 */}
       <div className="px-5 py-3 border-b border-[var(--border)] shrink-0">
         <label className="text-xs text-[var(--text-tertiary)] mb-1.5 block">배송상태 변경</label>
         <select
-          value={order.delivery_status || "결제전"}
+          value={order.delivery_status || "구매대기"}
           onChange={(e) => onUpdate(order.id, { delivery_status: e.target.value })}
           className="w-full bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-blue-500/50"
         >
@@ -196,7 +199,7 @@ export default function OrderSidePanel({ order, onUpdate, onClose }: OrderSidePa
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span className={`px-2 py-0.5 rounded text-xs font-medium shrink-0 ${DELIVERY_STATUS_COLORS[order.delivery_status] || "bg-gray-500/20 text-gray-400"}`}>
-                {order.delivery_status || "결제전"}
+                {order.delivery_status || "구매대기"}
               </span>
               <span className="text-xs text-[var(--text-muted)] truncate">{order.recipient_name || "-"}</span>
             </div>
