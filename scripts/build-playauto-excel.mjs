@@ -13,7 +13,8 @@
 //
 // 웹 내보내기와 달리 AI를 쓰지 않고 다음 규칙으로 값을 채운다.
 //   · 카테고리코드 : 식약처 식품유형 → 스마트스토어 카테고리 매핑표 (결정적)
-//   · 브랜드/제조사 : item_info의 판매원·제조원에서 추출
+//   · 브랜드      : 상품명 첫 단어 (소비자 브랜드 — 제조사를 넣으면 쿠팡 브랜드 정보 수정 대상이 된다)
+//   · 제조사      : item_info의 판매원·제조원에서 추출
 //   · 쿠팡 옵션    : 카테고리별 필수옵션 규칙 + 상품명 파싱 (캐시 미사용)
 //   · 고시 11항목  : item_info (없으면 "상세페이지 참조")
 import { createClient } from "@supabase/supabase-js";
@@ -329,10 +330,18 @@ function cleanModel(name) {
   return String(name).replace(/[^가-힣a-zA-Z0-9\s]/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 
-/** 판매원/제조원에서 브랜드·제조사 추출 */
-function resolveBrand(itemInfo, productName) {
+/** 제조사는 판매원/제조원에서 추출 */
+function resolveManufacturer(itemInfo, productName) {
   const seller = strip(itemInfo?.판매원).replace(/\((주|유|사)\)/g, "").replace(/주식회사/g, "").trim();
   if (seller) return seller;
+  return productName.split(" ")[0];
+}
+
+/**
+ * 브랜드는 소비자 브랜드 = 상품명 첫 단어. 제조사(판매원)를 넣으면 안 된다 —
+ * 쿠팡이 "코카콜라음료(제조사) ≠ 코카콜라(브랜드)"를 잡아 브랜드 정보 수정 대상(319건, 2026-09-01 일괄 정정)이 됐다.
+ */
+function resolveBrand(productName) {
   return productName.split(" ")[0];
 }
 
@@ -544,8 +553,8 @@ for (const platform of PLATFORMS) {
       상세설명: p.detail_html ?? "",
       "머리말/꼬리말 템플릿코드": cfg.headerFooter,
       모델명: cleanModel(strip(info?.제품명) || p.product_name),
-      브랜드: resolveBrand(info, p.product_name),
-      제조사: resolveBrand(info, p.product_name),
+      브랜드: resolveBrand(p.product_name),
+      제조사: resolveManufacturer(info, p.product_name),
       바코드: barcode,
       옵션바코드: barcode,                                  // 쿠팡 GTIN은 이 칸으로 전송됨
       표준상품코드: barcode ? `KAN=${barcode}` : "",
