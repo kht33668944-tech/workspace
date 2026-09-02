@@ -38,9 +38,10 @@ export async function notifySyncResults(results: SyncResult[], trigger: "manual"
   const otherClaims = results.flatMap((r) => r.claims.filter((c) => c.to !== "취소요청"));
   const confirmFailed = results.reduce((n, r) => n + r.confirmFailed, 0);
   const shipDeadline = extras?.shipDeadline ?? [];
-  if (newTotal === 0 && cancelReq.length === 0 && otherClaims.length === 0 && errors.length === 0 && autoOk.length === 0 && shipDeadline.length === 0) return;
+  const addressChanges = results.flatMap((r) => r.addressChanges ?? []);
+  if (newTotal === 0 && cancelReq.length === 0 && otherClaims.length === 0 && errors.length === 0 && autoOk.length === 0 && shipDeadline.length === 0 && addressChanges.length === 0) return;
 
-  const todo = cancelReq.length + shipDeadline.length + (confirmFailed > 0 ? 1 : 0);
+  const todo = cancelReq.length + shipDeadline.length + (confirmFailed > 0 ? 1 : 0) + addressChanges.filter((a) => a.afterPurchase).length;
   const failed = errors.length > 0 && newTotal === 0 && cancelReq.length === 0;
   const lines: string[] = [];
 
@@ -70,7 +71,15 @@ export async function notifySyncResults(results: SyncResult[], trigger: "manual"
   }
   if (otherClaims.length > 0) {
     lines.push(`클레임 반영 ${otherClaims.length}건`);
-    for (const c of otherClaims.slice(0, 5)) lines.push(`   • ${c.recipientName ?? "-"} · ${c.productName ?? "-"} → ${c.to}`);
+    for (const c of otherClaims.slice(0, 5)) {
+      const extras = [c.quantity ? `요청 ${c.quantity}개` : "", c.phoneUpdated ? "연락처 갱신" : ""].filter(Boolean).join(", ");
+      lines.push(`   • ${c.recipientName ?? "-"} · ${c.productName ?? "-"} → ${c.to}${extras ? ` (${extras})` : ""}`);
+    }
+  }
+  if (addressChanges.length > 0) {
+    const after = addressChanges.filter((a) => a.afterPurchase);
+    lines.push(`${after.length > 0 ? "👉 " : ""}배송지 변경 ${addressChanges.length}건 반영${after.length > 0 ? ` — 구매 후 변경 ${after.length}건은 구매처 배송지도 바꿔야 함` : ""}`);
+    for (const a of addressChanges.slice(0, 6)) lines.push(`   • ${a.recipientName ?? "-"} · ${a.productName ?? "-"}${a.afterPurchase ? " ⚠구매 후" : ""} (${a.changedFields.join(",")})`);
   }
   if (results.some((r) => r.dryRun)) lines.push("(DRY RUN — 실제 반영 없음)");
 

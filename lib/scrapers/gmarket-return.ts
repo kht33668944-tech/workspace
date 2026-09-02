@@ -33,6 +33,8 @@ export interface GmarketReturnResult {
   selectedReason: GmarketReturnReason;
   detailText: string;        // 입력한 상세 사유
   returnFeeText: string | null; // 화면에 표시된 반품배송비 (있으면)
+  // 수거방법 화면에 수거지 연락처 입력칸이 있는지 (후속: 마켓이 재발급한 안심번호를 넣어 주기 위한 사전 조사용)
+  hasContactField?: boolean;
   error?: string;            // 실패 시 단계명 포함 메시지
 }
 
@@ -152,6 +154,12 @@ export async function requestGmarketReturn(ctx: BrowserContext, input: GmarketRe
     frame = (await getReturnFrame(page)) ?? frame;
     const pickupText = await frame.evaluate(() => document.body?.innerText || "").catch(() => "");
     if (/상품 보낼 방법|택배사에서 재방문|보내실 방법/.test(pickupText)) {
+      // 수거지 연락처 입력칸 유무만 조사해 보고 (값은 건드리지 않는다)
+      const contactInputs = await frame
+        .locator('input[type="tel"], input[name*="phone" i], input[name*="tel" i], input[placeholder*="연락처"], input[placeholder*="휴대폰"], input[placeholder*="전화"]')
+        .count()
+        .catch(() => 0);
+      base.hasContactField = contactInputs > 0 || /수거지\s*(연락처|전화|휴대폰)|연락처\s*변경/.test(pickupText);
       if (/배송받은 택배사에서 재방문/.test(pickupText)) {
         await clickByText(frame, "배송받은 택배사에서 재방문", "수거방법 선택").catch(() => {});
       }

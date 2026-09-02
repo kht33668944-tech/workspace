@@ -8,7 +8,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CoupangExchangeRequest, CoupangOpenApiClient, CoupangOrderSheet, CoupangOrderStatus, CoupangReturnRequest } from "@/lib/coupang-api";
-import type { NaverCommerceApiClient, NaverProductOrderDetail } from "@/lib/naver-commerce-api";
+import type { NaverCommerceApiClient, NaverLastChangedType, NaverProductOrderDetail } from "@/lib/naver-commerce-api";
 import { toKstIso } from "@/lib/naver-commerce-api";
 import { getSettlementRate, splitAddress } from "@/lib/excel-parser";
 import { toKstDateKey } from "@/lib/date-utils";
@@ -18,6 +18,7 @@ import { LOCKED_STATUSES, TERMINAL_STATUSES, returnRank } from "@/lib/constants"
 import { getMarketplaceCourierCode } from "@/lib/marketplace/courier-codes";
 import { getAppSetting } from "@/lib/app-settings";
 import { findCoupangReceipt } from "@/lib/marketplace/order-cancel";
+import { appendMemo } from "@/lib/marketplace/order-claims";
 import type { OrderInsert } from "@/types/database";
 
 export type SyncPlatform = "coupang" | "smartstore";
@@ -46,6 +47,26 @@ export interface ClaimChange {
   claimType: string;
   claimStatus: string;
   reason?: string;
+  /** 반품/교환 접수 시 마켓이 재발급한 안심번호로 발주서 연락처를 갱신함 */
+  phoneUpdated?: boolean;
+  /** 마켓 반품/교환 요청 수량 (부분 반품) */
+  quantity?: number | null;
+}
+
+/** 구매자가 마켓에서 배송지를 바꾼 건 (스마트스토어 DELIVERY_ADDRESS_CHANGED) */
+export interface AddressChange {
+  orderId: string;
+  recipientName: string | null;
+  productName: string | null;
+  /** 이미 구매(발주)한 뒤의 변경 — 구매처 배송지도 사람이 바꿔야 한다 */
+  afterPurchase: boolean;
+  changedFields: string[];
+}
+
+/** 클레임 반영 시 함께 갱신할 부가 정보 */
+export interface ClaimExtra {
+  contact?: { phone?: string | null; name?: string | null };
+  quantity?: number | null;
 }
 
 export interface SyncResult {
@@ -61,6 +82,8 @@ export interface SyncResult {
   claimCounts: Record<string, number>;
   /** 자동 승인된 취소요청 (설정 auto_approve_cancel) */
   autoApproved: ApproveResultRow[];
+  /** 구매자 배송지 변경 반영 (스마트스토어) */
+  addressChanges: AddressChange[];
   errors: string[];
   runId: string | null;
 }
@@ -226,7 +249,7 @@ export async function searchNaverOrdersByPaidDate(client: NaverCommerceApiClient
 }
 
 /** 네이버 변경 상품주문 ID 수집 (24h 구간 순회) */
-async function fetchNaverChangedIds(client: NaverCommerceApiClient, days: number, type: "PAYED" | "CLAIM_REQUESTED" | "CLAIM_COMPLETED") {
+async function fetchNaverChangedIds(client: NaverCommerceApiClient, days: number, type: NaverLastChangedType) {
   const ids = new Set<string>();
   const now = Date.now();
   for (let d = days - 1; d >= 0; d--) {
@@ -268,6 +291,15 @@ interface ExistingOrder {
   marketplace_order_no: string | null;
   marketplace_product_order_no: string | null;
   bundle_no: string | null;
+  // 클레임 연락처 갱신·배송지 변경 판단용
+  recipient_phone: string | null;
+  orderer_phone: string | null;
+  postal_code: string | null;
+  address: string | null;
+  address_detail: string | null;
+  delivery_memo: string | null;
+  purchase_order_no: string | null;
+  purchased_at: string | null;
 }
 
 async function loadExistingOrders(supabase: SupabaseClient, userId: string, platform: SyncPlatform, days: number) {
@@ -276,7 +308,7 @@ async function loadExistingOrders(supabase: SupabaseClient, userId: string, plat
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,order_date,recipient_name,product_name,quantity,delivery_status,marketplace_order_no,marketplace_product_order_no,bundle_no")
+      .select("id,order_date,recipient_name,product_name,quantity,delivery_status,marketplace_order_no,marketplace_product_order_no,bundle_no,recipient_phone,orderer_phone,postal_code,address,address_detail,delivery_memo,purchase_order_no,purchased_at")
       .eq("user_id", userId)
       .ilike("marketplace", `%${MARKET_LABEL[platform]}%`)
       .gte("order_date", since)
@@ -322,6 +354,7 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
     claims: [],
     claimCounts: {},
     autoApproved: [],
+    addressChanges: [],
     errors: [],
     runId: null,
   };
@@ -480,10 +513,11 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
       }
     }
 
-    // ── 5. 클레임 동기화
+    // ── 5. 클레임 동기화 (+ 스토어 구매자 배송지 변경)
     if (platform === "coupang") {
       await syncCoupangClaims(opts, existing, days, result, dryRun);
     } else {
+      await syncNaverAddressChanges(opts, existing, days, result, dryRun);
       await syncNaverClaims(opts, existing, days, result, dryRun);
     }
     for (const c of result.claims) result.claimCounts[c.to] = (result.claimCounts[c.to] ?? 0) + 1;
@@ -527,6 +561,27 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
 
 type Existing = Awaited<ReturnType<typeof loadExistingOrders>>;
 
+/** 클레임 부가 정보 → 발주서 패치. 연락처는 값이 있고 기존과 다를 때만, 수량은 값이 있을 때만 */
+function claimExtraPatch(order: ExistingOrder, extra?: ClaimExtra): Record<string, unknown> {
+  const p: Record<string, unknown> = {};
+  if (extra?.quantity != null && extra.quantity > 0) p.claim_quantity = extra.quantity;
+  const phone = extra?.contact?.phone?.trim();
+  if (phone && (phone !== order.recipient_phone || phone !== order.orderer_phone)) {
+    p.recipient_phone = phone;
+    p.orderer_phone = phone;
+    p.claim_contact_updated_at = new Date().toISOString();
+  }
+  return p;
+}
+
+/** 메모리 상의 기존 주문에도 갱신된 연락처를 반영 (같은 실행에서 재비교 방지) */
+function applyContactToOrder(order: ExistingOrder, extra?: ClaimExtra) {
+  const phone = extra?.contact?.phone?.trim();
+  if (!phone) return;
+  order.recipient_phone = phone;
+  order.orderer_phone = phone;
+}
+
 export async function applyClaim(
   supabase: SupabaseClient,
   userId: string,
@@ -540,12 +595,17 @@ export async function applyClaim(
   result: SyncResult,
   dryRun: boolean,
   receiptId?: string | number | null,
+  extra?: ClaimExtra,
 ) {
   if (TERMINAL.has(order.delivery_status)) return;
+  // 반품/교환 접수 시 마켓이 재발급한 안심번호·요청 수량 — 상태 갈래와 무관하게 항상 최신으로
+  const extraPatch = claimExtraPatch(order, extra);
+  const phoneUpdated = "recipient_phone" in extraPatch;
   if (order.delivery_status === to) {
     // 상태는 같아도 접수번호·세부 단계는 최신으로 (반품 입고확인 등 단계 표시용)
     if (!dryRun && (receiptId != null || claimStatus)) {
-      await supabase.from("orders").update({ claim_status: claimStatus, claim_receipt_id: receiptId != null ? String(receiptId) : undefined, ...(reason ? { claim_reason: reason } : {}), marketplace_synced_at: new Date().toISOString() }).eq("id", order.id).eq("user_id", userId);
+      await supabase.from("orders").update({ claim_status: claimStatus, claim_receipt_id: receiptId != null ? String(receiptId) : undefined, ...(reason ? { claim_reason: reason } : {}), ...extraPatch, marketplace_synced_at: new Date().toISOString() }).eq("id", order.id).eq("user_id", userId);
+      if (phoneUpdated) applyContactToOrder(order, extra);
     }
     return;
   }
@@ -557,12 +617,13 @@ export async function applyClaim(
   const curRank = returnRank(order.delivery_status);
   if (toRank > 0 && curRank > 0 && toRank < curRank) {
     if (!dryRun && (receiptId != null || claimStatus)) {
-      await supabase.from("orders").update({ claim_status: claimStatus, claim_receipt_id: receiptId != null ? String(receiptId) : undefined, ...(reason ? { claim_reason: reason } : {}), marketplace_synced_at: new Date().toISOString() }).eq("id", order.id).eq("user_id", userId);
+      await supabase.from("orders").update({ claim_status: claimStatus, claim_receipt_id: receiptId != null ? String(receiptId) : undefined, ...(reason ? { claim_reason: reason } : {}), ...extraPatch, marketplace_synced_at: new Date().toISOString() }).eq("id", order.id).eq("user_id", userId);
+      if (phoneUpdated) applyContactToOrder(order, extra);
     }
     return;
   }
   const locked = LOCKED.has(order.delivery_status);
-  const patch: Record<string, unknown> = { claim_type: claimType, claim_status: claimStatus, marketplace_synced_at: new Date().toISOString() };
+  const patch: Record<string, unknown> = { claim_type: claimType, claim_status: claimStatus, ...extraPatch, marketplace_synced_at: new Date().toISOString() };
   if (receiptId != null) patch.claim_receipt_id = String(receiptId);
   if (reason) patch.claim_reason = reason; // 구매처 반품신청 자동화의 사유 분기·인용용
   if (!locked) {
@@ -574,9 +635,11 @@ export async function applyClaim(
     const { error } = await supabase.from("orders").update(patch).eq("id", order.id).eq("user_id", userId).eq("delivery_status", order.delivery_status);
     if (error) { result.errors.push(`클레임 반영 실패(${order.id}): ${error.message}`); return; }
   }
+  if (phoneUpdated) applyContactToOrder(order, extra);
   result.claims.push({
     orderId: order.id, bundleNo: order.bundle_no, recipientName: order.recipient_name, productName: order.product_name,
     from: order.delivery_status, to: locked ? `${order.delivery_status}(클레임 기록만)` : to, claimType, claimStatus, reason,
+    phoneUpdated: phoneUpdated || undefined, quantity: extra?.quantity ?? undefined,
   });
   await logMarketplaceApi(supabase, {
     user_id: userId, platform, credential_id: credentialId, action: dryRun ? "claim:dry" : "claim", status: "success",
@@ -632,7 +695,17 @@ async function syncCoupangClaims(opts: SyncOptions, existing: Existing, days: nu
     else if (r.receiptStatus === "RETURNS_UNCHECKED" || r.receiptStatus === "VENDOR_WAREHOUSE_CONFIRM" || r.receiptStatus === "REQUEST_COUPANG_CHECK") { toStatus = "반품준비"; claimType = "RETURN"; }
     else if (r.receiptStatus === "RETURNS_COMPLETED") { toStatus = "반품완료"; claimType = "RETURN"; }
     if (!toStatus) continue;
-    for (const o of targets) await applyClaim(opts.supabase, opts.userId, opts.credentialId, "coupang", o, toStatus, claimType, r.receiptStatus, reason, result, dryRun, r.receiptId);
+    for (const o of targets) {
+      // 반품 신청인 안심번호(requesterPhoneNumber) — 반품 접수 시 쿠팡이 새로 발급하므로 발주서 연락처를 갱신한다. 취소는 번호 변동 없음
+      const vendorItemId = o.marketplace_product_order_no?.split("-")[1] ?? "";
+      const matched = (r.returnItems ?? []).filter((i) => !vendorItemId || String(i.vendorItemId) === vendorItemId);
+      const qty = matched.reduce((s, i) => s + (i.cancelCount ?? 0), 0) || r.cancelCountSum || null;
+      const extra: ClaimExtra = {
+        contact: claimType === "RETURN" ? { phone: r.requesterPhoneNumber, name: r.requesterName } : undefined,
+        quantity: qty,
+      };
+      await applyClaim(opts.supabase, opts.userId, opts.credentialId, "coupang", o, toStatus, claimType, r.receiptStatus, reason, result, dryRun, r.receiptId, extra);
+    }
   }
   await syncCoupangExchanges(opts, existing, days, result, dryRun);
 }
@@ -667,7 +740,28 @@ async function syncCoupangExchanges(opts: SyncOptions, existing: Existing, days:
     else if (st === "SUCCESS") to = "교환완료";
     if (!to) continue; // REJECT/CANCEL 은 발주서 상태 유지
     const reason = [x.reasonCodeText, x.reason].filter(Boolean).join(" / ");
-    for (const o of targets) await applyClaim(opts.supabase, opts.userId, opts.credentialId, "coupang", o, to, "EXCHANGE", `${st}${x.receiptStatus ? `/${x.receiptStatus}` : ""}`, reason, result, dryRun, x.exchangeId);
+    // 교환 재배송지 연락처(exchangeAddressDtoV1.deliveryMobile) — 2024-09-02부터 안심번호로 제공 (쿠팡 공지)
+    const addr = x.exchangeAddressDtoV1;
+    for (const o of targets) {
+      const vendorItemId = o.marketplace_product_order_no?.split("-")[1] ?? "";
+      const matched = (x.exchangeItemDtoV1s ?? []).filter((i) => !vendorItemId || String(i.vendorItemId) === vendorItemId);
+      const qty = matched.reduce((s, i) => s + (i.quantity ?? 0), 0) || null;
+      const extra: ClaimExtra = {
+        contact: { phone: addr?.deliveryMobile || addr?.deliveryPhone || null, name: addr?.deliveryName ?? null },
+        quantity: qty,
+      };
+      await applyClaim(opts.supabase, opts.userId, opts.credentialId, "coupang", o, to, "EXCHANGE", `${st}${x.receiptStatus ? `/${x.receiptStatus}` : ""}`, reason, result, dryRun, x.exchangeId, extra);
+      // 재배송지가 원래 배송지와 다르면 메모로만 남긴다 (주소 컬럼은 덮어쓰지 않음)
+      if (!dryRun && addr?.deliveryAddress && to === "교환준비") {
+        const full = [addr.deliveryZipCode ? `(${addr.deliveryZipCode})` : "", addr.deliveryAddress, addr.deliveryAddressDetail].filter(Boolean).join(" ");
+        const current = [o.postal_code ? `(${o.postal_code})` : "", o.address, o.address_detail].filter(Boolean).join(" ");
+        if (full && full !== current && !(o.delivery_memo ?? "").includes("교환 재배송지:")) {
+          const memo = appendMemo(o.delivery_memo, `교환 재배송지: ${full}`);
+          await opts.supabase.from("orders").update({ delivery_memo: memo }).eq("id", o.id).eq("user_id", opts.userId);
+          o.delivery_memo = memo;
+        }
+      }
+    }
   }
 }
 
@@ -687,7 +781,7 @@ async function syncNaverClaims(opts: SyncOptions, existing: Existing, days: numb
     const status = d.productOrder.productOrderStatus;
     const type = (claim.claimType ?? d.productOrder.claimType ?? "").toUpperCase();
     const cs = (claim.claimStatus ?? d.productOrder.claimStatus ?? "").toUpperCase();
-    const reason = claim.cancelReason ?? claim.returnReason ?? claim.exchangeReason;
+    const reason = claim.cancelReason ?? claim.returnReason ?? claim.exchangeReason ?? d.return?.returnReason ?? d.exchange?.exchangeReason;
     let toStatus: string | null = null;
     if (status === "CANCELED" || cs === "CANCEL_DONE") toStatus = "취소완료";
     else if (type === "CANCEL" && cs.startsWith("CANCEL_REQUEST")) toStatus = "취소요청";
@@ -695,7 +789,75 @@ async function syncNaverClaims(opts: SyncOptions, existing: Existing, days: numb
     else if (type === "EXCHANGE") toStatus = status === "EXCHANGED" || cs === "EXCHANGE_DONE" ? "교환완료" : "교환준비";
     else if (type === "ADMIN_CANCEL") toStatus = "취소완료";
     if (!toStatus) continue;
-    await applyClaim(opts.supabase, opts.userId, opts.credentialId, "smartstore", o, toStatus, type || "CANCEL", cs || status, reason, result, dryRun, claim.claimId ?? null);
+    // 반품/교환 수거지 연락처(collectAddress.tel1) 우선, 없으면 배송지 연락처 — 취소는 번호 변동 없음
+    const claimAddr = type === "RETURN" ? d.return?.collectAddress : type === "EXCHANGE" ? d.exchange?.collectAddress : undefined;
+    const contactPhone = type === "RETURN" || type === "EXCHANGE" ? (claimAddr?.tel1 || d.productOrder.shippingAddress?.tel1 || null) : null;
+    const qty = claim.requestQuantity ?? d.return?.requestQuantity ?? d.exchange?.requestQuantity ?? null;
+    const extra: ClaimExtra = { contact: contactPhone ? { phone: contactPhone, name: claimAddr?.name ?? null } : undefined, quantity: qty };
+    await applyClaim(opts.supabase, opts.userId, opts.credentialId, "smartstore", o, toStatus, type || "CANCEL", cs || status, reason, result, dryRun, claim.claimId ?? d.return?.claimId ?? d.exchange?.claimId ?? null, extra);
+    // 교환 재배송지가 배송지와 다르면 메모로만 남긴다 (주소 컬럼은 덮어쓰지 않음)
+    const re = d.exchange?.reDeliveryAddress;
+    if (!dryRun && type === "EXCHANGE" && toStatus === "교환준비" && re?.baseAddress) {
+      const full = [re.zipCode ? `(${re.zipCode})` : "", re.baseAddress, sanitizeAddressDetail(re.detailedAddress ?? "")].filter(Boolean).join(" ");
+      const current = [o.postal_code ? `(${o.postal_code})` : "", o.address, o.address_detail].filter(Boolean).join(" ");
+      if (full !== current && !(o.delivery_memo ?? "").includes("교환 재배송지:")) {
+        const memo = appendMemo(o.delivery_memo, `교환 재배송지: ${full}`);
+        await opts.supabase.from("orders").update({ delivery_memo: memo }).eq("id", o.id).eq("user_id", opts.userId);
+        o.delivery_memo = memo;
+      }
+    }
+  }
+}
+
+/**
+ * 스마트스토어 구매자 배송지 변경(DELIVERY_ADDRESS_CHANGED) 반영 — 발송 전까지 구매자가 바꿀 수 있어
+ * 자동구매가 옛 주소로 나가지 않도록 발주서 배송지·연락처를 최신으로 맞춘다.
+ * 이미 구매(발주)한 행은 컬럼은 갱신하되 메모에 경고를 남기고 알림에 따로 표시한다 (구매처 배송지는 사람이 바꿔야 함).
+ */
+async function syncNaverAddressChanges(opts: SyncOptions, existing: Existing, days: number, result: SyncResult, dryRun: boolean) {
+  const client = opts.smartstore!;
+  let ids: string[] = [];
+  try { ids = await fetchNaverChangedIds(client, days, "DELIVERY_ADDRESS_CHANGED"); }
+  catch (err) { result.errors.push(err instanceof Error ? err.message : String(err)); return; }
+  const targets = ids.filter((id) => existing.byProductOrderNo.has(id));
+  if (targets.length === 0) return;
+  const details = await fetchNaverDetails(client, targets);
+  for (const d of details) {
+    const o = existing.byProductOrderNo.get(d.productOrder?.productOrderId ?? "");
+    if (!o || TERMINAL.has(o.delivery_status)) continue;
+    const sa = d.productOrder.shippingAddress;
+    if (!sa) continue;
+    const next = {
+      recipient_name: sa.name ?? null,
+      recipient_phone: sa.tel1 ?? null,
+      postal_code: sa.zipCode ?? null,
+      address: sa.baseAddress ?? null,
+      address_detail: sanitizeAddressDetail(sa.detailedAddress ?? "") || null,
+      delivery_memo: d.productOrder.shippingMemo || null,
+    };
+    const changed = (Object.keys(next) as Array<keyof typeof next>).filter((k) => {
+      if (k === "delivery_memo") return false; // 메모는 아래에서 별도 처리 (경고 문구가 붙어 있을 수 있음)
+      return (next[k] ?? "") !== (o[k] ?? "");
+    });
+    if (changed.length === 0) continue;
+    const afterPurchase = !!(o.purchase_order_no?.trim() || o.purchased_at);
+    const patch: Record<string, unknown> = { marketplace_synced_at: new Date().toISOString() };
+    for (const k of changed) patch[k] = next[k];
+    if (afterPurchase && !(o.delivery_memo ?? "").includes("구매 후 배송지 변경")) {
+      patch.delivery_memo = appendMemo(o.delivery_memo, "⚠ 구매 후 배송지 변경(마켓) — 구매처 배송지 확인 필요");
+    }
+    if (!dryRun) {
+      const { error } = await opts.supabase.from("orders").update(patch).eq("id", o.id).eq("user_id", opts.userId);
+      if (error) { result.errors.push(`배송지 변경 반영 실패(${o.id}): ${error.message}`); continue; }
+      Object.assign(o, patch);
+    }
+    result.addressChanges.push({ orderId: o.id, recipientName: next.recipient_name ?? o.recipient_name, productName: o.product_name, afterPurchase, changedFields: changed });
+    await logMarketplaceApi(opts.supabase, {
+      user_id: opts.userId, platform: "smartstore", credential_id: opts.credentialId, action: dryRun ? "address-change:dry" : "address-change", status: "success",
+      product_name: o.product_name, target_id: o.marketplace_product_order_no ?? o.marketplace_order_no,
+      previous_value: null, new_value: changed.join(","), error_message: null,
+      response_payload: { afterPurchase, changed: Object.fromEntries(changed.map((k) => [k, next[k]])) },
+    });
   }
 }
 

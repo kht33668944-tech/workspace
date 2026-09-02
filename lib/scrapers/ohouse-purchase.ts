@@ -1,7 +1,7 @@
 import { type Page, type BrowserContext } from "playwright";
 import { launchBrowser } from "./browser";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { PurchaseOrderInfo, PurchaseResult } from "./types";
+import type { PurchaseOrderInfo, PurchaseResult, PurchasedUnit, UnitPurchasedCallback } from "./types";
 import { sanitizeAddressDetail } from "./types";
 import { loadSession, saveSession, loadFileSession, saveFileSession } from "./session-manager";
 import { formatAutomationError } from "./error-messages";
@@ -51,7 +51,8 @@ export async function purchaseOhouse(
   abortSignal?: AbortSignal,
   paymentPin?: string,
   naverLoginId?: string,
-  naverLoginPw?: string
+  naverLoginPw?: string,
+  onUnitPurchased?: UnitPurchasedCallback
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
@@ -143,7 +144,8 @@ export async function purchaseOhouse(
       const totalQty = Math.max(order.quantity, 1);
       onProgress?.(order.orderId, "processing", "구매 진행 중...");
 
-      let lastOrderNo = "";
+      // 단위 구매(결제 1건) 목록 — 대표 주문번호는 첫 번째 단위
+      const units: PurchasedUnit[] = [];
       let lastPaymentMethod: string | undefined;
       let totalCost = 0;
       let costExtractedCount = 0;
@@ -161,13 +163,21 @@ export async function purchaseOhouse(
             page, activeContext, singleOrder, q > 1, onProgress, paymentPin, naverLoginId, naverLoginPw
           );
 
-          lastOrderNo = purchaseOrderNo;
+          const unit: PurchasedUnit = { orderNo: purchaseOrderNo, cost, paymentMethod };
+          units.push(unit);
           if (paymentMethod) lastPaymentMethod = paymentMethod;
           if (cost) { totalCost += cost; costExtractedCount++; }
           successCount++;
 
           if (totalQty > 1) {
             console.log(`[ohouse-purchase] ${q}/${totalQty}번째 구매 성공: ${purchaseOrderNo} (단가: ${cost ?? "미확인"})`);
+          }
+          if (onUnitPurchased) {
+            try {
+              await onUnitPurchased(order.orderId, unit, q, totalQty);
+            } catch (cbErr) {
+              console.warn(`[ohouse-purchase] onUnitPurchased 콜백 오류 (${order.orderId} ${q}/${totalQty}):`, cbErr instanceof Error ? cbErr.message : String(cbErr));
+            }
           }
         }
 
@@ -178,24 +188,27 @@ export async function purchaseOhouse(
             ? Math.round(totalCost / costExtractedCount) * totalQty
             : totalCost;
         }
-        result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod });
+        const repOrderNo = units[0]?.orderNo ?? "";
+        result.success.push({ orderId: order.orderId, purchaseOrderNo: repOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod, units: [...units] });
         onProgress?.(order.orderId, "success",
-          `주문번호: ${lastOrderNo}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`,
-          lastOrderNo
+          `주문번호: ${repOrderNo}${units.length > 1 ? ` 외 ${units.length - 1}건` : ""}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`,
+          repOrderNo
         );
-        console.log(`[ohouse-purchase] 주문 성공: ${order.orderId} → ${lastOrderNo} (총 원가: ${finalCost ?? "미확인"}, ${totalQty}개)`);
+        console.log(`[ohouse-purchase] 주문 성공: ${order.orderId} → ${units.map((u) => u.orderNo).join(",")} (총 원가: ${finalCost ?? "미확인"}, ${totalQty}개)`);
       } catch (err) {
         const reason = formatAutomationError(err);
+        const repOrderNo = units[0]?.orderNo ?? "";
         const partialInfo = successCount > 0 && totalQty > 1
-          ? ` (${successCount}/${totalQty}개 구매 후 실패${lastOrderNo ? `, 구매된 주문번호: ${lastOrderNo}` : ""})`
+          ? ` (${successCount}/${totalQty}개 구매 후 실패${units.length ? `, 구매된 주문번호: ${units.map((u) => u.orderNo).join(",")}` : ""})`
           : "";
         const failMsg = `${reason}${partialInfo}`;
         result.failed.push({
           orderId: order.orderId,
           reason: failMsg,
-          purchaseOrderNo: lastOrderNo || undefined,
+          purchaseOrderNo: repOrderNo || undefined,
           cost: totalCost > 0 ? totalCost : undefined,
           paymentMethod: lastPaymentMethod,
+          units: units.length ? [...units] : undefined,
         });
         onProgress?.(order.orderId, "failed", failMsg);
         console.error(`[ohouse-purchase] 주문 실패: ${order.orderId}`, failMsg, err instanceof Error ? err.message : String(err));

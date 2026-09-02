@@ -10,6 +10,7 @@ async function loadXLSX() {
 }
 import { EXCEL_COLUMN_MAP, LEGACY_EXCEL_COLUMN_MAP } from "./constants";
 import { sanitizeAddressDetail } from "./scrapers/types";
+import { splitOrderNos } from "./purchase-orders";
 import type { OrderInsert } from "@/types/database";
 
 const MAX_EXCEL_FILE_SIZE = 25 * 1024 * 1024;
@@ -568,6 +569,22 @@ function mapRowToOrder(row: RawRow, headerMap: Record<string, string>): OrderIns
   if (mapped.purchase_url === undefined) mapped.purchase_url = null;
   if (mapped.purchase_detail_url === undefined) mapped.purchase_detail_url = null;
   if (mapped.purchase_order_no === undefined) mapped.purchase_order_no = null;
+  // 주문번호 칸에 `A, B` 처럼 여러 개면 구매 주문 목록으로 분리 (수량 1씩, 수동) — 대표는 첫 번째
+  if (typeof mapped.purchase_order_no === "string") {
+    const nos = splitOrderNos(mapped.purchase_order_no);
+    if (nos.length > 1) {
+      mapped.purchase_order_no = nos[0];
+      mapped.purchase_orders = nos.map((no, i) => ({
+        order_no: no,
+        pay_no: null,
+        detail_url: i === 0 ? ((mapped.purchase_detail_url as string | null) ?? null) : null,
+        quantity: 1,
+        source: "manual" as const,
+      }));
+    } else if (nos.length === 1) {
+      mapped.purchase_order_no = nos[0];
+    }
+  }
   if (mapped.courier === undefined) mapped.courier = null;
   if (mapped.tracking_no === undefined) mapped.tracking_no = null;
   if (mapped.delivery_status === undefined) mapped.delivery_status = "구매대기";

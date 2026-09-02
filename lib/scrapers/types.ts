@@ -65,9 +65,21 @@ export interface PurchaseOrderInfo {
   maxPaymentPerUnit?: number; // 회당 결제 한도(원) = 정산예정÷수량 + 허용적자. 미지정 시 최종 결제금액 검사 생략
 }
 
+/** 수량 루프 1회(= 구매처 결제 1건)의 결과. 수량 N개 자동구매는 N건이 생긴다 */
+export interface PurchasedUnit {
+  orderNo: string;
+  payNo?: string;
+  cost?: number;
+  paymentMethod?: string;
+}
+
+/** 단위 구매가 끝날 때마다 호출 — 발주서 purchase_orders 에 즉시 누적해 중간 실패에도 산 만큼은 남긴다 */
+export type UnitPurchasedCallback = (orderId: string, unit: PurchasedUnit, index: number, total: number) => Promise<void> | void;
+
 export interface PurchaseResult {
-  success: { orderId: string; purchaseOrderNo: string; cost?: number; paymentMethod?: string; payNo?: string }[];
-  failed: { orderId: string; reason: string; purchaseOrderNo?: string; cost?: number; paymentMethod?: string; payNo?: string }[];
+  // purchaseOrderNo/payNo = 대표(첫 번째 단위) 값. units 에 전체 단위가 순서대로 들어 있다
+  success: { orderId: string; purchaseOrderNo: string; cost?: number; paymentMethod?: string; payNo?: string; units?: PurchasedUnit[] }[];
+  failed: { orderId: string; reason: string; purchaseOrderNo?: string; cost?: number; paymentMethod?: string; payNo?: string; units?: PurchasedUnit[] }[];
 }
 
 export interface AutoPurchaseRequest {

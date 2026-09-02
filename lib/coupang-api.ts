@@ -76,6 +76,13 @@ export interface CoupangReturnRequest {
   cancelReasonCategory2?: string;
   reasonCode?: string;
   reasonCodeText?: string;
+  // 반품 신청인 — 반품 접수 시 쿠팡이 새로 발급한 안심번호(requesterPhoneNumber). 실번호는 보통 null (공식 문서)
+  requesterName?: string;
+  requesterPhoneNumber?: string;
+  requesterRealPhoneNumber?: string | null;
+  requesterAddress?: string;
+  requesterAddressDetail?: string;
+  requesterZipCode?: string;
 }
 
 export interface CoupangInvoiceDto {
@@ -113,6 +120,16 @@ export interface CoupangExchangeRequest {
   exchangeItemDtoV1s?: Array<{ vendorItemId: number; quantity: number; originalShipmentBoxId?: number; targetShipmentBoxId?: number; vendorItemName?: string }>;
   returnDeliveryDtos?: Array<{ deliveryCompanyCode?: string; deliveryInvoiceNo?: string }>;
   deliveryInvoiceGroupDtos?: Array<{ shipmentBoxId?: number; deliveryCompanyCode?: string; invoiceNumber?: string }>;
+  // 교환 재배송지 — deliveryMobile 은 2024-09-02부터 안심번호 (쿠팡 공지 "교환요청 목록 조회 API의 안심번호 제공 안내")
+  exchangeAddressDtoV1?: {
+    deliveryName?: string;
+    deliveryPhone?: string;
+    deliveryMobile?: string;
+    deliveryZipCode?: string;
+    deliveryAddress?: string;
+    deliveryAddressDetail?: string;
+    [key: string]: unknown;
+  };
 }
 
 /** 쿠팡 판매자 취소 중분류 코드 (대분류는 항상 CANERR) */

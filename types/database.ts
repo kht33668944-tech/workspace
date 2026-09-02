@@ -54,11 +54,33 @@ export interface Order {
   claim_receipt_id?: string | null;
   // 구매처 주문상세 링크 (add_purchase_detail_url 마이그레이션, 자동구매 시 자동 입력)
   purchase_detail_url?: string | null;
+  // 구매처 반품신청 자동화 (20260902 마이그레이션)
+  claim_reason?: string | null;
+  purchase_return_requested_at?: string | null;
+  // 구매 주문 목록 + 클레임 연락처/수량 (20260903 마이그레이션)
+  // 비어 있으면 대표 컬럼(purchase_order_no 등) 1건으로 간주 — lib/purchase-orders.ts getPurchaseOrders 사용
+  purchase_orders?: PurchaseOrderEntry[];
+  claim_quantity?: number | null;
+  claim_contact_updated_at?: string | null;
   created_at: string;
   updated_at: string;
   purchase_log_order_nos?: string[];
   purchase_duplicate_level?: "danger" | "warning" | null;
   purchase_duplicate_message?: string | null;
+}
+
+/** 발주서 한 행에 딸린 구매처 주문 1건 (orders.purchase_orders 엔트리) */
+export interface PurchaseOrderEntry {
+  order_no: string;                    // 구매처 주문번호 (지마켓 orderNo / 오늘의집 orderNo)
+  pay_no?: string | null;              // 지마켓 결제번호 (상세링크 키)
+  detail_url?: string | null;          // purchaseDetailUrl() 결과
+  quantity: number;                    // 이 주문에 담긴 수량 (수동 묶음구매는 2 이상)
+  courier?: string | null;
+  tracking_no?: string | null;
+  purchased_at?: string | null;
+  return_requested_at?: string | null; // 지마켓 반품신청 완료 시각 (엔트리 단위)
+  return_status?: "접수" | "완료" | null; // 반품 진행상태 추적 결과
+  source: "auto" | "manual";
 }
 
 export interface ConsultationLog {

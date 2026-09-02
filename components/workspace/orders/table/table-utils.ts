@@ -2,6 +2,7 @@ import React from "react";
 import { MARKETPLACES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
 import { formatKoreanDateTime } from "@/lib/date-utils";
 import type { Order } from "@/types/database";
+import { parsePurchaseOrders } from "@/lib/purchase-orders";
 
 // 안전한 사칙연산 파서 (Function/eval 대체)
 function safeMathEval(expr: string): number {
@@ -132,7 +133,7 @@ export function getTrackingUrl(courier: string | null, trackingNo: string): stri
   return urlFn ? urlFn(trackingNo) : null;
 }
 
-export function formatCell(key: string, val: unknown, order?: { courier?: string | null }): React.ReactNode {
+export function formatCell(key: string, val: unknown, order?: { courier?: string | null; purchase_orders?: unknown }): React.ReactNode {
   if (val == null || val === "") return React.createElement("span", { className: "text-[var(--text-disabled)] text-xs" }, "-");
   if (key === "delivery_status") {
     const color = DELIVERY_STATUS_COLORS[String(val)] || "bg-gray-500/20 text-gray-400";
@@ -170,6 +171,14 @@ export function formatCell(key: string, val: unknown, order?: { courier?: string
     }, url.replace(/^https?:\/\//, "").slice(0, 30) + "...");
   }
   if (NUMERIC_KEYS.has(key)) return React.createElement("span", { className: "text-[var(--text-secondary)] text-xs" }, Number(val).toLocaleString());
+  if (key === "purchase_order_no" && order) {
+    // 수량 N개 자동구매 = 구매 주문 N건 — 대표 주문번호 뒤에 "외 N건" 표시 (전체 목록은 사이드패널)
+    const entries = parsePurchaseOrders(order.purchase_orders);
+    if (entries.length > 1) {
+      return React.createElement("span", { title: entries.map((e) => `${e.order_no} ×${e.quantity}`).join("\n"), className: "text-[var(--text-secondary)] text-xs truncate block max-w-full" },
+        String(val), React.createElement("span", { className: "ml-1 text-[var(--text-muted)]" }, `외 ${entries.length - 1}건`));
+    }
+  }
   return React.createElement("span", { title: String(val), className: "text-[var(--text-secondary)] text-xs truncate block max-w-full" }, String(val));
 }
 

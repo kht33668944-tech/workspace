@@ -8,6 +8,12 @@ import type { Order, PurchaseCredential } from "@/types/database";
 import { PLATFORM_LABELS } from "@/types/database";
 import type { ScrapeResult, TrackingInfo } from "@/lib/scrapers/types";
 import { generateOrderExcel, generatePlayAutoTrackingExcel, arrayBufferToBase64, downloadExcel } from "@/lib/excel-export";
+import { allOrderNos, getPurchaseOrders } from "@/lib/purchase-orders";
+
+/** 행에서 아직 운송장이 없는 구매처 주문번호들 */
+function pendingOrderNos(o: Order): string[] {
+  return allOrderNos(getPurchaseOrders(o).filter((e) => !e.tracking_no?.trim()));
+}
 
 interface TrackingCollectModalProps {
   orders: Order[];
@@ -85,11 +91,10 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
   // 언마운트 시 진행 중 수집 중단 (post-unmount setState 방지)
   useEffect(() => () => { abortControllerRef.current?.abort(); }, []);
 
-  // 운송장 미수집 주문 (플랫폼 무관)
+  // 운송장 미수집 주문 (플랫폼 무관) — 구매 주문 목록 중 운송장 없는 엔트리가 하나라도 있으면 대상
+  // (수량 N개 자동구매는 주문 N건이라 대표 운송장이 있어도 나머지 주문 운송장을 따로 수집한다)
   const pendingOrders = useMemo(() => {
-    return orders.filter(
-      (o) => o.purchase_order_no && (!o.tracking_no || o.tracking_no.trim() === "")
-    );
+    return orders.filter((o) => o.purchase_order_no && pendingOrderNos(o).length > 0);
   }, [orders]);
 
   // 계정별 수집 대상: purchase_id와 credential.login_id를 매칭
@@ -178,7 +183,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       if (shouldStopRef.current) {
         // 남은 그룹의 주문을 cancelled로 처리
         for (let j = i; j < autoCollectGroups.length; j++) {
-          const remaining = autoCollectGroups[j].targets.map((o) => o.purchase_order_no!);
+          const remaining = [...new Set(autoCollectGroups[j].targets.flatMap(pendingOrderNos))];
           allResults.push({
             success: [],
             failed: remaining.map((no) => ({ orderNo: no, reason: "사용자가 수집을 중단했습니다." })),
@@ -198,7 +203,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       abortControllerRef.current = controller;
 
       try {
-        const orderNos = targets.map((o) => o.purchase_order_no!);
+        const orderNos = [...new Set(targets.flatMap(pendingOrderNos))];
         const res = await fetch("/api/orders/collect-tracking", {
           method: "POST",
           headers: {
@@ -222,7 +227,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
           });
         }
       } catch (err) {
-        const orderNos = targets.map((o) => o.purchase_order_no!);
+        const orderNos = [...new Set(targets.flatMap(pendingOrderNos))];
         if (err instanceof DOMException && err.name === "AbortError") {
           setWasCancelled(true);
           allResults.push({
@@ -306,7 +311,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     abortControllerRef.current = controller;
 
     try {
-      const orderNos = manualTargets.map((o) => o.purchase_order_no!);
+      const orderNos = [...new Set(manualTargets.flatMap(pendingOrderNos))];
       const res = await fetch("/api/orders/collect-tracking", {
         method: "POST",
         headers: {
@@ -370,13 +375,18 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
   // 수집 성공한 주문 목록 (원본 Order 객체에 수집된 운송장 반영)
   const collectedOrders = useMemo(() => {
     if (!mergedResult?.success.length) return [];
-    return mergedResult.success
+    const list = mergedResult.success
       .map((t: TrackingInfo) => {
-        const order = orders.find((o) => o.purchase_order_no === t.orderNo);
+        const order = orders.find((o) => o.purchase_order_no === t.orderNo) ?? orders.find((o) => allOrderNos(getPurchaseOrders(o)).includes(t.orderNo));
         if (!order) return null;
+        // 대표 운송장은 첫 수집분 하나 — 이미 있으면 유지하고, 없을 때만 이번 운송장을 대표로 보여준다
+        if (order.tracking_no?.trim() && order.purchase_order_no !== t.orderNo) return { ...order, delivery_status: "배송완료" };
         return { ...order, courier: t.courier, tracking_no: t.trackingNo, delivery_status: "배송완료" };
       })
       .filter((o) => o !== null) as Order[];
+    // 한 행의 주문 여러 건이 수집돼도 발주서 행은 한 번만
+    const seen = new Set<string>();
+    return list.filter((o) => (seen.has(o.id) ? false : (seen.add(o.id), true)));
   }, [mergedResult, orders]);
 
   // 엑셀 내보내기 + 보관함 자동 저장 (단일 양식)

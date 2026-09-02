@@ -131,6 +131,18 @@ export interface NaverProductOrderDetail {
   };
   order: { orderId: string; ordererName?: string; ordererTel?: string; orderDate?: string; paymentDate?: string; paymentMeans?: string };
   currentClaim?: { claimType?: string; claimStatus?: string; cancelReason?: string; cancelDetailedReason?: string; returnReason?: string; exchangeReason?: string; requestQuantity?: number; requestDate?: string; claimId?: string };
+  // 반품/교환 상세 — collectAddress 는 수거지(구매자) 연락처, reDeliveryAddress 는 교환 재배송지
+  return?: { claimId?: string; claimStatus?: string; returnReason?: string; requestQuantity?: number; collectAddress?: NaverAddress; [key: string]: unknown };
+  exchange?: { claimId?: string; claimStatus?: string; exchangeReason?: string; requestQuantity?: number; collectAddress?: NaverAddress; reDeliveryAddress?: NaverAddress; [key: string]: unknown };
+}
+
+export interface NaverAddress {
+  name?: string;
+  tel1?: string;
+  tel2?: string;
+  zipCode?: string;
+  baseAddress?: string;
+  detailedAddress?: string;
 }
 
 /** 판매자 취소 사유 코드 (판매자 귀책) */
