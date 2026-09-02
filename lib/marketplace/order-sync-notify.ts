@@ -8,6 +8,7 @@ import { INQUIRY_TYPE_LABEL } from "@/types/database";
 import type { ShipResult } from "@/lib/marketplace/order-ship";
 import type { CollectAllResult } from "@/lib/tracking/collect-all";
 import type { EsmExportResult } from "@/lib/tracking/esm-export";
+import { buildTrackingNotification, shipPlatformLabel, type TrackingShipItem } from "@/lib/tracking-notification";
 
 const LABEL: Record<string, string> = { coupang: "쿠팡", smartstore: "스토어", gmarket: "지마켓", auction: "옥션", ohouse: "오늘의집" };
 
@@ -45,6 +46,22 @@ export async function notifySyncResults(results: SyncResult[], trigger: "manual"
   const failed = errors.length > 0 && newTotal === 0 && cancelReq.length === 0;
   const lines: string[] = [];
 
+  // 신규 발주가 가장 중요 — 맨 위에 건별(판매처 · 수취인 · 상품 수량 · 매출)로 나열하고 총 매출을 붙인다
+  if (newTotal > 0) {
+    const per = results.map((r) => [LABEL[r.platform], r.newOrders.length] as [string, number]);
+    lines.push(`🆕 신규 ${newTotal}건 등록·발주확인 완료 (${joinCounts(per)})`);
+    const MAX_NEW = 20;
+    const all = results.flatMap((r) => r.newOrders.map((o) => ({ platform: LABEL[r.platform] ?? r.platform, ...o })));
+    for (const o of all.slice(0, MAX_NEW)) {
+      const qty = Math.max(Number(o.quantity) || 1, 1);
+      lines.push(`▸ ${o.platform} · ${o.recipientName ?? "-"} · ${o.productName ?? "-"} ${qty}개 · ${Math.round(Number(o.revenue) || 0).toLocaleString()}원`);
+    }
+    if (all.length > MAX_NEW) lines.push(`  …외 ${all.length - MAX_NEW}건`);
+    const revenue = all.reduce((n, o) => n + (Number(o.revenue) || 0), 0);
+    lines.push(`💰 총 매출 ${Math.round(revenue).toLocaleString()}원`);
+    lines.push("");
+  }
+
   if (cancelReq.length > 0) {
     lines.push(`👉 취소요청 ${cancelReq.length}건 → 사이트 '주문 수집' 모달에서 승인/거절`);
     for (const c of cancelReq.slice(0, 6)) lines.push(`   • ${c.recipientName ?? "-"} · ${c.productName ?? "-"}${c.reason ? ` (${c.reason})` : ""}`);
@@ -58,12 +75,8 @@ export async function notifySyncResults(results: SyncResult[], trigger: "manual"
     lines.push(`👉 오류 ${errors.length}건`);
     for (const e of errors.slice(0, 3)) lines.push(`   • ${e.slice(0, 140)}`);
   }
-  if (lines.length > 0) lines.push("");
+  if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("");
 
-  if (newTotal > 0) {
-    const per = results.map((r) => [LABEL[r.platform], r.newOrders.length] as [string, number]);
-    lines.push(`신규 ${newTotal}건 등록·발주확인 완료 (${joinCounts(per)})`);
-  }
   if (autoOk.length > 0) {
     lines.push(`취소요청 ${autoOk.length}건 자동 승인 (운송장 없음·구매 전)`);
     for (const a of autoOk.slice(0, 6)) lines.push(`   • ${a.recipientName ?? "-"} · ${a.productName ?? "-"}`);
@@ -94,48 +107,32 @@ export async function notifySyncResults(results: SyncResult[], trigger: "manual"
 
 /** 운송장 수집 + 송장 전송 + ESM 엑셀 결과 (#운송장수집-자동화) */
 export async function notifyShipResults(results: ShipResult[], trigger: "manual" | "scheduler", extra: { collect?: CollectAllResult | null; esm?: EsmExportResult | null } = {}) {
-  const sent = results.reduce((n, r) => n + r.sent, 0);
-  const failedRows = results.flatMap((r) => r.rows.filter((x) => x.status === "failed"));
-  const errors = results.flatMap((r) => r.errors);
-  const collected = extra.collect?.groups.reduce((n, g) => n + g.applied, 0) ?? 0;
-  const collectErrors = extra.collect?.groups.filter((g) => g.error) ?? [];
-  const notCollected = extra.collect ? extra.collect.groups.reduce((n, g) => n + g.failed + g.notFound, 0) : 0;
-  const esmCount = extra.esm?.count ?? 0;
-  if (sent === 0 && failedRows.length === 0 && errors.length === 0 && collected === 0 && collectErrors.length === 0 && esmCount === 0) return;
-
-  const todo = (esmCount > 0 ? 1 : 0) + collectErrors.length + (failedRows.length > 0 ? 1 : 0);
-  const failed = (collectErrors.length > 0 || errors.length > 0) && sent === 0 && collected === 0;
-  const lines: string[] = [];
-
-  if (esmCount > 0) {
-    lines.push(`👉 ESM 운송장 ${esmCount}건 엑셀 저장 → 플레이오토에 업로드`);
-    lines.push(`   ${extra.esm?.file ?? ""}`);
-  }
-  for (const g of collectErrors) lines.push(`👉 ${LABEL[g.platform] ?? g.platform} 수집 실패 (${g.loginId}) — ${g.error?.slice(0, 100)}`);
-  if (failedRows.length > 0) {
-    lines.push(`👉 송장 전송 실패 ${failedRows.length}건 — 사이트 '송장 전송 (API)'에서 사유 확인`);
-    for (const row of failedRows.slice(0, 4)) lines.push(`   • ${row.recipientName ?? "-"} · ${row.productName ?? "-"}: ${row.message.slice(0, 80)}`);
-  }
-  for (const e of errors.slice(0, 3)) lines.push(`👉 오류: ${e.slice(0, 140)}`);
-  if (lines.length > 0) lines.push("");
-
-  const sentPer = joinCounts(results.map((r) => [LABEL[r.platform], r.sent + r.alreadySent] as [string, number]));
-  if (extra.collect) {
-    lines.push(`운송장 수집 ${collected}건${sent > 0 ? ` → ${sentPer} 마켓 전송 완료` : ""}`);
-    if (notCollected > 0) lines.push(`미수집 ${notCollected}건은 다음 회차에 재시도 (구매처 발송 전)`);
-  } else if (sent > 0) {
-    lines.push(`${sentPer} 송장 전송 완료`);
-  }
-  if (extra.esm && esmCount === 0 && (collected > 0 || sent > 0)) lines.push("ESM 새 운송장 없음");
-  if (results.some((r) => r.dryRun)) lines.push("(DRY RUN — 실제 반영 없음)");
-
-  const status: AutomationNotifyStatus = failed ? "failed" : todo > 0 ? "partial" : "success";
-  await notifyAutomationResult({
-    channel: "tracking",
-    title: `🚚 운송장·송장${trigger === "manual" ? "(수동)" : ""} ${headline(todo, failed)}`,
-    status,
-    summary: lines.join("\n").trim(),
+  // 크론·수동 모달·송장 전송 버튼이 같은 건별 포맷을 쓴다 — lib/tracking-notification.ts
+  const ship: TrackingShipItem[] = results.flatMap((r) => r.rows.map((row) => ({
+    platform: shipPlatformLabel(r.platform),
+    recipientName: row.recipientName,
+    productName: row.productName,
+    courier: row.courier,
+    trackingNo: row.trackingNo,
+    status: row.status,
+    message: row.message,
+  })));
+  const errors = [
+    ...results.flatMap((r) => r.errors),
+    ...(extra.collect?.groups.filter((g) => g.error).map((g) => `${LABEL[g.platform] ?? g.platform} 수집 실패 (${g.loginId}) — ${g.error}`) ?? []),
+    ...(extra.collect?.applyErrors ?? []),
+  ];
+  const payload = buildTrackingNotification({
+    trigger,
+    dryRun: results.some((r) => r.dryRun),
+    orders: extra.collect ? extra.collect.orders : undefined,
+    unmatched: extra.collect?.unmatched ?? 0,
+    ship: results.length > 0 ? ship : undefined,
+    esm: extra.esm ? { count: extra.esm.count, file: extra.esm.file } : null,
+    errors,
   });
+  if (!payload) return;
+  await notifyAutomationResult(payload);
 }
 
 /** 문의 동기화 결과 (#문의-자동화). 새 문의·자동답변·오류 없으면 보내지 않는다 */

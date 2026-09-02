@@ -14,6 +14,7 @@ import { randomUUID } from "crypto";
 import { CLAIM_STATUSES } from "@/lib/constants";
 import type { ScrapeResult } from "@/lib/scrapers/types";
 import { parsePurchaseOrders, upsertEntry } from "@/lib/purchase-orders";
+import type { TrackingOrderRow } from "@/lib/tracking-notification";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = SupabaseClient<any, any, any>;
@@ -140,4 +141,31 @@ export async function saveTrackingLogs(
     if (error) console.warn("[tracking-apply] 운송장 로그 저장 실패:", error.message);
   }
   return batchId;
+}
+
+/** 구매처 주문번호(대표 또는 목록 엔트리)로 발주서 행을 찾는다 — 디스코드 건별 알림용 (collect-tracking route 직접 호출 시) */
+export async function loadTrackingOrderRows(supabase: AnySupabase, orderNos: string[], userId?: string): Promise<TrackingOrderRow[]> {
+  const nos = [...new Set(orderNos.map((n) => n.trim()).filter(Boolean))];
+  if (nos.length === 0) return [];
+  const SELECT = "id, marketplace, recipient_name, product_name, quantity, purchase_order_no, purchase_orders";
+  const byId = new Map<string, TrackingOrderRow>();
+  let byRep = supabase.from("orders").select(SELECT).in("purchase_order_no", nos);
+  if (userId) byRep = byRep.eq("user_id", userId);
+  const { data: repRows, error } = await byRep;
+  if (error) { console.warn("[tracking-apply] 알림용 발주서 조회 실패:", error.message); return []; }
+  for (const r of (repRows ?? []) as TrackingOrderRow[]) byId.set(r.id, r);
+  // 목록 엔트리로만 찾히는 주문번호 (수량 N개 자동구매의 2번째 이후 주문)
+  const found = new Set([...byId.values()].flatMap((r) => allOrderNosOf(r)));
+  for (const no of nos.filter((n) => !found.has(n))) {
+    let q = supabase.from("orders").select(SELECT).contains("purchase_orders", JSON.stringify([{ order_no: no }])).limit(1);
+    if (userId) q = q.eq("user_id", userId);
+    const { data } = await q;
+    const r = ((data ?? []) as TrackingOrderRow[])[0];
+    if (r) byId.set(r.id, r);
+  }
+  return [...byId.values()];
+}
+
+function allOrderNosOf(row: TrackingOrderRow): string[] {
+  return parsePurchaseOrders(row.purchase_orders).map((e) => e.order_no).concat(row.purchase_order_no ? [row.purchase_order_no] : []);
 }

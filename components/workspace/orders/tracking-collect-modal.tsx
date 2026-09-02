@@ -9,6 +9,16 @@ import { PLATFORM_LABELS } from "@/types/database";
 import type { ScrapeResult, TrackingInfo } from "@/lib/scrapers/types";
 import { generateOrderExcel, generatePlayAutoTrackingExcel, arrayBufferToBase64, downloadExcel } from "@/lib/excel-export";
 import { allOrderNos, getPurchaseOrders } from "@/lib/purchase-orders";
+import { buildTrackingNotification, groupScrapeResultsByOrder, shipPlatformLabel, type TrackingShipItem } from "@/lib/tracking-notification";
+
+/** 수집 후처리(송장 전송 + ESM 엑셀) API 응답 */
+interface PostCollectResponse {
+  dryRun?: boolean;
+  results?: Array<{ platform: string; sent: number; alreadySent: number; failed: number; rows: Array<{ status: "success" | "already" | "failed" | "dry"; recipientName: string | null; productName: string | null; courier: string | null; trackingNo: string | null; message: string }> }>;
+  esm?: { count: number; file: string | null } | null;
+  errors?: string[];
+  error?: string;
+}
 
 /** 행에서 아직 운송장이 없는 구매처 주문번호들 */
 function pendingOrderNos(o: Order): string[] {
@@ -175,8 +185,6 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     const allResults: ScrapeResult[] = [];
     // 여러 계정 수집을 하나의 활동로그 배치로 묶기 위한 공유 batchId
     const sharedBatchId = crypto.randomUUID();
-    let totalApplied = 0;
-    const platformSet = new Set<Platform>();
 
     for (let i = 0; i < autoCollectGroups.length; i++) {
       // 그룹 간 중단 체크
@@ -194,7 +202,6 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       }
 
       const { credential, platform: p, targets } = autoCollectGroups[i];
-      platformSet.add(p);
       const label = credential.label || PLATFORM_LABELS[p];
       setProgress(`[${i + 1}/${autoCollectGroups.length}] ${label} 수집 중...`);
       setProgressDetail(`${targets.length}건 처리 중`);
@@ -218,7 +225,6 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
         const data = await res.json();
         if (res.ok) {
           allResults.push(data as ScrapeResult);
-          totalApplied += typeof data.appliedCount === "number" ? data.appliedCount : 0;
         } else {
           allResults.push({
             success: [],
@@ -248,40 +254,30 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
     setResults(allResults);
     setStep("result");
     setIsStopping(false); // 중단 버튼 상태 복원 — "중단 중..." 고착 방지
-    void runPostCollect(allResults.reduce((n, r) => n + r.success.length, 0));
+    // 후처리(송장 전송·ESM)까지 끝난 뒤 수집+전송을 합쳐 디스코드 1회 발송 (개별 계정·후처리 알림은 서버에서 억제됨)
+    void runPostCollect(allResults, shouldStopRef.current);
+  };
 
-    // 모든 계정 수집 완료 후 합산 결과로 디스코드 1회 발송 (개별 계정 알림은 서버에서 억제됨)
-    const successCount = allResults.reduce((sum, r) => sum + r.success.length, 0);
-    const failedCount = allResults.reduce((sum, r) => sum + r.failed.length, 0);
-    const notFoundCount = allResults.reduce((sum, r) => sum + r.notFound.length, 0);
-    const status: "success" | "partial" | "failed" | "cancelled" =
-      shouldStopRef.current && successCount === 0
-        ? "cancelled"
-        : successCount > 0 && (failedCount > 0 || notFoundCount > 0)
-          ? "partial"
-          : successCount > 0
-            ? "success"
-            : "failed";
-    const platformLabels = Array.from(platformSet).map((p) => PLATFORM_LABELS[p]).join(", ") || "-";
+  // 수집 결과 + 후처리 결과를 크론(tracking-and-ship)과 같은 건별 포맷으로 디스코드 1회 발송
+  const sendTrackingNotify = async (allResults: ScrapeResult[], post: PostCollectResponse | null, cancelled: boolean) => {
+    if (!session?.access_token) return;
+    const ship: TrackingShipItem[] = (post?.results ?? []).flatMap((r) => r.rows.map((row) => ({ platform: shipPlatformLabel(r.platform), ...row })));
+    const payload = buildTrackingNotification({
+      trigger: "manual",
+      dryRun: post?.dryRun,
+      cancelled,
+      orders: groupScrapeResultsByOrder(orders, allResults),
+      unmatched: unmatchedOrders.length,
+      ship: post ? ship : undefined,
+      esm: post ? (post.esm ?? null) : undefined,
+      errors: [...(post?.errors ?? []), ...(post?.error ? [post.error] : [])],
+    });
+    if (!payload) return;
     try {
       await fetch("/api/notifications/automation-result", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session?.access_token}`,
-        },
-        body: JSON.stringify({
-          title: "운송장 수집",
-          status,
-          summary: "운송장 수집 작업이 끝났습니다.",
-          fields: [
-            { name: "성공", value: successCount },
-            { name: "실패", value: failedCount },
-            { name: "미발견", value: notFoundCount },
-            { name: "DB 반영", value: totalApplied },
-            { name: "플랫폼", value: platformLabels },
-          ],
-        }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify(payload),
       });
     } catch (err) {
       console.error("[tracking-collect] 디스코드 알림 발송 실패:", err instanceof Error ? err.message : String(err));
@@ -318,7 +314,8 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ platform, loginId, loginPw, orderNos }),
+        // 서버 개별 알림 억제 — 자동 수집과 같이 후처리까지 합쳐 클라이언트가 1회 발송
+        body: JSON.stringify({ platform, loginId, loginPw, orderNos, notify: false }),
         signal: controller.signal,
       });
 
@@ -326,21 +323,24 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       if (!res.ok) {
         setError(data.error || "수집 실패");
         setStep("config");
+        void sendTrackingNotify([{ success: [], failed: orderNos.map((no) => ({ orderNo: no, reason: data.error || "수집 실패" })), notFound: [] }], null, false);
         return;
       }
 
       setResults([data as ScrapeResult]);
       setStep("result");
-      void runPostCollect((data as ScrapeResult).success?.length ?? 0);
+      void runPostCollect([data as ScrapeResult], false);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         setWasCancelled(true);
-        setResults([{
+        const cancelledResult: ScrapeResult = {
           success: [],
           failed: manualTargets.map((o) => ({ orderNo: o.purchase_order_no!, reason: "사용자가 수집을 중단했습니다." })),
           notFound: [],
-        }]);
+        };
+        setResults([cancelledResult]);
         setStep("result");
+        void sendTrackingNotify([cancelledResult], null, true);
       } else {
         setError(`오류: ${err instanceof Error ? err.message : String(err)}`);
         setStep("config");
@@ -352,12 +352,17 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
   };
 
   // 수집 완료 후: 새 운송장을 쿠팡·스토어 API로 전송 + ESM 운송장 엑셀 바탕화면 저장
-  const runPostCollect = async (successCount: number) => {
-    if (successCount === 0 || !session?.access_token) return;
+  // 끝나면 수집+전송 결과를 합쳐 디스코드 1회 발송 (수집 0건이면 후처리 없이 수집 결과만 발송)
+  const runPostCollect = async (allResults: ScrapeResult[], cancelled: boolean) => {
+    const successCount = allResults.reduce((n, r) => n + r.success.length, 0);
+    if (!session?.access_token) return;
+    if (successCount === 0) { await sendTrackingNotify(allResults, null, cancelled); return; }
     setPostCollect({ running: true, text: [] });
+    let post: PostCollectResponse | null = null;
     try {
-      const res = await fetch("/api/marketplace-api/orders/post-collect", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` } });
-      const data = (await res.json()) as { dryRun?: boolean; results?: Array<{ platform: string; sent: number; alreadySent: number; failed: number; rows: Array<{ status: string; recipientName: string | null; productName: string | null; message: string }> }>; esm?: { count: number; file: string | null } | null; errors?: string[]; error?: string };
+      const res = await fetch("/api/marketplace-api/orders/post-collect", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ notify: false }) });
+      const data = (await res.json()) as PostCollectResponse;
+      post = data;
       if (!res.ok) return setPostCollect({ running: false, text: [], error: data.error ?? "송장 전송 실패" });
       const text: string[] = [];
       for (const r of data.results ?? []) {
@@ -368,7 +373,10 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       for (const e of data.errors ?? []) text.push(`⚠ ${e}`);
       setPostCollect({ running: false, text });
     } catch {
+      post = post ?? { error: "송장 전송 중 오류" };
       setPostCollect({ running: false, text: [], error: "송장 전송 중 오류" });
+    } finally {
+      await sendTrackingNotify(allResults, post, cancelled);
     }
   };
 

@@ -21,6 +21,8 @@ export async function POST(request: NextRequest) {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return NextResponse.json({ error: "인증 실패" }, { status: 401 });
     const userId = userData.user.id;
+    // notify:false — 수집 모달이 수집+전송+ESM 을 합쳐 1회만 보낸다
+    const body = (await request.json().catch(() => ({}))) as { notify?: boolean };
 
     const { data: creds } = await supabase.from("marketplace_api_credentials").select("id,platform").in("platform", ["coupang", "smartstore"]);
     const results: ShipResult[] = [];
@@ -41,7 +43,7 @@ export async function POST(request: NextRequest) {
       esm = await exportEsmTrackingExcel(supabase, userId, { markExported: !isDryRun() });
     } catch (err) { errors.push(`ESM 엑셀: ${err instanceof Error ? err.message : String(err)}`); }
 
-    await notifyShipResults(results, "manual", { esm });
+    if (body.notify !== false) await notifyShipResults(results, "manual", { esm });
     return NextResponse.json({ dryRun: isDryRun(), results, esm, errors });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

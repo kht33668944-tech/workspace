@@ -11,6 +11,7 @@ import { collectOhouseTracking } from "@/lib/scrapers/ohouse";
 import type { ScrapeResult } from "@/lib/scrapers/types";
 import { applyTrackingToOrders, saveTrackingLogs } from "@/lib/tracking/apply";
 import { allOrderNos, getPurchaseOrders } from "@/lib/purchase-orders";
+import { groupScrapeResultsByOrder, type TrackingNotifyOrder } from "@/lib/tracking-notification";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = SupabaseClient<any, any, any>;
@@ -35,6 +36,10 @@ export interface CollectAllResult {
   unmatched: number;
   groups: CollectGroupResult[];
   appliedOrderIds: string[];
+  /** 주문 건별 수집 결과 (디스코드 건별 보고용) */
+  orders: TrackingNotifyOrder[];
+  /** 발주서 반영 실패 메시지 */
+  applyErrors: string[];
 }
 
 export async function collectTrackingForUser(supabase: AnySupabase, userId: string, opts: { days?: number; signal?: AbortSignal; log?: (m: string) => void } = {}): Promise<CollectAllResult> {
@@ -44,7 +49,7 @@ export async function collectTrackingForUser(supabase: AnySupabase, userId: stri
   // (수량 N개 자동구매는 주문 N건 — 대표 운송장이 있어도 나머지 주문의 운송장은 따로 수집)
   const { data: pendingRows, error } = await supabase
     .from("orders")
-    .select("id,purchase_source,purchase_id,purchase_order_no,purchase_detail_url,courier,tracking_no,delivery_status,quantity,purchased_at,purchase_orders")
+    .select("id,marketplace,recipient_name,product_name,purchase_source,purchase_id,purchase_order_no,purchase_detail_url,courier,tracking_no,delivery_status,quantity,purchased_at,purchase_orders")
     .eq("user_id", userId)
     .not("purchase_order_no", "is", null)
     .neq("purchase_order_no", "")
@@ -52,7 +57,8 @@ export async function collectTrackingForUser(supabase: AnySupabase, userId: stri
     .limit(3000);
   if (error) throw new Error(`발주서 조회 실패: ${error.message}`);
   type Row = {
-    id: string; purchase_source: string | null; purchase_id: string | null; purchase_order_no: string; purchase_detail_url: string | null;
+    id: string; marketplace: string | null; recipient_name: string | null; product_name: string | null;
+    purchase_source: string | null; purchase_id: string | null; purchase_order_no: string; purchase_detail_url: string | null;
     courier: string | null; tracking_no: string | null; delivery_status: string; quantity: number; purchased_at: string | null; purchase_orders: unknown;
   };
   const pendingNos = new Map<string, string[]>(); // 행 id → 운송장 없는 주문번호들
@@ -66,7 +72,7 @@ export async function collectTrackingForUser(supabase: AnySupabase, userId: stri
   });
 
   const { data: creds } = await supabase.from("purchase_credentials").select("id,platform,login_id,login_pw_encrypted").eq("user_id", userId).in("platform", ["gmarket", "auction", "ohouse"]);
-  const result: CollectAllResult = { pending: pending.length, unmatched: 0, groups: [], appliedOrderIds: [] };
+  const result: CollectAllResult = { pending: pending.length, unmatched: 0, groups: [], appliedOrderIds: [], orders: [], applyErrors: [] };
   const matched = new Set<string>();
   const batchId = randomUUID();
 
@@ -89,11 +95,13 @@ export async function collectTrackingForUser(supabase: AnySupabase, userId: stri
       else if (cred.platform === "auction") r = await collectAuctionTracking(cred.login_id, pw, orderNos, opts.signal);
       else r = await collectOhouseTracking(cred.login_id, pw, orderNos, supabase, opts.signal);
       g.success = r.success.length; g.failed = r.failed.length; g.notFound = r.notFound.length;
+      result.orders.push(...groupScrapeResultsByOrder(targets, [r]));
       if (r.success.length > 0) {
         const applied = await applyTrackingToOrders(supabase, r.success.map((s) => ({ purchase_order_no: s.orderNo, courier: s.courier, tracking_no: s.trackingNo })), userId);
         g.applied = applied.successCount;
         result.appliedOrderIds.push(...applied.orderIds);
         for (const e of applied.errors.slice(0, 5)) log(`  반영 실패: ${e}`);
+        result.applyErrors.push(...applied.errors.slice(0, 5).map((e) => `발주서 반영 실패: ${e}`));
       }
       await saveTrackingLogs(supabase, userId, r, cred.platform, cred.login_id, orderNos, batchId);
       log(`${name} ${cred.login_id}: 성공 ${g.success} 실패 ${g.failed} 미발견 ${g.notFound} 반영 ${g.applied}`);

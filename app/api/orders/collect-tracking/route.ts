@@ -6,8 +6,9 @@ import { decrypt } from "@/lib/crypto";
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import type { ScrapeResult } from "@/lib/scrapers/types";
-import { applyTrackingToOrders, saveTrackingLogs } from "@/lib/tracking/apply";
-import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
+import { applyTrackingToOrders, saveTrackingLogs, loadTrackingOrderRows } from "@/lib/tracking/apply";
+import { notifyAutomationResult } from "@/lib/discord-notifier";
+import { buildTrackingNotification, groupScrapeResultsByOrder } from "@/lib/tracking-notification";
 
 export const maxDuration = 300;
 
@@ -26,12 +27,6 @@ interface CollectRequest {
   batchId?: string;
   // 디스코드 알림 발송 여부 (기본 true). 다계정 수집 시 마지막에 1회만 보내려면 false로 개별 호출 억제
   notify?: boolean;
-}
-
-function getTrackingNotifyStatus(successCount: number, failCount: number, notFoundCount: number): AutomationNotifyStatus {
-  if (successCount > 0 && (failCount > 0 || notFoundCount > 0)) return "partial";
-  if (successCount > 0) return "success";
-  return failCount > 0 || notFoundCount > 0 ? "failed" : "success";
 }
 
 export async function POST(request: NextRequest) {
@@ -101,11 +96,13 @@ export async function POST(request: NextRequest) {
 
       // 성공한 운송장을 발주서(orders)에 즉시 반영
       let appliedCount = 0;
+      const applyErrors: string[] = [];
       if (supabase && result.success.length > 0) {
         const applyResult = await applyTrackingToOrders(supabase, result.success.map((s) => ({ purchase_order_no: s.orderNo, courier: s.courier, tracking_no: s.trackingNo })));
         appliedCount = applyResult.successCount;
         if (applyResult.failCount > 0) {
           console.warn("[collect-tracking] 발주서 반영 일부 실패:", applyResult.errors.slice(0, 5));
+          applyErrors.push(...applyResult.errors.slice(0, 5).map((e) => `발주서 반영 실패: ${e}`));
         }
       }
 
@@ -118,19 +115,11 @@ export async function POST(request: NextRequest) {
       }
 
       // 다계정 수집 시 개별 호출은 알림을 억제하고, 클라이언트가 마지막에 합산 결과로 1회만 발송
+      // (직접 API 호출용 — 수동 모달·크론과 같은 건별 포맷)
       if (body.notify !== false) {
-        await notifyAutomationResult({
-          title: "운송장 수집",
-          status: getTrackingNotifyStatus(result.success.length, result.failed.length, result.notFound.length),
-          summary: "운송장 수집 작업이 끝났습니다.",
-          fields: [
-            { name: "성공", value: result.success.length },
-            { name: "실패", value: result.failed.length },
-            { name: "미발견", value: result.notFound.length },
-            { name: "DB 반영", value: appliedCount },
-            { name: "플랫폼", value: platform },
-          ],
-        });
+        const rows = supabase ? await loadTrackingOrderRows(supabase, body.orderNos) : [];
+        const payload = buildTrackingNotification({ trigger: "manual", orders: groupScrapeResultsByOrder(rows, [result]), errors: applyErrors });
+        if (payload) await notifyAutomationResult(payload);
       }
 
       return NextResponse.json({ ...result, appliedCount });
@@ -138,11 +127,8 @@ export async function POST(request: NextRequest) {
       browserPool.release();
     }
   } catch (err) {
-    await notifyAutomationResult({
-      title: "운송장 수집",
-      status: "failed",
-      summary: `서버 오류: ${err instanceof Error ? err.message : String(err)}`,
-    });
+    const payload = buildTrackingNotification({ trigger: "manual", orders: [], errors: [`서버 오류: ${err instanceof Error ? err.message : String(err)}`] });
+    if (payload) await notifyAutomationResult(payload);
     return NextResponse.json(
       { error: `서버 오류: ${err instanceof Error ? err.message : String(err)}` },
       { status: 500 }
