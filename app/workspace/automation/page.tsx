@@ -7,6 +7,7 @@ import AutomationStatusCards from "@/components/workspace/automation/automation-
 import TodayTimeline from "@/components/workspace/automation/today-timeline";
 import ErrorCenter from "@/components/workspace/automation/error-center";
 import AutoApproveSetting from "@/components/workspace/settings/auto-approve-setting";
+import ReturnSmsSetting from "@/components/workspace/settings/return-sms-setting";
 import AutoReplyInquirySetting from "@/components/workspace/automation/auto-reply-inquiry-setting";
 import AutoPurchaseSetting from "@/components/workspace/automation/auto-purchase-setting";
 import { Loader2 } from "lucide-react";
@@ -39,6 +40,7 @@ export default function AutomationPage() {
             <AutoApproveSetting />
             <AutoReplyInquirySetting />
             <AutoPurchaseSetting />
+            <ReturnSmsSetting />
           </div>
         </>
       )}

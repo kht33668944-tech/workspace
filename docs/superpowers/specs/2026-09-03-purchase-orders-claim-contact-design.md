@@ -206,3 +206,12 @@ A → D(헬퍼·스크래퍼·route) → E → F → B → C. D~F는 자동구�
 - 노트북 IP는 마켓 API가 차단되므로 6·7은 자동화 PC에서 실행(메모리: project_laptop_market_api_ip).
 - 커밋·배포는 사용자 승인 후.
 - 대표 컬럼(`purchase_order_no` 등)의 의미를 바꾸지 않으므로 송장 전송(`order-ship`), ESM 엑셀, 정산 대조는 수정 대상이 아니다.
+
+---
+
+## G. 반품신청 후 고객 안내 문자 (추가, 2026-09-03)
+
+- 설정 `app_settings.return_sms = { enabled, templateName }` (기본 꺼짐, 템플릿 "반품 신청"). 자동화 페이지 토글 `components/workspace/settings/return-sms-setting.tsx`
+- `lib/sms/return-notify.ts` `sendReturnRequestedSms`: 지마켓 반품신청 route가 한 주문(반품준비 건만, 교환 제외)의 신청을 모두 마친 직후 호출. 주문자번호(없으면 수령자번호)로 휴대폰 경로 1통. 마켓 반품 접수 때 재발급된 안심번호는 order-sync `applyClaim`이 이미 반영해 둔 상태
+- 중복 방지: `sms_logs` order_id + batch_id 접두어 `auto-return:` 성공 기록 있으면 skip. KT 일일 한도는 `countTodayPhoneSms` 동일 규칙. 실패는 결과 행 `sms`에만 기록하고 반품 신청 결과는 바꾸지 않는다
+- 디스코드 보고·모달 결과 줄에 "안내 문자 발송/실패" 표시

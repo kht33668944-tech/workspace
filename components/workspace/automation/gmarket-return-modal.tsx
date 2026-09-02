@@ -36,6 +36,7 @@ interface RunResultRow {
   entryCount?: number;
   requestedCount?: number;
   hasContactField?: boolean;
+  sms?: { status: "sent" | "skipped" | "failed"; message: string; phone?: string };
 }
 
 const API = "/api/marketplace-api/returns/gmarket";
@@ -207,6 +208,8 @@ export default function GmarketReturnModal({ open, onClose, onRefetch, orderIds 
                   {r.ok ? "✓" : "✗"} {r.recipientName ?? "?"} · {r.productName ?? "?"}{(r.entryCount ?? 1) > 1 ? ` [주문 ${r.entryCount}건]` : ""} — {r.ok ? `${r.selectedReason}${r.returnFee ? ` (반품비 ${r.returnFee} 환불차감)` : ""}` : `${r.error}${(r.requestedCount ?? 0) > 0 ? ` (${r.requestedCount}/${r.entryCount}건 신청됨)` : ""}`}
                   {r.ok && r.needRepurchase && <span className="text-amber-400"> · 재구매 필요</span>}
                   {r.hasContactField && <span className="text-sky-400"> · 수거지 연락처 입력칸 있음</span>}
+                  {r.sms?.status === "sent" && <span className="text-emerald-400"> · 안내 문자 발송{r.sms.phone ? ` (${r.sms.phone})` : ""}</span>}
+                  {r.sms?.status === "failed" && <span className="text-amber-400"> · 안내 문자 실패: {r.sms.message}</span>}
                 </p>
               ))}
             </div>

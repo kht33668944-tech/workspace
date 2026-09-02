@@ -5,7 +5,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = SupabaseClient<any, any, any>;
 
-export type AppSettingKey = "auto_approve_cancel" | "auto_reply_inquiry" | "auto_purchase";
+export type AppSettingKey = "auto_approve_cancel" | "auto_reply_inquiry" | "auto_purchase" | "return_sms";
+
+export interface ReturnSmsSetting {
+  enabled: boolean;
+  /** sms_templates.name — 지마켓 반품신청 완료 직후 보낼 템플릿 (기본 "반품 신청") */
+  templateName?: string;
+}
 
 export interface AutoApproveCancelSetting {
   enabled: boolean;
@@ -29,7 +35,12 @@ export const APP_SETTING_DEFAULTS: Record<AppSettingKey, unknown> = {
   // 주문수집 직후 원가갱신→계정배정→자동구매까지 무인 실행. 기본 꺼짐 —
   // 실결제가 발생하므로 자동화 전담 PC에서만 설정 페이지 토글로 켠다
   auto_purchase: { enabled: false, accounts: {} } satisfies AutoPurchaseSetting,
+  // 지마켓 반품신청 자동화가 한 주문의 반품 신청을 모두 마친 직후, 마켓이 재발급한 안심번호(주문자번호)로
+  // "반품 신청" 템플릿 문자를 휴대폰 경로로 1통 보낸다. 기본 꺼짐 — 자동화 페이지 토글로 켠다
+  return_sms: { enabled: false, templateName: "반품 신청" } satisfies ReturnSmsSetting,
 };
+
+export const RETURN_SMS_DEFAULT_TEMPLATE = "반품 신청";
 
 export async function getAppSetting<T>(supabase: AnySupabase, userId: string, key: AppSettingKey): Promise<T | null> {
   const { data, error } = await supabase.from("app_settings").select("value").eq("user_id", userId).eq("key", key).maybeSingle();

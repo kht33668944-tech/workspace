@@ -17,6 +17,7 @@ import { requestGmarketReturn, mapClaimReason, buildDetailText } from "@/lib/scr
 import { startSyncRun, finishSyncRun } from "@/lib/marketplace/sync-run";
 import { notifyAutomationResult } from "@/lib/discord-notifier";
 import { getPurchaseOrders, upsertEntry } from "@/lib/purchase-orders";
+import { sendReturnRequestedSms, type ReturnSmsResult } from "@/lib/sms/return-notify";
 import type { PurchaseOrderEntry } from "@/types/database";
 
 export const maxDuration = 300;
@@ -51,6 +52,8 @@ interface SSEEvent {
     orderId: string; recipientName: string | null; productName: string | null; deliveryStatus: string;
     ok: boolean; selectedReason: string; returnFee: string | null; error?: string; needRepurchase: boolean;
     orderNos: string[]; entryCount: number; requestedCount: number; hasContactField?: boolean;
+    /** 반품 안내 문자 (설정 return_sms) */
+    sms?: ReturnSmsResult;
   }>;
   successCount?: number;
   failCount?: number;
@@ -213,7 +216,7 @@ export async function POST(request: NextRequest) {
             }
           }
           const ok = !error && requestedCount === t.entries.length;
-          const row = {
+          const row: NonNullable<SSEEvent["results"]>[number] = {
             orderId: t.id, recipientName: t.recipient_name, productName: t.product_name, deliveryStatus: t.delivery_status,
             ok, selectedReason, returnFee, error, hasContactField,
             needRepurchase: t.delivery_status === "교환준비",
@@ -233,10 +236,16 @@ export async function POST(request: NextRequest) {
               .update(patch)
               .eq("id", t.id).eq("user_id", userId);
             if (rowErr) console.error(`[gmarket-return] 신청 기록 실패(${t.id}): ${rowErr.message}`);
+            // 반품 안내 문자 — 반품 건만 (교환은 템플릿이 반품용). 설정 꺼짐이면 skipped. 실패해도 신청 결과는 그대로
+            if (t.delivery_status === "반품준비") {
+              row.sms = await sendReturnRequestedSms(serviceSb, userId, t.id);
+              if (row.sms.status !== "skipped") console.log(`[gmarket-return] 안내 문자 ${row.sms.status} (${t.id}): ${row.sms.message}`);
+            }
           }
           if (ok) success++; else fail++;
           const partial = !ok && requestedCount > 0 ? ` (${requestedCount}/${t.entries.length}건 신청됨)` : "";
-          send({ type: "progress", orderId: t.id, index: i + 1, total: targets.length, message: ok ? `완료 (${selectedReason}${multi})` : `실패: ${error}${partial}` });
+          const smsNote = row.sms && row.sms.status !== "skipped" ? ` · 문자 ${row.sms.status === "sent" ? "발송" : `실패(${row.sms.message})`}` : "";
+          send({ type: "progress", orderId: t.id, index: i + 1, total: targets.length, message: ok ? `완료 (${selectedReason}${multi})${smsNote}` : `실패: ${error}${partial}` });
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -263,6 +272,8 @@ export async function POST(request: NextRequest) {
       const succeeded = results.filter((r) => r.ok);
       const repurchase = results.filter((r) => r.ok && r.needRepurchase);
       const failures = results.filter((r) => !r.ok);
+      const smsSent = results.filter((r) => r.sms?.status === "sent");
+      const smsFailed = results.filter((r) => r.sms?.status === "failed");
       try {
         await notifyAutomationResult({
           title: "지마켓 반품신청",
@@ -272,12 +283,16 @@ export async function POST(request: NextRequest) {
             `대상 ${targets.length}건 — 성공 ${success} / 실패 ${fail}${dryRun ? " [드라이런]" : ""}`,
             ...(succeeded.length > 0 ? ["", `${dryRun ? "신청 예정" : "반품신청 완료"}:`, ...succeeded.map(line)] : []),
             ...(failures.length > 0 ? ["", "실패:", ...failures.slice(0, 10).map((r) => `${line(r)} — ${r.error}${r.requestedCount > 0 ? ` (${r.requestedCount}/${r.entryCount}건 신청됨)` : ""}`)] : []),
+            ...(smsSent.length > 0 || smsFailed.length > 0
+              ? ["", `고객 안내 문자: 발송 ${smsSent.length} / 실패 ${smsFailed.length}`, ...smsFailed.slice(0, 5).map((r) => `- ${r.recipientName ?? "?"}: ${r.sms?.message}`)]
+              : []),
             ...(dryRun ? ["", `수거지 연락처 입력칸: ${contactFieldSeen ? "있음" : "없음/미확인"}`] : []),
           ].join("\n"),
           fields: [
             { name: "성공", value: success },
             { name: "실패", value: fail },
             { name: "재구매 필요(교환)", value: repurchase.length },
+            ...(smsSent.length > 0 || smsFailed.length > 0 ? [{ name: "안내 문자", value: `${smsSent.length}건${smsFailed.length ? ` (실패 ${smsFailed.length})` : ""}` }] : []),
           ],
         });
       } catch (e) {
