@@ -48,7 +48,7 @@ class GmarketBotChallengeError extends Error {
   }
 }
 
-function isBotChallengeText(value: string): boolean {
+export function isBotChallengeText(value: string): boolean {
   return /잠시만 기다리|Just a moment|봇\(Bot\)|봇 확인|간단한 확인 안내|검토번호|자동으로 작동하는 프로그램|사람인지 확인|captcha|Cloudflare|Turnstile/i.test(value);
 }
 
@@ -361,7 +361,7 @@ async function hasBotChallenge(page: Page): Promise<boolean> {
   return !pageState.hasProductDom && page.frames().some(isChallengeFrame);
 }
 
-async function clickBotChallengeCheckbox(page: Page): Promise<boolean> {
+export async function clickBotChallengeCheckbox(page: Page): Promise<boolean> {
   const selectors = [
     'input[type="checkbox"]',
     '[role="checkbox"]',

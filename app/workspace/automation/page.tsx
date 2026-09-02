@@ -8,6 +8,7 @@ import TodayTimeline from "@/components/workspace/automation/today-timeline";
 import ErrorCenter from "@/components/workspace/automation/error-center";
 import AutoApproveSetting from "@/components/workspace/settings/auto-approve-setting";
 import AutoReplyInquirySetting from "@/components/workspace/automation/auto-reply-inquiry-setting";
+import AutoPurchaseSetting from "@/components/workspace/automation/auto-purchase-setting";
 import { Loader2 } from "lucide-react";
 
 export default function AutomationPage() {
@@ -37,6 +38,7 @@ export default function AutomationPage() {
             <h2 className="text-base font-semibold text-[var(--text-primary)]">자동화 설정</h2>
             <AutoApproveSetting />
             <AutoReplyInquirySetting />
+            <AutoPurchaseSetting />
           </div>
         </>
       )}

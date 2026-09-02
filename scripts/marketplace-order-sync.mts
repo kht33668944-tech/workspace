@@ -19,6 +19,9 @@ import { syncInquiries, type InquirySyncResult } from "@/lib/marketplace/inquiry
 import { AUTOMATIONS, isOverdue, isStaleRunning } from "@/lib/automation-schedule";
 import { notifyAutomationResult } from "@/lib/discord-notifier";
 import { toKstDateKey } from "@/lib/date-utils";
+import { getAppSetting, type AutoPurchaseSetting } from "@/lib/app-settings";
+import { runAutoPurchaseStage } from "@/lib/marketplace/auto-purchase-stage";
+import { ensureServer, getAutomationSession, resolveBaseUrl } from "./lib/automation-auth.mjs";
 
 const argv = process.argv.slice(2);
 const opt = (name: string, def: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : def; };
@@ -80,6 +83,32 @@ try {
 } catch (e) { log(`발송기한 확인 실패: ${e instanceof Error ? e.message : String(e)}`); }
 
 await notifySyncResults(results, "scheduler", { shipDeadline });
+
+// 자동구매 — 주문수집 직후 신규 구매대기 건을 원가갱신→계정배정→구매까지 무인 처리
+// (--skip-purchase 로 생략, 실제 동작 여부는 설정 페이지의 auto_purchase 토글이 제어 — 기본 꺼짐)
+if (!argv.includes("--skip-purchase")) {
+  try {
+    // 설정이 꺼져 있으면 서버 기동·JWT 발급 없이 조용히 건너뛴다 (매시 도는 크론의 낭비 방지)
+    const setting = await getAppSetting<AutoPurchaseSetting>(sb, userId, "auto_purchase");
+    if (setting?.enabled) {
+      const dryPurchase = argv.includes("--dry") || process.env.MARKETPLACE_API_DRY_RUN === "true";
+      const baseUrl = resolveBaseUrl(env);
+      await ensureServer(baseUrl, log);
+      const session = await getAutomationSession(env, log);
+      const r = await runAutoPurchaseStage({
+        supabase: sb, userId, baseUrl, token: session.token,
+        paymentPin: env.GMARKET_PAYMENT_PIN ?? null,
+        dryRun: dryPurchase, trigger: "scheduler",
+        log: (m) => log(`자동구매: ${m}`),
+      });
+      if (r.ran) log(`자동구매 결과: 성공 ${r.purchased} 실패 ${r.purchaseFailed} 품절 ${r.skipped.soldOut} 적자 ${r.skipped.deficit}${r.dryRun ? " [DRY]" : ""}`);
+    } else {
+      log("자동구매: 설정 꺼짐 — 건너뜀");
+    }
+  } catch (err) {
+    log(`자동구매 예외: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 
 // 문의 동기화 — 새 문의는 AI 초안·단순건 자동답변 후 #문의-자동화 알림 (--skip-inquiries 로 생략)
 if (!argv.includes("--skip-inquiries")) {

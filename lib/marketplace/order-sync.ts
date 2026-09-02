@@ -544,7 +544,7 @@ export async function applyClaim(
   if (order.delivery_status === to) {
     // 상태는 같아도 접수번호·세부 단계는 최신으로 (반품 입고확인 등 단계 표시용)
     if (!dryRun && (receiptId != null || claimStatus)) {
-      await supabase.from("orders").update({ claim_status: claimStatus, claim_receipt_id: receiptId != null ? String(receiptId) : undefined, marketplace_synced_at: new Date().toISOString() }).eq("id", order.id).eq("user_id", userId);
+      await supabase.from("orders").update({ claim_status: claimStatus, claim_receipt_id: receiptId != null ? String(receiptId) : undefined, ...(reason ? { claim_reason: reason } : {}), marketplace_synced_at: new Date().toISOString() }).eq("id", order.id).eq("user_id", userId);
     }
     return;
   }
@@ -553,6 +553,7 @@ export async function applyClaim(
   const locked = LOCKED.has(order.delivery_status);
   const patch: Record<string, unknown> = { claim_type: claimType, claim_status: claimStatus, marketplace_synced_at: new Date().toISOString() };
   if (receiptId != null) patch.claim_receipt_id = String(receiptId);
+  if (reason) patch.claim_reason = reason; // 구매처 반품신청 자동화의 사유 분기·인용용
   if (!locked) {
     patch.delivery_status = to;
     if (to === "취소완료") patch.canceled_at = new Date().toISOString();

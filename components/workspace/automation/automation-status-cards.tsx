@@ -8,6 +8,7 @@ import { AUTOMATIONS, RUN_STATUS_LABEL, type AutomationKey, type SlotStatus } fr
 import { timeAgo } from "@/lib/log-format";
 import type { AutomationWeekStat } from "@/hooks/use-automation-runs";
 import { useRunAutomation } from "./run-actions";
+import GmarketReturnModal from "./gmarket-return-modal";
 
 const STATUS_CLS: Record<string, string> = {
   success: "bg-emerald-500/10 text-emerald-400",
@@ -22,6 +23,7 @@ export default function AutomationStatusCards({ weekStats, onRefetch }: {
 }) {
   const { session } = useAuth();
   const [schtasksAvailable, setSchtasksAvailable] = useState(false);
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
   const { busyId, run } = useRunAutomation(onRefetch);
 
   useEffect(() => {
@@ -75,7 +77,7 @@ export default function AutomationStatusCards({ weekStats, onRefetch }: {
                 ) : <div className="flex-1" />}
                 {def.runVia && (
                   <button
-                    onClick={() => run(def.key)}
+                    onClick={() => def.key === "gmarket-return" ? setReturnModalOpen(true) : run(def.key)}
                     disabled={disabled || busyId !== null}
                     title={def.runVia === "schtasks" && !schtasksAvailable ? "로컬 PC에서만 실행 가능" : undefined}
                     className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[var(--bg-hover)] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-active)] transition-colors disabled:opacity-40"
@@ -89,6 +91,7 @@ export default function AutomationStatusCards({ weekStats, onRefetch }: {
           );
         })}
       </div>
+      <GmarketReturnModal open={returnModalOpen} onClose={() => setReturnModalOpen(false)} onRefetch={onRefetch} />
     </section>
   );
 }

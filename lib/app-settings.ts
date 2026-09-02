@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = SupabaseClient<any, any, any>;
 
-export type AppSettingKey = "auto_approve_cancel" | "auto_reply_inquiry";
+export type AppSettingKey = "auto_approve_cancel" | "auto_reply_inquiry" | "auto_purchase";
 
 export interface AutoApproveCancelSetting {
   enabled: boolean;
@@ -15,11 +15,20 @@ export interface AutoReplyInquirySetting {
   enabled: boolean;
 }
 
+export interface AutoPurchaseSetting {
+  enabled: boolean;
+  /** 플랫폼별 기본 구매계정 login_id (purchase_credentials 매칭) — 예: { gmarket: "joker3733" } */
+  accounts: Record<string, string>;
+}
+
 export const APP_SETTING_DEFAULTS: Record<AppSettingKey, unknown> = {
   auto_approve_cancel: { enabled: false } satisfies AutoApproveCancelSetting,
   // AI가 단순 배송문의에 자동 답변. 기본 꺼짐 — 쿠팡 고객센터 문의는 링크 응답 등
   // 일반 답변으로 해결 안 되는 건이 있어 사람이 확인 후 전송하는 것을 기본으로 한다
   auto_reply_inquiry: { enabled: false } satisfies AutoReplyInquirySetting,
+  // 주문수집 직후 원가갱신→계정배정→자동구매까지 무인 실행. 기본 꺼짐 —
+  // 실결제가 발생하므로 자동화 전담 PC에서만 설정 페이지 토글로 켠다
+  auto_purchase: { enabled: false, accounts: {} } satisfies AutoPurchaseSetting,
 };
 
 export async function getAppSetting<T>(supabase: AnySupabase, userId: string, key: AppSettingKey): Promise<T | null> {

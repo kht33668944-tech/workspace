@@ -6,10 +6,11 @@
 import type { MarketplaceSyncRun } from "@/types/database";
 import { toKstDateKey } from "@/lib/date-utils";
 
-export type AutomationKey = "order-sync" | "inquiries" | "tracking-ship" | "price" | "settlement" | "daily-summary";
+export type AutomationKey = "order-sync" | "inquiries" | "tracking-ship" | "price" | "settlement" | "daily-summary" | "auto-purchase" | "gmarket-return";
 export type RunKind =
   | "orders" | "inquiries" | "shipping" | "tracking-collect" | "esm-export"
-  | "settlement" | "daily-summary" | "price" | "health-alert";
+  | "settlement" | "daily-summary" | "price" | "health-alert"
+  | "auto-purchase" | "gmarket-return";
 
 export interface AutomationDef {
   key: AutomationKey;
@@ -25,7 +26,9 @@ export interface AutomationDef {
   primaryKind: RunKind;
   schedule:
     | { type: "interval"; anchorHour: number; minute: number; intervalHours: number }
-    | { type: "daily-latch"; afterHourKst: number };
+    | { type: "daily-latch"; afterHourKst: number }
+    /** 예정 슬롯 없음 — 수동 버튼 전용이거나 조건부(설정 토글)라 미실행 판정을 하지 않는 자동화 */
+    | { type: "manual" };
   /** 정상 실행 최대 소요(분) — 초과 running 은 좀비로 판정 */
   maxRuntimeMin: number;
   toleranceMin: number;
@@ -74,6 +77,21 @@ export const AUTOMATIONS: AutomationDef[] = [
     schedule: { type: "daily-latch", afterHourKst: 21 },
     maxRuntimeMin: 20, toleranceMin: 70,
   },
+  {
+    // 설정(auto_purchase) 켜져 있을 때만 주문수집 뒤에 이어 돎 — 꺼진 동안 "미실행" 오탐을 막기 위해 예정 슬롯 없음
+    key: "auto-purchase", label: "자동구매", description: "신규 발주건 원가갱신 → 계정배정 → 자동구매 (주문수집 직후, 설정 토글)",
+    taskName: "OnliveOrderSync", runVia: null,
+    kinds: ["auto-purchase"], primaryKind: "auto-purchase",
+    schedule: { type: "manual" },
+    maxRuntimeMin: 60, toleranceMin: 10,
+  },
+  {
+    key: "gmarket-return", label: "지마켓 반품", description: "반품·교환 들어온 지마켓 구매건 반품신청 (수동 버튼, 드라이런→실행)",
+    taskName: null, runVia: "api", apiPath: "/api/marketplace-api/returns/gmarket",
+    kinds: ["gmarket-return"], primaryKind: "gmarket-return",
+    schedule: { type: "manual" },
+    maxRuntimeMin: 30, toleranceMin: 10,
+  },
 ];
 
 export const KIND_TO_KEY: Record<RunKind, AutomationKey | null> = {
@@ -86,6 +104,8 @@ export const KIND_TO_KEY: Record<RunKind, AutomationKey | null> = {
   "daily-summary": "daily-summary",
   price: "price",
   "health-alert": null,
+  "auto-purchase": "auto-purchase",
+  "gmarket-return": "gmarket-return",
 };
 
 export const AUTOMATION_BY_KEY = Object.fromEntries(
@@ -127,6 +147,7 @@ export interface PriceRound { round: number; collected: number; soldOut: number;
 
 /** 해당 KST 날짜의 예정 실행 시각 ISO 배열 (daily-latch 는 기준 시각 1개) */
 export function slotsForKstDate(def: AutomationDef, dateKst: string): string[] {
+  if (def.schedule.type === "manual") return [];
   if (def.schedule.type === "daily-latch") {
     const hh = String(def.schedule.afterHourKst).padStart(2, "0");
     return [new Date(`${dateKst}T${hh}:00:00+09:00`).toISOString()];
