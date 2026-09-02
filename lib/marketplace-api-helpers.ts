@@ -104,6 +104,22 @@ export async function getCoupangClientFromCredential(
   };
 }
 
+/** 쿠팡 목표 판매가 — 고정가 우선, 없으면 정산가×수수료. null = 수수료율·고정가 모두 없음(반영 제외 대상) */
+export function computeCoupangTargetPrice(product: Product, rateMap: ReturnType<typeof buildRateMap>): number | null {
+  if (product.fixed_price_coupang != null) return roundCoupangPrice(product.fixed_price_coupang);
+  const rate = rateMap[product.category]?.coupang ?? 0;
+  if (rate <= 0) return null;
+  return roundCoupangPrice(calcPlatformPrice(calcSettlementPrice(product.lowest_price, product.margin_rate), rate));
+}
+
+/** 스마트스토어 목표 판매가 — 계산 규칙은 computeCoupangTargetPrice 와 동일 구조 */
+export function computeSmartstoreTargetPrice(product: Product, rateMap: ReturnType<typeof buildRateMap>): number | null {
+  if (product.fixed_price_smartstore != null) return roundSmartstorePrice(product.fixed_price_smartstore);
+  const rate = rateMap[product.category]?.smartstore ?? 0;
+  if (rate <= 0) return null;
+  return roundSmartstorePrice(calcPlatformPrice(calcSettlementPrice(product.lowest_price, product.margin_rate), rate));
+}
+
 export async function buildCoupangPreview(
   supabase: SupabaseClient,
   productIds: string[],
@@ -173,16 +189,10 @@ export async function buildCoupangPreview(
 
     let targetPrice: number | null = null;
     if (action === "price") {
-      if (product.fixed_price_coupang != null) {
-        targetPrice = roundCoupangPrice(product.fixed_price_coupang);
-      } else {
-        const rate = rateMap[product.category]?.coupang ?? 0;
-        if (rate <= 0) {
-          blocked.push({ productId: id, productName: product.product_name, reason: "쿠팡 수수료율 또는 고정가가 없어 제외했습니다." });
-          continue;
-        }
-        const settlement = calcSettlementPrice(product.lowest_price, product.margin_rate);
-        targetPrice = roundCoupangPrice(calcPlatformPrice(settlement, rate));
+      targetPrice = computeCoupangTargetPrice(product, rateMap);
+      if (targetPrice == null) {
+        blocked.push({ productId: id, productName: product.product_name, reason: "쿠팡 수수료율 또는 고정가가 없어 제외했습니다." });
+        continue;
       }
       if (!targetPrice || targetPrice <= 0) {
         blocked.push({ productId: id, productName: product.product_name, reason: "계산된 쿠팡 판매가가 올바르지 않습니다." });
@@ -349,16 +359,10 @@ export async function buildSmartstorePreview(
 
     let targetPrice: number | null = null;
     if (action === "price") {
-      if (product.fixed_price_smartstore != null) {
-        targetPrice = roundSmartstorePrice(product.fixed_price_smartstore);
-      } else {
-        const rate = rateMap[product.category]?.smartstore ?? 0;
-        if (rate <= 0) {
-          blocked.push({ productId: id, productName: product.product_name, reason: "스마트스토어 수수료율 또는 고정가가 없어 제외했습니다." });
-          continue;
-        }
-        const settlement = calcSettlementPrice(product.lowest_price, product.margin_rate);
-        targetPrice = roundSmartstorePrice(calcPlatformPrice(settlement, rate));
+      targetPrice = computeSmartstoreTargetPrice(product, rateMap);
+      if (targetPrice == null) {
+        blocked.push({ productId: id, productName: product.product_name, reason: "스마트스토어 수수료율 또는 고정가가 없어 제외했습니다." });
+        continue;
       }
       if (!targetPrice || targetPrice <= 0) {
         blocked.push({ productId: id, productName: product.product_name, reason: "계산된 스마트스토어 판매가가 올바르지 않습니다." });

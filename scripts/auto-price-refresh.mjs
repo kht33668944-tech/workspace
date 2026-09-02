@@ -20,7 +20,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, appendFileSync, existsSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -142,6 +142,8 @@ async function serverAlive() {
   }
 }
 
+let autoStartedPid = null; // 우리가 자동 기동한 서버의 PID — 종료 시 트리째 정리 (원래 떠 있던 서버는 건드리지 않음)
+
 async function ensureServer() {
   if (await serverAlive()) { log("서버 확인: 이미 실행 중"); return; }
   // BASE 의 포트에 맞춰 기동해야 헬스체크와 일치한다 (AUTO_BASE_URL=3001 인데 3000을 띄우면 영원히 기동 실패)
@@ -154,11 +156,22 @@ async function ensureServer() {
     windowsHide: true,
   });
   child.unref();
+  autoStartedPid = child.pid ?? null;
   for (let i = 0; i < 36; i++) {
     await sleep(5000);
     if (await serverAlive()) { log(`서버 기동 완료 (${(i + 1) * 5}초 소요)`); await sleep(3000); return; }
   }
   throw new Error("서버 자동 기동 실패 (3분 대기 초과)");
+}
+
+function stopAutoStartedServer() {
+  if (!autoStartedPid) return;
+  const pid = autoStartedPid;
+  autoStartedPid = null;
+  // detached로 띄운 cmd.exe 트리(npm → node next dev)를 통째로 종료
+  const r = spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
+  if (r.status === 0) log(`자동 기동한 서버 종료 완료 (PID ${pid})`);
+  else log(`자동 기동한 서버 종료 실패 (PID ${pid}, exit ${r.status ?? r.error?.message ?? "?"}) — 수동 확인 필요`);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -408,21 +421,39 @@ async function applySoldOutMargins(userId, inStockIds, soldOutIds) {
 // ---------- 쿠팡·스마트스토어 API 반영 (변동가 price / 품절 stop / 재입고 resume) ----------
 // 사이트의 "쿠팡 API 반영 / 스토어 API 반영" 버튼과 동일 경로. ESM(지마켓·옥션·11번가)은 API 없음 → 엑셀.
 async function applyToMarketplaces(token, { changedIds, soldOutIds, restoredIds }) {
-  const out = { coupang: null, smartstore: null, skipped: null };
+  const out = { coupang: null, smartstore: null, skipped: null, reconcile: null };
   if (String(env.AUTO_MARKET_APPLY ?? "true").toLowerCase() === "false") { out.skipped = "AUTO_MARKET_APPLY=false"; return out; }
   let creds = [];
   try {
     const res = await fetch(`${BASE}/api/marketplace-api/credentials`, { headers: { Authorization: `Bearer ${token}` } });
     creds = res.ok ? await res.json() : [];
   } catch (e) { out.skipped = `자격증명 조회 실패: ${e instanceof Error ? e.message : String(e)}`; return out; }
-  const jobs = [
-    { action: "price", ids: [...new Set([...changedIds, ...restoredIds])] },
-    { action: "stop", ids: soldOutIds },
-    { action: "resume", ids: restoredIds },
-  ];
+
+  // 검산 — 기준가≠마켓가인 판매중 상품을 price 잡에 합류시켜, 과거에 놓친 반영·수동 수정으로 어긋난 가격을 자동 복구.
+  // 검산 실패는 본작업을 막지 않는다 (변동분만 반영하는 기존 동작으로 폴백).
+  let reconcile = { coupang: [], smartstore: [] };
+  try {
+    const res = await fetch(`${BASE}/api/marketplace-api/reconcile`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) {
+      const j = await res.json();
+      reconcile = { coupang: j.coupang ?? [], smartstore: j.smartstore ?? [] };
+      out.reconcile = { coupang: reconcile.coupang.length, smartstore: reconcile.smartstore.length };
+      if (reconcile.coupang.length || reconcile.smartstore.length) {
+        log(`검산: 기준가≠마켓가 재반영 대상 쿠팡 ${reconcile.coupang.length} · 스토어 ${reconcile.smartstore.length}`);
+      }
+    } else {
+      log(`검산 실패 (HTTP ${res.status}) — 변동분만 반영`);
+    }
+  } catch (e) { log(`검산 실패 — 변동분만 반영: ${e instanceof Error ? e.message : String(e)}`); }
+
   for (const platform of ["coupang", "smartstore"]) {
     const cred = creds.find((c) => c.platform === platform);
     if (!cred) continue;
+    const jobs = [
+      { action: "price", ids: [...new Set([...changedIds, ...restoredIds, ...reconcile[platform]])] },
+      { action: "stop", ids: soldOutIds },
+      { action: "resume", ids: restoredIds },
+    ];
     const r = { price: 0, stop: 0, resume: 0, failed: 0, blocked: 0, dry: false, errors: [] };
     out[platform] = r;
     for (const job of jobs) {
@@ -576,6 +607,9 @@ async function main() {
   const mk = (p) => p ? `가격 ${p.price} · 중지 ${p.stop} · 재개 ${p.resume}${p.failed ? ` · 실패 ${p.failed}` : ""}${p.blocked ? ` · 미연동 ${p.blocked}` : ""}${p.dry ? " [DRY]" : ""}` : "계정 없음";
   if (market.skipped) fields.push({ name: "마켓 반영", value: `건너뜀 (${market.skipped})` });
   else { fields.push({ name: "쿠팡 반영", value: mk(market.coupang) }); fields.push({ name: "스토어 반영", value: mk(market.smartstore) }); }
+  if (market.reconcile && (market.reconcile.coupang || market.reconcile.smartstore)) {
+    fields.push({ name: "검산 재반영(기준가≠마켓가)", value: `쿠팡 ${market.reconcile.coupang} · 스토어 ${market.reconcile.smartstore}` });
+  }
   const marketFailed = [market.coupang, market.smartstore].some((p) => p && (p.failed > 0 || p.errors.length > 0));
 
   const status = okCount === 0 ? "failed" : (remaining.length > 0 || marketFailed) ? "partial" : "success";
@@ -600,4 +634,4 @@ main().catch(async (e) => {
   await patchRun({ status: "failed", finished_at: new Date().toISOString(), error: msg, detail: runDetail });
   await discordDirect(`**최저가 자동 갱신 (${LABEL}) 실패** — ${msg}`);
   process.exitCode = 1;
-});
+}).finally(() => stopAutoStartedServer());
