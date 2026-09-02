@@ -6,7 +6,8 @@ import { decrypt } from "@/lib/crypto";
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
 import { purchaseDetailUrl, type PurchaseOrderInfo, type PurchasedUnit } from "@/lib/scrapers/types";
-import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
+import { notifyAutomationResult } from "@/lib/discord-notifier";
+import { buildPurchaseNotification, type PurchaseNotifyItem } from "@/lib/purchase-notification";
 import { parsePurchaseOrders, upsertEntry } from "@/lib/purchase-orders";
 import type { PurchaseOrderEntry } from "@/types/database";
 
@@ -38,17 +39,20 @@ interface SSEEvent {
   // 수량 2개 이상 주문의 진행/부분구매 개수 (예: 3개 중 1개만 구매됨)
   purchasedCount?: number;
   totalQty?: number;
-  success?: { orderId: string; purchaseOrderNo: string; cost?: number; paymentMethod?: string }[];
+  // units = 수량 루프별 결제 내역 (카드사별 집계용) — 합산 알림을 만드는 모달·크론 스테이지가 읽는다
+  success?: { orderId: string; purchaseOrderNo: string; cost?: number; paymentMethod?: string; payNo?: string; units?: PurchasedUnit[] }[];
   failed?: { orderId: string; reason: string; purchaseOrderNo?: string; cost?: number; paymentMethod?: string; payNo?: string; units?: PurchasedUnit[] }[];
   successCount?: number;
   failCount?: number;
 }
 
-function getPurchaseNotifyStatus(successCount: number, failCount: number, cancelled = false): AutomationNotifyStatus {
-  if (cancelled) return "cancelled";
-  if (successCount > 0 && failCount > 0) return "partial";
-  if (successCount > 0) return "success";
-  return failCount > 0 ? "failed" : "success";
+/** 알림 건별 표시에 필요한 발주서 메타 (판매처·정산예정 등) — 구매 전 상태 확인 쿼리에서 채운다 */
+interface OrderMeta {
+  marketplace: string | null;
+  recipient_name: string | null;
+  product_name: string | null;
+  quantity: number | null;
+  settlement: number | null;
 }
 
 export async function POST(request: NextRequest) {
@@ -167,6 +171,36 @@ export async function POST(request: NextRequest) {
         const lockReleaseStatusByOrderId = new Map<string, string>();
         const loggedFailureOrderIds = new Set<string>();
         const completedCallbackOrderIds = new Set<string>();
+        const orderMetaById = new Map<string, OrderMeta>();
+
+        // 디스코드 알림 — 수동 모달·크론 스테이지와 같은 건별 포맷 (notify:false 면 호출측이 합산 발송)
+        const toNotifyItem = (e: NonNullable<SSEEvent["failed"]>[number] | NonNullable<SSEEvent["success"]>[number]): PurchaseNotifyItem => {
+          const info = body.orders.find((o) => o.orderId === e.orderId);
+          const meta = orderMetaById.get(e.orderId);
+          return {
+            marketplace: meta?.marketplace ?? null,
+            recipientName: info?.recipientName || meta?.recipient_name || null,
+            productName: info?.productName || meta?.product_name || null,
+            quantity: info?.quantity ?? meta?.quantity ?? 1,
+            settlement: meta?.settlement ?? null,
+            cost: e.cost,
+            paymentMethod: e.paymentMethod,
+            units: e.units,
+            purchaseOrderNo: e.purchaseOrderNo,
+            reason: "reason" in e ? e.reason : undefined,
+          };
+        };
+        const sendPurchaseNotify = async (opts: { cancelled?: boolean; headline?: string; errors?: string[] } = {}) => {
+          if (body.notify === false) return;
+          await notifyAutomationResult(buildPurchaseNotification({
+            trigger: "manual",
+            cancelled: opts.cancelled,
+            headline: opts.headline,
+            errors: opts.errors,
+            success: allSuccess.map(toNotifyItem),
+            failed: allFailed.map(toNotifyItem),
+          }));
+        };
 
         // 주문별 즉시 DB 업데이트 + SSE 전송 콜백
         const onProgress = (
@@ -342,7 +376,7 @@ export async function POST(request: NextRequest) {
           const orderInfo = body.orders.find(o => o.orderId === orderId);
 
           const recordBlockedPurchase = async (reason: string) => {
-            allFailed.push({ orderId, reason, purchaseOrderNo, cost, paymentMethod });
+            allFailed.push({ orderId, reason, purchaseOrderNo, cost, paymentMethod, payNo, units });
             loggedFailureOrderIds.add(orderId);
             sendEvent({ type: "progress", orderId, status: "failed", message: reason, purchaseOrderNo });
             sendEvent({ type: "db_updated", orderId, status: "error", message: reason, purchaseOrderNo, cost, paymentMethod });
@@ -405,7 +439,7 @@ export async function POST(request: NextRequest) {
             return;
           }
 
-          allSuccess.push({ orderId, purchaseOrderNo, cost, paymentMethod });
+          allSuccess.push({ orderId, purchaseOrderNo, cost, paymentMethod, payNo, units });
           console.log(`[auto-purchase] DB 즉시 업데이트 성공 (${orderId}): ${JSON.stringify(updateData)}`);
           sendEvent({ type: "db_updated", orderId, status: "ok", purchaseOrderNo, cost, paymentMethod });
 
@@ -490,13 +524,22 @@ export async function POST(request: NextRequest) {
           if (targetOrders.length > 0) {
             const orderStateQuery = supabase
               .from("orders")
-              .select("id, purchase_order_no, delivery_status, quantity, settlement")
+              .select("id, purchase_order_no, delivery_status, quantity, settlement, marketplace, recipient_name, product_name")
               .in("id", targetOrders.map((order) => order.orderId))
               .eq("user_id", userId);
             const { data: currentOrders, error: currentOrdersErr } = await orderStateQuery;
 
             if (currentOrdersErr) {
               throw new Error(`구매 전 주문 상태 확인 실패: ${currentOrdersErr.message}`);
+            }
+            for (const row of currentOrders || []) {
+              orderMetaById.set(row.id as string, {
+                marketplace: (row.marketplace as string | null) ?? null,
+                recipient_name: (row.recipient_name as string | null) ?? null,
+                product_name: (row.product_name as string | null) ?? null,
+                quantity: (row.quantity as number | null) ?? null,
+                settlement: (row.settlement as number | null) ?? null,
+              });
             }
 
             const currentOrderById = new Map((currentOrders || []).map((order) => [order.id as string, order]));
@@ -621,18 +664,7 @@ export async function POST(request: NextRequest) {
               failCount: allFailed.length,
               message: "구매 가능한 주문이 없습니다. 이미 구매된 주문은 자동구매에서 제외했습니다.",
             });
-            if (body.notify !== false) {
-              await notifyAutomationResult({
-                title: "자동구매",
-                status: getPurchaseNotifyStatus(allSuccess.length, allFailed.length),
-                summary: "구매 가능한 주문이 없어 작업이 종료됐습니다.",
-                fields: [
-                  { name: "성공", value: allSuccess.length },
-                  { name: "실패/제외", value: allFailed.length },
-                  { name: "플랫폼", value: platform },
-                ],
-              });
-            }
+            await sendPurchaseNotify({ headline: "구매 가능한 주문이 없어 작업이 종료됐습니다." });
             return;
           }
 
@@ -775,18 +807,7 @@ export async function POST(request: NextRequest) {
             failCount: allFailed.length,
             message: isCancelled ? "사용자가 작업을 중단했습니다." : undefined,
           });
-          if (body.notify !== false) {
-            await notifyAutomationResult({
-              title: "자동구매",
-              status: getPurchaseNotifyStatus(allSuccess.length, allFailed.length, isCancelled),
-              summary: isCancelled ? "사용자가 작업을 중단했습니다." : "자동구매 작업이 끝났습니다.",
-              fields: [
-                { name: "성공", value: allSuccess.length },
-                { name: "실패", value: allFailed.length },
-                { name: "플랫폼", value: platform },
-              ],
-            });
-          }
+          await sendPurchaseNotify({ cancelled: isCancelled });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           // abort 에러는 cancelled로 처리
@@ -799,32 +820,10 @@ export async function POST(request: NextRequest) {
               failCount: allFailed.length,
               message: "사용자가 작업을 중단했습니다.",
             });
-            if (body.notify !== false) {
-              await notifyAutomationResult({
-                title: "자동구매",
-                status: "cancelled",
-                summary: "사용자가 작업을 중단했습니다.",
-                fields: [
-                  { name: "성공", value: allSuccess.length },
-                  { name: "실패", value: allFailed.length },
-                  { name: "플랫폼", value: platform },
-                ],
-              });
-            }
+            await sendPurchaseNotify({ cancelled: true });
           } else {
             sendEvent({ type: "error", message: `서버 오류: ${msg}` });
-            if (body.notify !== false) {
-              await notifyAutomationResult({
-                title: "자동구매",
-                status: "failed",
-                summary: `서버 오류: ${msg}`,
-                fields: [
-                  { name: "성공", value: allSuccess.length },
-                  { name: "실패", value: allFailed.length },
-                  { name: "플랫폼", value: platform },
-                ],
-              });
-            }
+            await sendPurchaseNotify({ errors: [`서버 오류: ${msg}`] });
           }
         } finally {
           const purchasedOrderIds = new Set([

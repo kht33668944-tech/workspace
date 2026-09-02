@@ -6,7 +6,22 @@ import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import type { Order, PurchaseCredential, PurchasePlatform } from "@/types/database";
 import { PLATFORM_LABELS } from "@/types/database";
-import type { PurchaseOrderInfo } from "@/lib/scrapers/types";
+import type { PurchaseOrderInfo, PurchasedUnit } from "@/lib/scrapers/types";
+import { buildPurchaseNotification, type PurchaseNotifyItem } from "@/lib/purchase-notification";
+
+/** 합산 디스코드 발송용 건별 결과 (서버 done 이벤트의 success/failed 항목) */
+interface CollectedOutcome {
+  orderId: string;
+  cost?: number;
+  paymentMethod?: string;
+  purchaseOrderNo?: string;
+  units?: PurchasedUnit[];
+  reason?: string;
+}
+interface PurchaseCollect {
+  success: CollectedOutcome[];
+  failed: Map<string, CollectedOutcome>;
+}
 
 interface AutoPurchaseModalProps {
   orders: Order[];
@@ -241,10 +256,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
     response: Response,
     groupOrders: Order[],
     signal: AbortSignal,
-    collect?: {
-      success: { orderId: string; cost?: number; paymentMethod?: string }[];
-      failedOrderIds: Set<string>;
-    }
+    collect?: PurchaseCollect
   ): Promise<{ isDone: boolean; isCancelled: boolean }> {
     const reader = response.body?.getReader();
     if (!reader) return { isDone: true, isCancelled: false };
@@ -297,13 +309,13 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
               isCancelled = event.type === "cancelled";
               // 최종 결과로 상태 확정
               if (event.success) {
-                // 합산 발송용: 성공 주문의 원가·결제수단(카드사) 수집
+                // 합산 발송용: 성공 주문의 결제금액·결제수단(카드사)·단위 결제 내역 수집
                 if (collect) {
-                  for (const s of event.success as { orderId: string; cost?: number; paymentMethod?: string }[]) {
+                  for (const s of event.success as CollectedOutcome[]) {
                     if (!collect.success.some((x) => x.orderId === s.orderId)) {
-                      collect.success.push({ orderId: s.orderId, cost: s.cost, paymentMethod: s.paymentMethod });
+                      collect.success.push({ orderId: s.orderId, cost: s.cost, paymentMethod: s.paymentMethod, purchaseOrderNo: s.purchaseOrderNo, units: s.units });
                     }
-                    collect.failedOrderIds.delete(s.orderId);
+                    collect.failed.delete(s.orderId);
                   }
                 }
                 const successMap = new Map(
@@ -321,9 +333,9 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
               }
               if (event.failed) {
                 if (collect) {
-                  for (const f of event.failed as { orderId: string }[]) {
+                  for (const f of event.failed as CollectedOutcome[]) {
                     if (!collect.success.some((x) => x.orderId === f.orderId)) {
-                      collect.failedOrderIds.add(f.orderId);
+                      collect.failed.set(f.orderId, { orderId: f.orderId, reason: f.reason, cost: f.cost, paymentMethod: f.paymentMethod, purchaseOrderNo: f.purchaseOrderNo, units: f.units });
                     }
                   }
                 }
@@ -343,7 +355,9 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
             } else if (event.type === "error") {
               if (collect) {
                 for (const o of groupOrders) {
-                  if (!collect.success.some((x) => x.orderId === o.id)) collect.failedOrderIds.add(o.id);
+                  if (!collect.success.some((x) => x.orderId === o.id) && !collect.failed.has(o.id)) {
+                    collect.failed.set(o.id, { orderId: o.id, reason: event.message || "서버 오류" });
+                  }
                 }
               }
               setOrderStatuses((prev) =>
@@ -406,12 +420,8 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
     let cancelled = false;
 
     // 합산 디스코드 발송용 집계 (개별 그룹 발송은 서버에서 억제)
-    const collect = {
-      success: [] as { orderId: string; cost?: number; paymentMethod?: string }[],
-      failedOrderIds: new Set<string>(),
-    };
-    const quantityMap = new Map<string, number>(allOrders.map((o) => [o.id, Math.max(Number(o.quantity) || 1, 1)]));
-    const platformSet = new Set<PurchasePlatform>(matchedGroups.map((g) => g.platform));
+    const collect: PurchaseCollect = { success: [], failed: new Map() };
+    const orderById = new Map<string, Order>(allOrders.map((o) => [o.id, o]));
 
     // 그룹별 순차 처리
     for (let gi = 0; gi < matchedGroups.length; gi++) {
@@ -484,7 +494,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
         const contentType = res.headers.get("content-type") || "";
         if (contentType.includes("application/json")) {
           const data = await res.json();
-          for (const o of group.orders) collect.failedOrderIds.add(o.id);
+          for (const o of group.orders) collect.failed.set(o.id, { orderId: o.id, reason: data.error || "구매 실패" });
           setOrderStatuses((prev) =>
             prev.map((s) =>
               group.orders.some((o) => o.id === s.orderId)
@@ -515,6 +525,11 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
           break;
         }
         const msg = err instanceof Error ? err.message : String(err);
+        for (const o of group.orders) {
+          if (!collect.success.some((x) => x.orderId === o.id) && !collect.failed.has(o.id)) {
+            collect.failed.set(o.id, { orderId: o.id, reason: msg });
+          }
+        }
         setOrderStatuses((prev) =>
           prev.map((s) =>
             group.orders.some((o) => o.id === s.orderId) && s.status !== "success"
@@ -532,33 +547,36 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
     setStep("result");
 
     // 모든 그룹 완료 후 합산 결과로 디스코드 1회 발송 (개별 그룹 알림은 서버에서 억제됨)
-    const successItems = collect.success;
-    const successCount = successItems.length;
-    const totalQty = successItems.reduce((sum, s) => sum + (quantityMap.get(s.orderId) ?? 1), 0);
-    const failedCount = collect.failedOrderIds.size;
-    const totalCost = successItems.reduce((sum, s) => sum + (s.cost ?? 0), 0);
-    // 결제수단(카드사)별 결제 횟수·금액 집계
-    const cardMap = new Map<string, { count: number; amount: number }>();
-    for (const s of successItems) {
-      const key = s.paymentMethod?.trim() || "미확인";
-      const cur = cardMap.get(key) ?? { count: 0, amount: 0 };
-      cur.count += 1;
-      cur.amount += s.cost ?? 0;
-      cardMap.set(key, cur);
+    // 크론 자동구매(auto-purchase-stage)와 같은 건별 포맷 — lib/purchase-notification.ts
+    const toNotifyItem = (o: CollectedOutcome): PurchaseNotifyItem => {
+      const order = orderById.get(o.orderId);
+      return {
+        marketplace: order?.marketplace ?? null,
+        recipientName: order?.recipient_name ?? null,
+        productName: order?.product_name ?? null,
+        quantity: order?.quantity ?? 1,
+        settlement: order?.settlement ?? null,
+        cost: o.cost,
+        paymentMethod: o.paymentMethod,
+        units: o.units,
+        purchaseOrderNo: o.purchaseOrderNo,
+        reason: o.reason,
+      };
+    };
+    // 중단으로 시작조차 못 한 주문도 사유와 함께 실패 목록에 넣는다
+    if (cancelled) {
+      for (const o of allOrders) {
+        if (!collect.success.some((x) => x.orderId === o.id) && !collect.failed.has(o.id)) {
+          collect.failed.set(o.id, { orderId: o.id, reason: "작업 중단으로 미실행" });
+        }
+      }
     }
-    const cardBreakdown =
-      Array.from(cardMap.entries())
-        .map(([name, v]) => `${name} ${v.count}회 ${v.amount.toLocaleString()}원`)
-        .join("\n") || "-";
-    const platformLabels = Array.from(platformSet).map((p) => PLATFORM_LABELS[p]).join(", ") || "-";
-    const status: "success" | "partial" | "failed" | "cancelled" =
-      cancelled && successCount === 0
-        ? "cancelled"
-        : successCount > 0 && failedCount > 0
-          ? "partial"
-          : successCount > 0
-            ? "success"
-            : "failed";
+    const payload = buildPurchaseNotification({
+      trigger: "manual",
+      cancelled,
+      success: allOrders.filter((o) => collect.success.some((x) => x.orderId === o.id)).map((o) => toNotifyItem(collect.success.find((x) => x.orderId === o.id)!)),
+      failed: allOrders.filter((o) => collect.failed.has(o.id)).map((o) => toNotifyItem(collect.failed.get(o.id)!)),
+    });
     try {
       await fetch("/api/notifications/automation-result", {
         method: "POST",
@@ -566,19 +584,7 @@ export default function AutoPurchaseModal({ orders, onClose, onComplete, onMinim
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({
-          title: "자동구매",
-          status,
-          summary: `총 ${successCount}건 주문 · 수량 ${totalQty}개 · 결제금액 ${totalCost.toLocaleString()}원`,
-          fields: [
-            { name: "✅ 성공", value: `${successCount}건` },
-            { name: "📦 총수량", value: `${totalQty}개` },
-            { name: "❌ 실패", value: `${failedCount}건` },
-            { name: "🏬 플랫폼", value: platformLabels },
-            { name: "💳 총결제금액", value: `${totalCost.toLocaleString()}원` },
-            { name: "💳 카드별 결제", value: cardBreakdown },
-          ],
-        }),
+        body: JSON.stringify(payload),
       });
     } catch (err) {
       console.error("[auto-purchase] 디스코드 알림 발송 실패:", err instanceof Error ? err.message : String(err));

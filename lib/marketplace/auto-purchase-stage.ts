@@ -11,7 +11,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAppSetting, type AutoPurchaseSetting } from "@/lib/app-settings";
 import { startSyncRun, finishSyncRun } from "@/lib/marketplace/sync-run";
 import { notifyAutomationResult } from "@/lib/discord-notifier";
-import type { PurchaseOrderInfo } from "@/lib/scrapers/types";
+import { buildPurchaseNotification, type PurchaseNotifyItem } from "@/lib/purchase-notification";
+import type { PurchaseOrderInfo, PurchasedUnit } from "@/lib/scrapers/types";
 import { parsePurchaseOrders } from "@/lib/purchase-orders";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -34,6 +35,7 @@ function detectPlatform(url: string | null | undefined): (typeof PURCHASE_SOURCE
 
 interface OrderRow {
   id: string;
+  marketplace: string | null;
   product_name: string | null;
   purchase_url: string | null;
   purchase_id: string | null;
@@ -76,6 +78,9 @@ export interface AutoPurchaseStageResult {
   total: number;              // 구매대기 후보 전체
   purchased: number;
   purchaseFailed: number;
+  /** 건별 결과 (디스코드 건별 보고용) — 수동 모달과 같은 포맷 */
+  purchasedItems: PurchaseNotifyItem[];
+  failedItems: PurchaseNotifyItem[];
   wouldPurchase: string[];    // dryRun 시 구매 예정 목록 (상품명)
   skipped: {
     platform: number;         // 지마켓 외 링크
@@ -89,7 +94,7 @@ export interface AutoPurchaseStageResult {
 }
 
 const EMPTY_RESULT: AutoPurchaseStageResult = {
-  ran: false, dryRun: false, total: 0, purchased: 0, purchaseFailed: 0, wouldPurchase: [],
+  ran: false, dryRun: false, total: 0, purchased: 0, purchaseFailed: 0, purchasedItems: [], failedItems: [], wouldPurchase: [],
   skipped: { platform: 0, noProduct: 0, soldOut: 0, deficit: 0, noSettlement: 0, priceFailed: 0 },
   errors: [],
 };
@@ -181,7 +186,7 @@ export async function runAutoPurchaseStage(opts: AutoPurchaseStageOpts): Promise
   // 2. 대상 조회 (자동구매 모달의 purchasableOrders 필터와 동일)
   let orderQuery = opts.supabase
     .from("orders")
-    .select("id, product_name, purchase_url, purchase_id, purchase_order_no, tracking_no, purchased_at, delivery_status, quantity, settlement, cost, memo, purchase_source, recipient_name, postal_code, address, address_detail, recipient_phone, delivery_memo, purchase_orders")
+    .select("id, marketplace, product_name, purchase_url, purchase_id, purchase_order_no, tracking_no, purchased_at, delivery_status, quantity, settlement, cost, memo, purchase_source, recipient_name, postal_code, address, address_detail, recipient_phone, delivery_memo, purchase_orders")
     .eq("user_id", opts.userId)
     .eq("delivery_status", "구매대기")
     .not("purchase_url", "is", null)
@@ -361,20 +366,44 @@ export async function runAutoPurchaseStage(opts: AutoPurchaseStageOpts): Promise
       const contentType = res.headers.get("content-type") || "";
       if (contentType.includes("application/json")) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
+        const reason = `자동구매 API 실패 (HTTP ${res.status}${err.error ? `: ${err.error}` : ""})`;
         result.purchaseFailed += chunk.length;
-        result.errors.push(`자동구매 API 실패 (HTTP ${res.status}${err.error ? `: ${err.error}` : ""})`);
+        for (const o of chunk) result.failedItems.push(toNotifyItem(o, { orderId: o.id, reason }));
+        result.errors.push(reason);
         continue;
       }
+      const chunkById = new Map(chunk.map((o) => [o.id, o]));
+      const seen = new Set<string>();
+      const stream = { error: null as string | null };
       await readSseEvents(res, (e) => {
-        if (e.type === "done") {
-          result.purchased += Number(e.successCount) || 0;
-          result.purchaseFailed += Number(e.failCount) || 0;
-          const failed = e.failed as Array<{ orderId: string; reason: string }> | undefined;
-          for (const f of failed ?? []) result.errors.push(`구매 실패(${f.orderId}): ${f.reason}`);
+        if (e.type === "done" || e.type === "cancelled") {
+          const success = (e.success as PurchaseOutcome[] | undefined) ?? [];
+          const failed = (e.failed as PurchaseOutcome[] | undefined) ?? [];
+          for (const s of success) {
+            const o = chunkById.get(s.orderId);
+            if (!o || seen.has(s.orderId)) continue;
+            seen.add(s.orderId);
+            result.purchased++;
+            result.purchasedItems.push(toNotifyItem(o, s));
+          }
+          for (const f of failed) {
+            const o = chunkById.get(f.orderId);
+            if (!o || seen.has(f.orderId)) continue;
+            seen.add(f.orderId);
+            result.purchaseFailed++;
+            result.failedItems.push(toNotifyItem(o, f));
+          }
         } else if (e.type === "error") {
-          result.errors.push(`자동구매 오류: ${String(e.message)}`);
+          stream.error = `자동구매 오류: ${String(e.message)}`;
+          result.errors.push(stream.error);
         }
       });
+      // done 이벤트 없이 끝난 주문(서버 오류·연결 끊김)도 사유와 함께 실패로 남긴다
+      for (const o of chunk) {
+        if (seen.has(o.id)) continue;
+        result.purchaseFailed++;
+        result.failedItems.push(toNotifyItem(o, { orderId: o.id, reason: stream.error ?? "결과 미수신 (서버 응답 없음)" }));
+      }
     }
     log(`자동구매 완료: 성공 ${result.purchased} / 실패 ${result.purchaseFailed}`);
 
@@ -391,33 +420,57 @@ export async function runAutoPurchaseStage(opts: AutoPurchaseStageOpts): Promise
   }
 }
 
-function stageDetail(r: AutoPurchaseStageResult): Record<string, unknown> {
-  return { total: r.total, purchased: r.purchased, purchaseFailed: r.purchaseFailed, skipped: r.skipped, errors: r.errors.slice(0, 20), wouldPurchase: r.wouldPurchase.slice(0, 50) };
+/** 자동구매 API done 이벤트의 success/failed 항목 */
+interface PurchaseOutcome {
+  orderId: string;
+  purchaseOrderNo?: string;
+  cost?: number;
+  paymentMethod?: string;
+  units?: PurchasedUnit[];
+  reason?: string;
 }
 
-async function notifyStage(r: AutoPurchaseStageResult, trigger: string): Promise<void> {
+function toNotifyItem(o: OrderRow, outcome: PurchaseOutcome): PurchaseNotifyItem {
+  return {
+    marketplace: o.marketplace,
+    recipientName: o.recipient_name,
+    productName: o.product_name,
+    quantity: o.quantity ?? 1,
+    settlement: o.settlement,
+    cost: outcome.cost,
+    paymentMethod: outcome.paymentMethod,
+    units: outcome.units,
+    purchaseOrderNo: outcome.purchaseOrderNo,
+    reason: outcome.reason,
+  };
+}
+
+function stageDetail(r: AutoPurchaseStageResult): Record<string, unknown> {
+  return {
+    total: r.total, purchased: r.purchased, purchaseFailed: r.purchaseFailed, skipped: r.skipped, errors: r.errors.slice(0, 20), wouldPurchase: r.wouldPurchase.slice(0, 50),
+    purchasedItems: r.purchasedItems.slice(0, 50), failedItems: r.failedItems.slice(0, 50),
+  };
+}
+
+async function notifyStage(r: AutoPurchaseStageResult, trigger: "scheduler" | "manual"): Promise<void> {
   // 아무 일도 없었던 시간대(대상 0)는 디스코드를 조용히 둔다
   if (r.total === 0 && r.errors.length === 0) return;
   const skippedTotal = Object.values(r.skipped).reduce((a, b) => a + b, 0);
   if (r.purchased === 0 && r.purchaseFailed === 0 && skippedTotal === 0 && r.errors.length === 0) return;
-  const status = r.errors.length > 0 || r.purchaseFailed > 0 ? (r.purchased > 0 ? "partial" : "failed") : "success";
-  await notifyAutomationResult({
-    title: "자동구매",
-    status,
-    channel: "purchase",
-    summary: [
-      `구매대기 ${r.total}건 처리 (${trigger === "scheduler" ? "주문수집 후 자동" : "수동"})${r.dryRun ? " [드라이런]" : ""}`,
-      ...(r.errors.length > 0 ? ["", "오류/실패:", ...r.errors.slice(0, 10).map((e) => `- ${e}`)] : []),
-    ].join("\n"),
-    fields: [
-      { name: "구매 성공", value: r.purchased },
-      { name: "구매 실패", value: r.purchaseFailed },
-      { name: "품절 스킵", value: r.skipped.soldOut },
-      { name: "적자 스킵", value: r.skipped.deficit },
-      { name: "정산없음", value: r.skipped.noSettlement },
-      { name: "타플랫폼", value: r.skipped.platform },
-      { name: "상품 미매칭", value: r.skipped.noProduct },
-      { name: "가격수집 실패", value: r.skipped.priceFailed },
+  // 건별 실패 사유는 failedItems 에 이미 있으므로 errors 에서 중복 제거 — 건별로 못 묶는 오류만 남긴다
+  await notifyAutomationResult(buildPurchaseNotification({
+    trigger,
+    dryRun: r.dryRun,
+    success: r.purchasedItems,
+    failed: r.failedItems,
+    skipped: [
+      { label: "품절", count: r.skipped.soldOut },
+      { label: "적자", count: r.skipped.deficit },
+      { label: "정산없음", count: r.skipped.noSettlement },
+      { label: "타플랫폼", count: r.skipped.platform },
+      { label: "상품 미매칭", count: r.skipped.noProduct },
+      { label: "가격수집 실패", count: r.skipped.priceFailed },
     ],
-  });
+    errors: r.errors,
+  }));
 }
