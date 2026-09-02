@@ -490,8 +490,10 @@ const PRICE_V2_PLATFORMS = [
   { key: "smartstore", label: "스마트스토어 일괄수정" },
 ];
 
-async function exportPriceExcel(token, changedIds, soldOutIds) {
-  const ids = [...new Set([...changedIds, ...soldOutIds])];
+async function exportPriceExcel(token, changedIds, soldOutIds, restoredIds = []) {
+  // restoredIds 포함 필수: 품절 때 마진 35%로 부풀린 가격이 엑셀로 올라갔으므로,
+  // 재입고 복원(마진 8%) 가격도 엑셀에 실어야 ESM 마켓이 부풀린 가격에 고착되지 않는다 (orders 페이지 수동판과 동일 동작)
+  const ids = [...new Set([...changedIds, ...soldOutIds, ...restoredIds])];
   if (ids.length === 0) return [];
 
   const now = new Date();
@@ -589,7 +591,7 @@ async function main() {
   await step("margins", { soldOut: soldOut.length, restored: restoredIds.length });
   const market = await applyToMarketplaces(token, { changedIds: changed.map((r) => r.id), soldOutIds: soldOut, restoredIds });
   await step("market", market);
-  const excelFiles = await exportPriceExcel(token, changed.map((r) => r.id), soldOut);
+  const excelFiles = await exportPriceExcel(token, changed.map((r) => r.id), soldOut, restoredIds);
   await step("excel", { files: excelFiles.length });
 
   const elapsed = Math.round((Date.now() - started) / 1000);

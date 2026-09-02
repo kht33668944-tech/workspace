@@ -389,7 +389,9 @@ function ProductTable({
         for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) {
           const p = products[r], k = COLUMNS[c].key;
           if (!p || !EDITABLE_KEYS.has(k)) continue;
-          onUpdate(p.id, { [k]: NUMERIC_KEYS.has(k) ? 0 : "" });
+          const fixedKey = PLATFORM_FIXED_KEY_MAP[k];
+          if (fixedKey) onUpdate(p.id, { [fixedKey]: null });
+          else onUpdate(p.id, { [k]: NUMERIC_KEYS.has(k) ? 0 : "" });
         }
         onEndBatchUndo?.();
       }

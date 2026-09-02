@@ -4,7 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getAccessToken, getSupabaseClient } from "@/lib/api-helpers";
 import { toKstDateKey } from "@/lib/date-utils";
-import { calcSettlementPrice, calcPlatformPrice, buildRateMap } from "@/lib/product-calculations";
+import { buildRateMap } from "@/lib/product-calculations";
+import { computeCoupangTargetPrice } from "@/lib/marketplace-api-helpers";
 import { COL, DATA_START_ROW_INDEX } from "@/lib/coupang-price-inventory";
 import type { Product, CommissionRate, CoupangPriceInventory } from "@/types/database";
 
@@ -66,12 +67,10 @@ export async function POST(request: NextRequest) {
     const priceByProductId = new Map<string, number>();
     const noPriceProductIds: string[] = [];
     for (const p of products) {
-      const settlement = calcSettlementPrice(p.lowest_price, p.margin_rate);
-      const rate = (rateMap[p.category] ?? {}).coupang ?? 0;
-      if (p.fixed_price_coupang != null) {
-        priceByProductId.set(p.id, p.fixed_price_coupang);
-      } else if (rate > 0) {
-        priceByProductId.set(p.id, calcPlatformPrice(settlement, rate));
+      // API apply 경로와 동일 계산(고정가 10원 올림 포함) — 엑셀과 API가 다른 가격을 보내지 않도록 헬퍼 공유
+      const price = computeCoupangTargetPrice(p, rateMap);
+      if (price != null && price > 0) {
+        priceByProductId.set(p.id, price);
       } else {
         // 수수료율도 고정가도 없음 → 원가(최저가) 판매 방지: 제외 + 경고
         noPriceProductIds.push(p.id);

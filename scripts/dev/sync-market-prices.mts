@@ -43,7 +43,11 @@ if (platformArg === "all" || platformArg === "coupang") {
       await sleep(220);
       const ok = res.ok;
       if (ok) changed++; else { failed++; if (fails.length < 8) fails.push(`${it.productName.slice(0, 30)}: ${res.message}`); }
-      if (ok && !res.dryRun) await sb.from("coupang_price_inventory").update({ sale_price: Number(it.newValue), api_synced_at: new Date().toISOString() }).eq("option_id", it.vendorItemId);
+      // 쿠팡 테이블에는 api_synced_at 컬럼이 없다 (스마트스토어 전용) — 넣으면 update 전체가 400으로 무효화된다
+      if (ok && !res.dryRun) {
+        const { error: cacheErr } = await sb.from("coupang_price_inventory").update({ sale_price: Number(it.newValue) }).eq("option_id", it.vendorItemId);
+        if (cacheErr) console.error("[sync-market-prices] 쿠팡 캐시 갱신 실패:", cacheErr.message);
+      }
       await logMarketplaceApi(sb, { user_id: userId, platform: "coupang", credential_id: cp.id, action: res.dryRun ? "price:dry" : "price", status: ok ? "success" : "failed", product_id: it.productId, product_name: it.productName, vendor_item_id: it.vendorItemId, previous_value: livePrice != null ? String(livePrice) : it.previousValue, new_value: it.newValue, error_message: ok ? null : res.message });
     }
     let stopped = 0, stopFailed = 0;
@@ -51,7 +55,13 @@ if (platformArg === "all" || platformArg === "coupang") {
     for (const it of sv.items) {
       const res = await c.stopSale(it.vendorItemId);
       await sleep(220);
-      if (res.ok) { stopped++; if (!res.dryRun) await sb.from("coupang_price_inventory").update({ sale_status: "판매중지", api_synced_at: new Date().toISOString() }).eq("option_id", it.vendorItemId); } else stopFailed++;
+      if (res.ok) {
+        stopped++;
+        if (!res.dryRun) {
+          const { error: cacheErr } = await sb.from("coupang_price_inventory").update({ sale_status: "판매중지" }).eq("option_id", it.vendorItemId);
+          if (cacheErr) console.error("[sync-market-prices] 쿠팡 캐시 갱신 실패:", cacheErr.message);
+        }
+      } else stopFailed++;
       await logMarketplaceApi(sb, { user_id: userId, platform: "coupang", credential_id: cp.id, action: res.dryRun ? "stop:dry" : "stop", status: res.ok ? "success" : "failed", product_id: it.productId, product_name: it.productName, vendor_item_id: it.vendorItemId, previous_value: it.previousValue, new_value: "판매중지", error_message: res.ok ? null : res.message });
     }
     console.log(`[쿠팡] 가격 변경 ${changed} · 이미 같음 ${same} · 실패 ${failed} · 미연동 ${pv.blocked.length} | 판매중지 ${stopped} (실패 ${stopFailed}, 미연동 ${sv.blocked.length})`);
