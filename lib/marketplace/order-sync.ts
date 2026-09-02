@@ -291,6 +291,8 @@ async function loadExistingOrders(supabase: SupabaseClient, userId: string, plat
   for (const r of rows) {
     if (r.marketplace_product_order_no) byProductOrderNo.set(r.marketplace_product_order_no, r);
     if (r.marketplace_order_no) byOrderNo.set(r.marketplace_order_no, [...(byOrderNo.get(r.marketplace_order_no) ?? []), r]);
+    // fuzzy 풀에는 마켓 번호가 없는 행(플토 엑셀 입력분)만 — 번호 있는 행까지 넣으면 동일인·동일상품 재주문이 중복으로 오인돼 수집 누락된다
+    if (r.marketplace_product_order_no) continue;
     const fk = fuzzyKey(r.order_date, r.recipient_name, r.product_name);
     byFuzzy.set(fk, [...(byFuzzy.get(fk) ?? []), r]);
   }
@@ -369,8 +371,7 @@ export async function syncOrders(opts: SyncOptions): Promise<SyncResult> {
         // 같은 키의 기존 행 하나를 소비한다 (동일인·동일상품 다건 주문 대응)
         const plto = fuzzyPool.shift()!;
         // 플토 행에 마켓 번호를 채워 두면 다음부터 정확 매칭·취소 API 에서 바로 쓴다
-        if (plto.marketplace_product_order_no) continue;
-        if (plto && !dryRun) {
+        if (!dryRun) {
           await supabase
             .from("orders")
             .update({ marketplace_order_no: o.marketplace_order_no, marketplace_product_order_no: pon, marketplace_status: o.marketplace_status, marketplace_synced_at: o.marketplace_synced_at })
