@@ -136,8 +136,11 @@ export async function POST(request: NextRequest) {
             const memoLine = `구매처 반품신청(${r.selectedReason}${r.returnFeeText ? `, 반품비 ${r.returnFeeText} 환불차감` : ""})`;
             const { data: cur } = await serviceSb.from("orders").select("delivery_memo").eq("id", t.id).eq("user_id", userId).maybeSingle();
             const memo = cur?.delivery_memo ? `${cur.delivery_memo} | ${memoLine}` : memoLine;
+            // 반품준비 → 반품접수 로 전진 (교환준비는 상태 유지 — 교환은 재구매가 수동이라 반품 단계로 옮기지 않는다)
+            const patch: Record<string, unknown> = { purchase_return_requested_at: new Date().toISOString(), delivery_memo: memo };
+            if (t.delivery_status === "반품준비") patch.delivery_status = "반품접수";
             const { error } = await serviceSb.from("orders")
-              .update({ purchase_return_requested_at: new Date().toISOString(), delivery_memo: memo })
+              .update(patch)
               .eq("id", t.id).eq("user_id", userId);
             if (error) console.error(`[gmarket-return] 신청 기록 실패(${t.id}): ${error.message}`);
           }

@@ -16,6 +16,7 @@ import type { SyncPlatform } from "@/lib/marketplace/order-sync";
 import { shipOrders, type ShipResult } from "@/lib/marketplace/order-ship";
 import { notifyShipResults } from "@/lib/marketplace/order-sync-notify";
 import { collectTrackingForUser, type CollectAllResult } from "@/lib/tracking/collect-all";
+import { trackGmarketReturns } from "@/lib/tracking/gmarket-return-track";
 import { exportEsmTrackingExcel, type EsmExportResult } from "@/lib/tracking/esm-export";
 import { startSyncRun, finishSyncRun, type SyncRunPatch } from "@/lib/marketplace/sync-run";
 
@@ -118,6 +119,22 @@ try {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       log(`ESM 엑셀 예외: ${msg}`);
+      await finishRun(runId, { status: "failed", error: msg });
+    }
+  }
+
+  // 4) 지마켓 반품추적 — 반품접수 건의 지마켓 상세를 읽어 반품완료까지 반영 (--skip-return-track 로 생략)
+  //    읽기 위주라 --dry 여도 판정은 하고 DB 반영만 생략
+  if (!has("skip-return-track")) {
+    const runId = await startRun("return-track");
+    try {
+      const rt = await trackGmarketReturns(sb, userId, { dryRun: dry, log });
+      log(`반품추적: 확인 ${rt.checked} 접수 ${rt.toReceived} 완료 ${rt.toCompleted} 변화없음 ${rt.unchanged} 오류 ${rt.errors.length}${dry ? " [DRY]" : ""}`);
+      const st = rt.errors.length > 0 ? (rt.changes.length > 0 ? "partial" : "failed") : "success";
+      await finishRun(runId, { status: st, remote_count: rt.checked, detail: { toReceived: rt.toReceived, toCompleted: rt.toCompleted, changes: rt.changes.slice(0, 50), errors: rt.errors.slice(0, 20) } });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log(`반품추적 예외: ${msg}`);
       await finishRun(runId, { status: "failed", error: msg });
     }
   }

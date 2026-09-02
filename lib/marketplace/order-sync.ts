@@ -14,7 +14,7 @@ import { getSettlementRate, splitAddress } from "@/lib/excel-parser";
 import { toKstDateKey } from "@/lib/date-utils";
 import { sanitizeAddressDetail } from "@/lib/scrapers/types";
 import { isDryRun, logMarketplaceApi, normalizeNameKey, normalizeProductKey, sleep } from "@/lib/marketplace/common";
-import { LOCKED_STATUSES, TERMINAL_STATUSES } from "@/lib/constants";
+import { LOCKED_STATUSES, TERMINAL_STATUSES, returnRank } from "@/lib/constants";
 import { getMarketplaceCourierCode } from "@/lib/marketplace/courier-codes";
 import { getAppSetting } from "@/lib/app-settings";
 import { findCoupangReceipt } from "@/lib/marketplace/order-cancel";
@@ -550,6 +550,16 @@ export async function applyClaim(
   }
   // 취소요청이 이미 취소준비(판매자 취소 진행 중)면 상태 유지
   if (to === "취소요청" && order.delivery_status === "취소준비") return;
+  // 반품 역행 방지: 우리가 지마켓 반품신청/완료로 올린 단계를, 마켓이 보내는 낮은 반품단계(진행중=반품준비)로 되돌리지 않는다.
+  // 상태는 유지하고 claim_* 만 최신화 (준비<접수<완료 rank; 반품 아닌 to 는 rank 0 이라 영향 없음)
+  const toRank = returnRank(to);
+  const curRank = returnRank(order.delivery_status);
+  if (toRank > 0 && curRank > 0 && toRank < curRank) {
+    if (!dryRun && (receiptId != null || claimStatus)) {
+      await supabase.from("orders").update({ claim_status: claimStatus, claim_receipt_id: receiptId != null ? String(receiptId) : undefined, ...(reason ? { claim_reason: reason } : {}), marketplace_synced_at: new Date().toISOString() }).eq("id", order.id).eq("user_id", userId);
+    }
+    return;
+  }
   const locked = LOCKED.has(order.delivery_status);
   const patch: Record<string, unknown> = { claim_type: claimType, claim_status: claimStatus, marketplace_synced_at: new Date().toISOString() };
   if (receiptId != null) patch.claim_receipt_id = String(receiptId);

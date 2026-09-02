@@ -10,7 +10,7 @@ export type AutomationKey = "order-sync" | "inquiries" | "tracking-ship" | "pric
 export type RunKind =
   | "orders" | "inquiries" | "shipping" | "tracking-collect" | "esm-export"
   | "settlement" | "daily-summary" | "price" | "health-alert"
-  | "auto-purchase" | "gmarket-return";
+  | "auto-purchase" | "gmarket-return" | "return-track";
 
 export interface AutomationDef {
   key: AutomationKey;
@@ -50,9 +50,9 @@ export const AUTOMATIONS: AutomationDef[] = [
     maxRuntimeMin: 20, toleranceMin: 10,
   },
   {
-    key: "tracking-ship", label: "운송장·송장", description: "구매처 운송장 수집 → 마켓 송장 전송 → ESM 엑셀",
+    key: "tracking-ship", label: "운송장·송장", description: "구매처 운송장 수집 → 마켓 송장 전송 → ESM 엑셀 → 지마켓 반품추적",
     taskName: "OnliveTrackingShip", runVia: "schtasks",
-    kinds: ["tracking-collect", "shipping", "esm-export"], primaryKind: "tracking-collect",
+    kinds: ["tracking-collect", "shipping", "esm-export", "return-track"], primaryKind: "tracking-collect",
     schedule: { type: "interval", anchorHour: 2, minute: 30, intervalHours: 3 },
     maxRuntimeMin: 40, toleranceMin: 10,
   },
@@ -100,6 +100,7 @@ export const KIND_TO_KEY: Record<RunKind, AutomationKey | null> = {
   shipping: "tracking-ship",
   "tracking-collect": "tracking-ship",
   "esm-export": "tracking-ship",
+  "return-track": "tracking-ship",
   settlement: "settlement",
   "daily-summary": "daily-summary",
   price: "price",

@@ -67,7 +67,7 @@ export const COURIERS = [
 
 // 배송상태 목록 및 색상
 export const DELIVERY_STATUSES = [
-  "구매대기", "구매진행중", "구매확인필요", "발송불가", "부분구매", "배송준비", "배송완료", "취소요청", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료",
+  "구매대기", "구매진행중", "구매확인필요", "발송불가", "부분구매", "배송준비", "배송완료", "취소요청", "취소준비", "취소완료", "반품준비", "반품접수", "반품완료", "교환준비", "교환완료",
 ] as const;
 
 export type DeliveryStatus = typeof DELIVERY_STATUSES[number];
@@ -84,6 +84,7 @@ export const DELIVERY_STATUS_COLORS: Record<string, string> = {
   취소준비: "bg-red-500/20 text-red-400",
   취소완료: "bg-red-500/20 text-red-400",
   반품준비: "bg-orange-500/20 text-orange-400",
+  반품접수: "bg-orange-500/30 text-orange-300",
   반품완료: "bg-orange-500/20 text-orange-400",
   교환준비: "bg-purple-500/20 text-purple-400",
   교환완료: "bg-purple-500/20 text-purple-400",
@@ -95,7 +96,13 @@ export const TERMINAL_STATUSES = new Set<string>(["취소완료", "반품완료"
 /** 자동구매 락 중 — 상태는 두고 claim_* 만 기록 */
 export const LOCKED_STATUSES = new Set<string>(["구매진행중"]);
 /** 운송장이 입력돼도 배송완료로 자동 전환하지 않는 클레임 상태 (송장 전송 대상에서도 제외) */
-export const CLAIM_STATUSES = new Set<string>(["취소요청", "취소준비", "취소완료", "반품준비", "반품완료", "교환준비", "교환완료"]);
+export const CLAIM_STATUSES = new Set<string>(["취소요청", "취소준비", "취소완료", "반품준비", "반품접수", "반품완료", "교환준비", "교환완료"]);
+
+/** 반품 진행 단계 순서 — 크론이 낮은 단계로 되돌리지 못하게 하는 역행 방지용 (반품 아니면 0) */
+export const RETURN_RANK: Record<string, number> = { 반품준비: 1, 반품접수: 2, 반품완료: 3 };
+export function returnRank(status: string | null | undefined): number {
+  return status ? (RETURN_RANK[status] ?? 0) : 0;
+}
 
 // 상품 등록 상태
 // 판매중지 = 일시(품절 등, 재개는 사람이 등록완료로 변경) / 판매종료 = 영구(상품정보 오류·완전 품절 — 자동화가 절대 건드리지 않음)

@@ -209,3 +209,25 @@ export async function requestGmarketReturn(ctx: BrowserContext, input: GmarketRe
     await page.close().catch(() => {});
   }
 }
+
+export type GmarketReturnProgress = "접수" | "완료" | "기타";
+
+/**
+ * basic 구매상세페이지 상단 텍스트로 반품 진행상태를 읽는다 (읽기 전용, 아무것도 클릭 안 함).
+ * "반품완료" → 완료, "반품요청/반품접수/반품중/반품처리" → 접수, 그 외 → 기타.
+ * 지마켓은 구매자용 API가 없어 이 페이지가 유일한 소스 (2026-09-02 실측).
+ */
+export async function readGmarketReturnStatus(ctx: BrowserContext, detailUrl: string): Promise<GmarketReturnProgress> {
+  const page = await ctx.newPage();
+  try {
+    await page.goto(detailUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await sleep(1500);
+    await handleBotChallengeOnDetail(page);
+    const text = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    if (/반품완료/.test(text)) return "완료";
+    if (/반품요청|반품접수|반품중|반품처리/.test(text)) return "접수";
+    return "기타";
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
