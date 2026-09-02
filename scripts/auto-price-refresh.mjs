@@ -81,8 +81,7 @@ const SOLDOUT_MARGIN = 35;
 const DEFAULT_MARGIN = 8;
 
 // ---------- 디스코드 직통 (서버가 죽어 알림 API도 못 쓸 때 최후 수단) ----------
-async function discordDirect(message) {
-  const url = env.DISCORD_WEBHOOK_URL;
+async function discordDirect(message, url = env.DISCORD_WEBHOOK_URL) {
   if (!url) return;
   try {
     await fetch(url, {
@@ -93,6 +92,28 @@ async function discordDirect(message) {
   } catch (e) {
     log(`디스코드 직통 알림 실패: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+// ---------- 반복 실패 추적 ----------
+// 같은 상품이 마켓 반영에 계속 실패하면(데이터 문제 등 재시도로 안 풀리는 유형) 사람이 봐야 한다.
+// 이번 실행의 실패 목록으로 연속 실패 횟수를 갱신하고, 3회 도달·이후 3의 배수마다 경고 문구를 돌려준다.
+// 상태 파일 읽기/쓰기 실패는 무시 — 알림은 부가 기능이라 본작업을 막지 않는다.
+const FAIL_STREAK_FILE = path.join(LOG_DIR, "price-fail-streak.json");
+function trackRepeatedFailures(failures) {
+  let state = {};
+  try { state = JSON.parse(readFileSync(FAIL_STREAK_FILE, "utf8")); } catch {}
+  const next = {}; // 이번에 실패하지 않은 키는 옮기지 않는다 → 연속 카운트 리셋
+  const alerts = [];
+  for (const [key, message] of failures) {
+    const streak = (typeof state[key] === "number" ? state[key] : 0) + 1;
+    next[key] = streak;
+    if (streak >= 3 && streak % 3 === 0) {
+      const [platform, productName] = key.split("|");
+      alerts.push(`- [${platform}] ${productName} — ${streak}회 연속 실패: ${message}`);
+    }
+  }
+  try { writeFileSync(FAIL_STREAK_FILE, JSON.stringify(next, null, 1), "utf8"); } catch {}
+  return alerts;
 }
 
 // ---------- 실행 기록 (marketplace_sync_runs, kind="price" — 자동화 페이지 타임라인·진행중 카드용) ----------
@@ -446,6 +467,7 @@ async function applyToMarketplaces(token, { changedIds, soldOutIds, restoredIds 
     }
   } catch (e) { log(`검산 실패 — 변동분만 반영: ${e instanceof Error ? e.message : String(e)}`); }
 
+  const runFailures = new Map(); // "플랫폼|상품명" → 실패 메시지 (반복 실패 추적용)
   for (const platform of ["coupang", "smartstore"]) {
     const cred = creds.find((c) => c.platform === platform);
     if (!cred) continue;
@@ -472,12 +494,24 @@ async function applyToMarketplaces(token, { changedIds, soldOutIds, restoredIds 
           r.failed += json.failCount ?? 0;
           r.blocked += Array.isArray(json.blocked) ? json.blocked.length : 0;
           if (json.dryRun) r.dry = true;
-          for (const x of (json.results ?? []).filter((x) => x.status === "failed").slice(0, 3)) r.errors.push(`${x.productName}: ${x.message}`);
+          const failedItems = (json.results ?? []).filter((x) => x.status === "failed");
+          for (const x of failedItems.slice(0, 3)) r.errors.push(`${x.productName}: ${x.message}`);
+          for (const x of failedItems) runFailures.set(`${platform}|${x.productName}`, `${job.action}: ${x.message}`);
         } catch (e) { r.errors.push(`${job.action}: ${e instanceof Error ? e.message : String(e)}`); }
       }
     }
     log(`${platform} API 반영: 가격 ${r.price} · 판매중지 ${r.stop} · 재개 ${r.resume} · 실패 ${r.failed} · 미연동 ${r.blocked}${r.dry ? " [DRY]" : ""}`);
     for (const e of r.errors.slice(0, 3)) log(`  x ${e}`);
+  }
+
+  // 반복 실패 경고 — 재시도로 안 풀리는 실패(데이터 문제 등)는 디스코드 가격 채널로 사람에게 알린다
+  const alerts = trackRepeatedFailures(runFailures);
+  if (alerts.length > 0) {
+    log(`반복 실패 경고 ${alerts.length}건 → 디스코드 알림`);
+    await discordDirect(
+      `⚠️ **가격 반영 반복 실패 (${LABEL})** — 자동 재시도로 해결되지 않는 상품입니다. 원인 확인 필요:\n${alerts.join("\n")}`,
+      env.DISCORD_WEBHOOK_PRICE || env.DISCORD_WEBHOOK_URL,
+    );
   }
   return out;
 }
