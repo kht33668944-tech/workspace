@@ -1026,6 +1026,8 @@ export async function backfillMarketplaceNumbers(opts: SyncOptions): Promise<Bac
     const details = await searchNaverOrdersByPaidDate(client, days, result.errors);
     candidates = details.map((d) => mapNaverProductOrder(d, userId)).filter((o): o is OrderInsert => !!o);
   }
+  // 수집 전에 이미 취소된 마켓 주문은 발주서에 없어도 정상 — 미발견(notFound) 오탐을 막는다
+  candidates = candidates.filter((o) => o.marketplace_status !== "CANCELED");
   result.remoteCount = candidates.length;
   const seen = new Set<string>();
   for (const o of candidates) {
