@@ -16,6 +16,11 @@ interface PreviewTarget {
   mappedReason: string;
   detailText: string;
   needRepurchase: boolean;
+  claimQuantity?: number | null;   // 마켓 반품 요청 수량 (부분 반품)
+  orderNos?: string[];              // 이번에 신청할 구매처 주문번호들 (수량 N개 자동구매 = N건)
+  entryCount?: number;
+  bundleQuantities?: number[];      // 묶음구매 엔트리(수량 2 이상)
+  alreadyRequested?: number;        // 앞선 실행에서 이미 신청된 주문 수
 }
 
 interface RunResultRow {
@@ -27,6 +32,11 @@ interface RunResultRow {
   returnFee: string | null;
   error?: string;
   needRepurchase: boolean;
+  orderNos?: string[];
+  entryCount?: number;
+  requestedCount?: number;
+  hasContactField?: boolean;
+  sms?: { status: "sent" | "skipped" | "failed"; message: string; phone?: string };
 }
 
 const API = "/api/marketplace-api/returns/gmarket";
@@ -167,7 +177,12 @@ export default function GmarketReturnModal({ open, onClose, onRefetch, orderIds 
                     <tr key={t.orderId} className="border-b border-[var(--border)] last:border-0">
                       <td className="p-2 text-[var(--text-primary)]">
                         {t.recipientName ?? "?"} · {t.productName ?? "?"} ×{t.quantity ?? 1}
+                        {t.claimQuantity != null && t.claimQuantity < (t.quantity ?? 1) && <span className="ml-1 text-sky-400">(요청 {t.claimQuantity}개)</span>}
+                        {(t.entryCount ?? 1) > 1 && <span className="ml-1 text-[var(--text-secondary)]">주문 {t.entryCount}건</span>}
+                        {(t.bundleQuantities?.length ?? 0) > 0 && <span className="ml-1 text-amber-400">(묶음 {t.bundleQuantities!.join("/")}개 — 수량 선택 확인)</span>}
+                        {(t.alreadyRequested ?? 0) > 0 && <span className="ml-1 text-[var(--text-secondary)]">(이미 {t.alreadyRequested}건 신청됨)</span>}
                         {t.needRepurchase && <span className="ml-1 text-amber-400">(교환 — 재구매 필요)</span>}
+                        {t.orderNos && t.orderNos.length > 0 && <div className="font-mono text-[10px] text-[var(--text-secondary)]">{t.orderNos.join(", ")}</div>}
                       </td>
                       <td className="p-2 text-[var(--text-secondary)]">{t.deliveryStatus}</td>
                       <td className="p-2 text-[var(--text-secondary)]">
@@ -190,8 +205,11 @@ export default function GmarketReturnModal({ open, onClose, onRefetch, orderIds 
             <div className="space-y-1">
               {results.map((r) => (
                 <p key={r.orderId} className={`text-xs ${r.ok ? "text-emerald-400" : "text-red-400"}`}>
-                  {r.ok ? "✓" : "✗"} {r.recipientName ?? "?"} · {r.productName ?? "?"} — {r.ok ? `${r.selectedReason}${r.returnFee ? ` (반품비 ${r.returnFee} 환불차감)` : ""}` : r.error}
+                  {r.ok ? "✓" : "✗"} {r.recipientName ?? "?"} · {r.productName ?? "?"}{(r.entryCount ?? 1) > 1 ? ` [주문 ${r.entryCount}건]` : ""} — {r.ok ? `${r.selectedReason}${r.returnFee ? ` (반품비 ${r.returnFee} 환불차감)` : ""}` : `${r.error}${(r.requestedCount ?? 0) > 0 ? ` (${r.requestedCount}/${r.entryCount}건 신청됨)` : ""}`}
                   {r.ok && r.needRepurchase && <span className="text-amber-400"> · 재구매 필요</span>}
+                  {r.hasContactField && <span className="text-sky-400"> · 수거지 연락처 입력칸 있음</span>}
+                  {r.sms?.status === "sent" && <span className="text-emerald-400"> · 안내 문자 발송{r.sms.phone ? ` (${r.sms.phone})` : ""}</span>}
+                  {r.sms?.status === "failed" && <span className="text-amber-400"> · 안내 문자 실패: {r.sms.message}</span>}
                 </p>
               ))}
             </div>

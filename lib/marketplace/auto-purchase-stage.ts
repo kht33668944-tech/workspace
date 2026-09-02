@@ -12,6 +12,7 @@ import { getAppSetting, type AutoPurchaseSetting } from "@/lib/app-settings";
 import { startSyncRun, finishSyncRun } from "@/lib/marketplace/sync-run";
 import { notifyAutomationResult } from "@/lib/discord-notifier";
 import type { PurchaseOrderInfo } from "@/lib/scrapers/types";
+import { parsePurchaseOrders } from "@/lib/purchase-orders";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = SupabaseClient<any, any, any>;
@@ -51,6 +52,7 @@ interface OrderRow {
   address_detail: string | null;
   recipient_phone: string | null;
   delivery_memo: string | null;
+  purchase_orders?: unknown;
 }
 
 interface ProductRow {
@@ -179,7 +181,7 @@ export async function runAutoPurchaseStage(opts: AutoPurchaseStageOpts): Promise
   // 2. 대상 조회 (자동구매 모달의 purchasableOrders 필터와 동일)
   let orderQuery = opts.supabase
     .from("orders")
-    .select("id, product_name, purchase_url, purchase_id, purchase_order_no, tracking_no, purchased_at, delivery_status, quantity, settlement, cost, memo, purchase_source, recipient_name, postal_code, address, address_detail, recipient_phone, delivery_memo")
+    .select("id, product_name, purchase_url, purchase_id, purchase_order_no, tracking_no, purchased_at, delivery_status, quantity, settlement, cost, memo, purchase_source, recipient_name, postal_code, address, address_detail, recipient_phone, delivery_memo, purchase_orders")
     .eq("user_id", opts.userId)
     .eq("delivery_status", "구매대기")
     .not("purchase_url", "is", null)
@@ -189,7 +191,7 @@ export async function runAutoPurchaseStage(opts: AutoPurchaseStageOpts): Promise
   if (orderErr) throw new Error(`구매대기 주문 조회 실패: ${orderErr.message}`);
 
   let candidates = ((orderRows ?? []) as OrderRow[]).filter(
-    (o) => (!o.purchase_order_no || o.purchase_order_no.trim() === "") && !o.tracking_no && !o.purchased_at,
+    (o) => (!o.purchase_order_no || o.purchase_order_no.trim() === "") && !o.tracking_no && !o.purchased_at && parsePurchaseOrders(o.purchase_orders).length === 0,
   );
 
   // 중복구매 방지 — 구매로그에 성공 기록이 이미 있는 주문은 제외 (use-orders 의 purchase_duplicate_level 판정과 동일 근거)

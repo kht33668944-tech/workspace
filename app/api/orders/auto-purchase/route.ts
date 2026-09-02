@@ -5,8 +5,10 @@ import { purchaseOhouse } from "@/lib/scrapers/ohouse-purchase";
 import { decrypt } from "@/lib/crypto";
 import { browserPool } from "@/lib/scrapers/browser-pool";
 import { getAccessToken, getSupabaseClient, getServiceSupabaseClient } from "@/lib/api-helpers";
-import { purchaseDetailUrl, type PurchaseOrderInfo } from "@/lib/scrapers/types";
+import { purchaseDetailUrl, type PurchaseOrderInfo, type PurchasedUnit } from "@/lib/scrapers/types";
 import { notifyAutomationResult, type AutomationNotifyStatus } from "@/lib/discord-notifier";
+import { parsePurchaseOrders, upsertEntry } from "@/lib/purchase-orders";
+import type { PurchaseOrderEntry } from "@/types/database";
 
 export const maxDuration = 300;
 
@@ -37,7 +39,7 @@ interface SSEEvent {
   purchasedCount?: number;
   totalQty?: number;
   success?: { orderId: string; purchaseOrderNo: string; cost?: number; paymentMethod?: string }[];
-  failed?: { orderId: string; reason: string; purchaseOrderNo?: string; cost?: number; paymentMethod?: string }[];
+  failed?: { orderId: string; reason: string; purchaseOrderNo?: string; cost?: number; paymentMethod?: string; payNo?: string; units?: PurchasedUnit[] }[];
   successCount?: number;
   failCount?: number;
 }
@@ -243,13 +245,78 @@ export async function POST(request: NextRequest) {
           }
         };
 
+        // 단위 구매(결제 1건) → purchase_orders 엔트리
+        const unitToEntry = (unit: PurchasedUnit, purchasedAt: string): PurchaseOrderEntry => ({
+          order_no: unit.orderNo,
+          pay_no: unit.payNo ?? null,
+          detail_url: purchaseDetailUrl(platform, unit.orderNo, unit.payNo),
+          quantity: 1,
+          purchased_at: purchasedAt,
+          source: "auto",
+        });
+
+        // 단위 구매마다 purchase_logs 에 기록한 주문번호 (완료 시 중복 기록 방지)
+        const unitLoggedNos = new Map<string, Set<string>>();
+
+        const insertPurchaseLog = async (orderId: string, unit: PurchasedUnit, status: "success" | "failed", errorMessage?: string) => {
+          const orderInfo = body.orders.find(o => o.orderId === orderId);
+          const { error: logErr } = await supabase.from("purchase_logs").insert({
+            user_id: userId,
+            batch_id: batchId,
+            order_id: orderId,
+            platform,
+            login_id: loginId,
+            status,
+            purchase_order_no: unit.orderNo,
+            cost: unit.cost ?? null,
+            payment_method: unit.paymentMethod ?? null,
+            error_message: errorMessage ?? null,
+            product_name: orderInfo?.productName ?? null,
+            recipient_name: orderInfo?.recipientName ?? null,
+          });
+          if (logErr) console.error(`[auto-purchase] 구매 로그 기록 실패 (${orderId} ${unit.orderNo}):`, logErr.message);
+          else if (status === "success") {
+            const set = unitLoggedNos.get(orderId) ?? new Set<string>();
+            set.add(unit.orderNo);
+            unitLoggedNos.set(orderId, set);
+          }
+        };
+
+        // 단위 구매가 끝날 때마다 purchase_orders 에 누적 — 중간 실패(부분구매)에도 산 만큼은 남긴다.
+        // 대표 컬럼(purchase_order_no 등)은 건드리지 않으므로 기존 잠금 조건(purchase_order_no 비어 있음)과 충돌하지 않는다.
+        const onUnitPurchased = async (orderId: string, unit: PurchasedUnit, index: number, total: number) => {
+          const { data: cur, error: readErr } = await supabase
+            .from("orders")
+            .select("purchase_orders, delivery_status")
+            .eq("id", orderId)
+            .eq("user_id", userId)
+            .maybeSingle();
+          if (readErr || !cur) {
+            console.warn(`[auto-purchase] 단위 구매 누적 실패 — 주문 조회 불가 (${orderId} ${index}/${total}):`, readErr?.message ?? "없음");
+          } else if (cur.delivery_status !== purchaseLockStatus) {
+            console.warn(`[auto-purchase] 단위 구매 누적 건너뜀 — 상태 '${cur.delivery_status}' (${orderId} ${index}/${total}, ${unit.orderNo})`);
+          } else {
+            const entries = upsertEntry(parsePurchaseOrders(cur.purchase_orders), unitToEntry(unit, new Date().toISOString()));
+            const { error: upErr } = await supabase
+              .from("orders")
+              .update({ purchase_orders: entries })
+              .eq("id", orderId)
+              .eq("user_id", userId)
+              .eq("delivery_status", purchaseLockStatus);
+            if (upErr) console.error(`[auto-purchase] 단위 구매 누적 실패 (${orderId} ${index}/${total}):`, upErr.message);
+            else console.log(`[auto-purchase] 단위 구매 누적 (${orderId} ${index}/${total}): ${unit.orderNo}`);
+          }
+          await insertPurchaseLog(orderId, unit, "success");
+        };
+
         // 성공 시 즉시 DB 업데이트하는 콜백
         const onOrderComplete = async (
           orderId: string,
           purchaseOrderNo: string,
           cost?: number,
           paymentMethod?: string,
-          payNo?: string
+          payNo?: string,
+          units?: PurchasedUnit[]
         ) => {
           completedCallbackOrderIds.add(orderId);
 
@@ -342,32 +409,24 @@ export async function POST(request: NextRequest) {
           console.log(`[auto-purchase] DB 즉시 업데이트 성공 (${orderId}): ${JSON.stringify(updateData)}`);
           sendEvent({ type: "db_updated", orderId, status: "ok", purchaseOrderNo, cost, paymentMethod });
 
-          // 구매처 주문상세 링크 — 컬럼 미적용 환경에서도 구매번호 저장이 깨지지 않게 별도 갱신
-          const detailUrl = purchaseDetailUrl(platform, purchaseOrderNo, payNo);
-          if (detailUrl) {
-            await supabase.from("orders").update({ purchase_detail_url: detailUrl })
-              .eq("id", orderId).eq("user_id", userId)
-              .then(({ error: urlErr }) => {
-                if (urlErr) console.error(`[auto-purchase] 주문상세링크 저장 실패 (${orderId}):`, urlErr.message);
-              });
-          }
+          // 구매 주문 목록 + 대표 상세링크 — 컬럼 미적용 환경에서도 구매번호 저장이 깨지지 않게 별도 갱신.
+          // 단위 콜백이 누락됐어도 완료 시점의 units 전체로 다시 써서 보정한다.
+          const purchasedAt = (updateData.purchased_at as string | undefined) ?? existingOrder?.purchased_at ?? new Date().toISOString();
+          const finalUnits: PurchasedUnit[] = units && units.length > 0 ? units : [{ orderNo: purchaseOrderNo, payNo, cost, paymentMethod }];
+          const entries = finalUnits.map((u) => unitToEntry(u, purchasedAt));
+          const detailUrl = entries[0]?.detail_url ?? null;
+          await supabase.from("orders").update({ purchase_orders: entries, purchase_detail_url: detailUrl })
+            .eq("id", orderId).eq("user_id", userId)
+            .then(({ error: urlErr }) => {
+              if (urlErr) console.error(`[auto-purchase] 구매 주문 목록/상세링크 저장 실패 (${orderId}):`, urlErr.message);
+            });
 
-          // 구매 로그 기록
-          await supabase.from("purchase_logs").insert({
-            user_id: userId,
-            batch_id: batchId,
-            order_id: orderId,
-            platform,
-            login_id: loginId,
-            status: "success",
-            purchase_order_no: purchaseOrderNo,
-            cost: cost ?? null,
-            payment_method: paymentMethod ?? null,
-            product_name: orderInfo?.productName ?? null,
-            recipient_name: orderInfo?.recipientName ?? null,
-          }).then(({ error: logErr }) => {
-            if (logErr) console.error(`[auto-purchase] 구매 로그 기록 실패 (${orderId}):`, logErr.message);
-          });
+          // 구매 로그 기록 — 단위 콜백에서 이미 기록한 주문번호는 건너뛴다
+          const logged = unitLoggedNos.get(orderId) ?? new Set<string>();
+          for (const u of finalUnits) {
+            if (logged.has(u.orderNo)) continue;
+            await insertPurchaseLog(orderId, units && units.length > 0 ? u : { ...u, cost }, "success");
+          }
         };
 
         const releasePurchaseLock = async (orderId: string) => {
@@ -581,9 +640,9 @@ export async function POST(request: NextRequest) {
           let result;
           try {
             if (platform === "gmarket") {
-              result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, targetOrders, onProgress, signal, onOrderComplete, (order) => assertOrderStillLockedForPurchase(order.orderId));
+              result = await purchaseGmarket(loginId, loginPw, body.paymentPin!, targetOrders, onProgress, signal, onOrderComplete, (order) => assertOrderStillLockedForPurchase(order.orderId), onUnitPurchased);
             } else {
-              result = await purchaseOhouse(loginId, loginPw, targetOrders, onProgress, supabase, signal, body.paymentPin, naverLoginId, naverLoginPw);
+              result = await purchaseOhouse(loginId, loginPw, targetOrders, onProgress, supabase, signal, body.paymentPin, naverLoginId, naverLoginPw, onUnitPurchased);
             }
           } finally {
             browserPool.release();
@@ -592,7 +651,7 @@ export async function POST(request: NextRequest) {
           // 성공한 주문 즉시 DB 업데이트 (스크래퍼에서 콜백 안 탄 경우 대비)
           for (const s of result.success) {
             if (!completedCallbackOrderIds.has(s.orderId)) {
-              await onOrderComplete(s.orderId, s.purchaseOrderNo, s.cost, s.paymentMethod, s.payNo);
+              await onOrderComplete(s.orderId, s.purchaseOrderNo, s.cost, s.paymentMethod, s.payNo, s.units);
             }
           }
 
@@ -668,6 +727,16 @@ export async function POST(request: NextRequest) {
                     cost: f.cost,
                     paymentMethod: f.paymentMethod,
                   });
+                  // 부분구매도 구매 주문 목록·상세링크를 남긴다 (반품/운송장 수집이 산 만큼 찾을 수 있게)
+                  const partialAt = (partialUpdate.purchased_at as string | undefined) ?? existingPartialOrder?.purchased_at ?? new Date().toISOString();
+                  const partialUnits: PurchasedUnit[] = f.units && f.units.length > 0 ? f.units : [{ orderNo: f.purchaseOrderNo, payNo: f.payNo, cost: f.cost, paymentMethod: f.paymentMethod }];
+                  const partialEntries = partialUnits.map((u) => unitToEntry(u, partialAt));
+                  await supabase.from("orders")
+                    .update({ purchase_orders: partialEntries, purchase_detail_url: partialEntries[0]?.detail_url ?? null })
+                    .eq("id", f.orderId).eq("user_id", userId)
+                    .then(({ error: urlErr }) => {
+                      if (urlErr) console.error(`[auto-purchase] 부분구매 주문 목록 저장 실패 (${f.orderId}):`, urlErr.message);
+                    });
                 }
             }
 

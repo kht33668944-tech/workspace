@@ -6,7 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import type { MarketplaceSyncRun } from "@/types/database";
 
 interface NewOrder { id?: string; bundleNo: string | null; recipientName: string | null; productName: string | null; quantity: number; revenue: number; marketplaceStatus: string | null }
-interface Claim { orderId: string; recipientName: string | null; productName: string | null; from: string; to: string; claimStatus: string; reason?: string }
+interface Claim { orderId: string; recipientName: string | null; productName: string | null; from: string; to: string; claimStatus: string; reason?: string; phoneUpdated?: boolean; quantity?: number | null }
 interface SyncResult {
   platform: "coupang" | "smartstore";
   dryRun: boolean;
@@ -216,7 +216,7 @@ export default function OrderSyncModal({ onClose, onDone, cancelRequests }: Prop
                 <h3 className="text-sm font-medium text-amber-400 mb-2">클레임 반영 {totalClaims}건</h3>
                 <div className="max-h-44 overflow-y-auto border border-amber-500/20 rounded-lg divide-y divide-amber-500/10">
                   {results.flatMap((r) => r.claims.map((c) => (
-                    <div key={c.orderId} className="px-3 py-1.5 text-sm"><span className="text-[var(--text-primary)]">{c.recipientName} · {c.productName}</span><span className="text-[var(--text-muted)]"> · {c.from} → {c.to}{c.reason ? ` (${c.reason})` : ""}</span></div>
+                    <div key={c.orderId} className="px-3 py-1.5 text-sm"><span className="text-[var(--text-primary)]">{c.recipientName} · {c.productName}</span><span className="text-[var(--text-muted)]"> · {c.from} → {c.to}{c.reason ? ` (${c.reason})` : ""}{c.quantity ? ` · 요청 ${c.quantity}개` : ""}</span>{c.phoneUpdated && <span className="ml-1 text-sky-400 text-xs">연락처 갱신</span>}</div>
                   )))}
                 </div>
               </div>

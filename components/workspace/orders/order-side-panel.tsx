@@ -6,6 +6,7 @@ import { DELIVERY_STATUSES, DELIVERY_STATUS_COLORS } from "@/lib/constants";
 import { sanitizeText } from "@/lib/sanitize";
 import type { Order, OrderUpdate, ConsultationLog } from "@/types/database";
 import ClaimActions from "@/components/workspace/orders/claim-actions";
+import PurchaseOrdersEditor from "@/components/workspace/orders/purchase-orders-editor";
 
 function InfoRow({ label, value, highlight }: { label: string; value: string | null | undefined; highlight?: boolean }) {
   if (!value) return null;
@@ -110,9 +111,17 @@ export function OrderSidePanelContent({ order, onUpdate }: OrderSidePanelProps) 
           {order.delivery_memo && (
             <InfoRow label="배송메모" value={order.delivery_memo} highlight />
           )}
-          {order.purchase_order_no && (
-            <InfoRow label="구매번호" value={order.purchase_order_no} />
+          {(order.claim_reason || order.claim_quantity != null) && (
+            <InfoRow
+              label="반품/교환 사유"
+              value={[order.claim_reason, order.claim_quantity != null ? `요청 수량 ${order.claim_quantity}/${order.quantity ?? "?"}` : ""].filter(Boolean).join(" · ")}
+              highlight
+            />
           )}
+          {order.claim_contact_updated_at && (
+            <InfoRow label="연락처" value={`반품/교환 접수 시 마켓이 재발급한 번호로 갱신됨 (${new Date(order.claim_contact_updated_at).toLocaleString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })})`} />
+          )}
+          <PurchaseOrdersEditor order={order} onUpdate={onUpdate} />
         </div>
       </div>
 

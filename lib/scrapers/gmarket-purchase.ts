@@ -3,7 +3,7 @@ import { launchBrowser } from "./browser";
 import sharp from "sharp";
 import type TesseractType from "tesseract.js";
 import path from "path";
-import type { PurchaseOrderInfo, PurchaseResult } from "./types";
+import type { PurchaseOrderInfo, PurchaseResult, PurchasedUnit, UnitPurchasedCallback } from "./types";
 import { sanitizeAddressDetail } from "./types";
 import { formatAutomationError } from "./error-messages";
 
@@ -27,7 +27,8 @@ interface ProgressCallback {
 }
 
 interface OrderCompleteCallback {
-  (orderId: string, purchaseOrderNo: string, cost?: number, paymentMethod?: string, payNo?: string): Promise<void> | void;
+  // purchaseOrderNo/payNo = 대표(첫 번째 단위), units = 이 주문의 모든 단위 구매(수량 N → N건)
+  (orderId: string, purchaseOrderNo: string, cost?: number, paymentMethod?: string, payNo?: string, units?: PurchasedUnit[]): Promise<void> | void;
 }
 
 interface OrderPreflightCallback {
@@ -81,7 +82,8 @@ export async function purchaseGmarket(
   onProgress?: ProgressCallback,
   abortSignal?: AbortSignal,
   onOrderComplete?: OrderCompleteCallback,
-  onBeforeOrder?: OrderPreflightCallback
+  onBeforeOrder?: OrderPreflightCallback,
+  onUnitPurchased?: UnitPurchasedCallback
 ): Promise<PurchaseResult> {
   const result: PurchaseResult = { success: [], failed: [] };
 
@@ -153,8 +155,8 @@ export async function purchaseGmarket(
           : (totalQty > 1 ? `구매 진행 중... (0/${totalQty})` : "구매 진행 중...")
       );
 
-      let lastOrderNo = "";
-      let lastPayNo: string | undefined;
+      // 단위 구매(결제 1건) 목록 — 대표 주문번호/결제번호는 첫 번째 단위
+      const units: PurchasedUnit[] = [];
       let totalCost = 0;
       let costExtractedCount = 0;
       let lastPaymentMethod: string | undefined;
@@ -196,8 +198,8 @@ export async function purchaseGmarket(
           const isRepeat = q > 1;
           const { purchaseOrderNo, cost, paymentMethod, payNo } = await processSingleOrder(activePage, context, singleOrder, paymentPin, existingOrderNosBeforePurchase, isRepeat);
 
-          lastOrderNo = purchaseOrderNo;
-          if (payNo) lastPayNo = payNo;
+          const unit: PurchasedUnit = { orderNo: purchaseOrderNo, payNo: payNo ?? undefined, cost, paymentMethod };
+          units.push(unit);
           if (cost) { totalCost += cost; costExtractedCount++; }
           if (paymentMethod) lastPaymentMethod = paymentMethod;
           successCount++;
@@ -205,9 +207,17 @@ export async function purchaseGmarket(
           if (totalQty > 1) {
             console.log(`[gmarket-purchase] ${q}/${totalQty}번째 구매 성공: ${purchaseOrderNo} (단가: ${cost ?? "미확인"})`);
           }
+          // 단위 구매 즉시 발주서 purchase_orders 에 누적 (중간 실패에도 산 만큼은 남긴다)
+          if (onUnitPurchased) {
+            try {
+              await onUnitPurchased(order.orderId, unit, q, totalQty);
+            } catch (cbErr) {
+              console.warn(`[gmarket-purchase] onUnitPurchased 콜백 오류 (${order.orderId} ${q}/${totalQty}):`, cbErr instanceof Error ? cbErr.message : String(cbErr));
+            }
+          }
         }
 
-        // 모든 수량 구매 완료 → 마지막 주문번호 + 원가 합산으로 결과 기록
+        // 모든 수량 구매 완료 → 대표(첫 번째) 주문번호 + 원가 합산으로 결과 기록
         // 일부 반복에서 원가 추출 실패 시 단가 평균 × 총 수량으로 보정
         let finalCost: number | undefined;
         if (totalCost > 0) {
@@ -215,26 +225,29 @@ export async function purchaseGmarket(
             ? Math.round(totalCost / costExtractedCount) * totalQty
             : totalCost;
         }
-        result.success.push({ orderId: order.orderId, purchaseOrderNo: lastOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod, payNo: lastPayNo });
-        onProgress?.(order.orderId, "success", `주문번호: ${lastOrderNo}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${lastPaymentMethod ? ` [${lastPaymentMethod}]` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`, lastOrderNo, { purchased: successCount, total: totalQty });
-        console.log(`[gmarket-purchase] 주문 성공: ${order.orderId} → ${lastOrderNo} (총 원가: ${finalCost ?? "미확인"}, ${totalQty}개, 카드: ${lastPaymentMethod ?? "미확인"})`);
+        const repOrderNo = units[0]?.orderNo ?? "";
+        const repPayNo = units[0]?.payNo;
+        result.success.push({ orderId: order.orderId, purchaseOrderNo: repOrderNo, cost: finalCost, paymentMethod: lastPaymentMethod, payNo: repPayNo, units: [...units] });
+        onProgress?.(order.orderId, "success", `주문번호: ${repOrderNo}${units.length > 1 ? ` 외 ${units.length - 1}건` : ""}${finalCost ? ` (원가: ${finalCost.toLocaleString()}원)` : ""}${lastPaymentMethod ? ` [${lastPaymentMethod}]` : ""}${totalQty > 1 ? ` (${totalQty}개)` : ""}`, repOrderNo, { purchased: successCount, total: totalQty });
+        console.log(`[gmarket-purchase] 주문 성공: ${order.orderId} → ${units.map((u) => u.orderNo).join(",")} (총 원가: ${finalCost ?? "미확인"}, ${totalQty}개, 카드: ${lastPaymentMethod ?? "미확인"})`);
 
         // 성공 즉시 DB 반영 (취소/예외로 배치가 중단돼도 데이터 유실 방지)
         if (onOrderComplete) {
           try {
-            await onOrderComplete(order.orderId, lastOrderNo, finalCost, lastPaymentMethod, lastPayNo);
+            await onOrderComplete(order.orderId, repOrderNo, finalCost, lastPaymentMethod, repPayNo, [...units]);
           } catch (cbErr) {
             console.error(`[gmarket-purchase] onOrderComplete 콜백 오류 (${order.orderId}):`, cbErr instanceof Error ? cbErr.message : String(cbErr));
           }
         }
       } catch (err) {
         const reason = formatAutomationError(err);
+        const repOrderNo = units[0]?.orderNo ?? "";
         const partialInfo = successCount > 0 && totalQty > 1
-          ? ` (${successCount}/${totalQty}개 구매 후 실패${lastOrderNo ? `, 구매된 주문번호: ${lastOrderNo}` : ""})`
+          ? ` (${successCount}/${totalQty}개 구매 후 실패${units.length ? `, 구매된 주문번호: ${units.map((u) => u.orderNo).join(",")}` : ""})`
           : "";
         const failMsg = `${reason}${partialInfo}`;
         // 이 주문에서 아무것도 안 샀을 때만 재시도 (부분 구매 건은 중복 위험이라 재시도 안 함)
-        const canRetry = successCount === 0 && !lastOrderNo;
+        const canRetry = successCount === 0 && units.length === 0;
         const counts = retryCounts.get(order.orderId) ?? { bot: 0, frame: 0 };
         const willRetryBot = canRetry && isBotChallengeError(err) && counts.bot < MAX_BOT_RETRY;
         const willRetryFrame = canRetry && isRetryablePaymentFrameError(err) && counts.frame < MAX_FRAME_RETRY;
@@ -250,12 +263,13 @@ export async function purchaseGmarket(
           result.failed.push({
             orderId: order.orderId,
             reason: failMsg,
-            purchaseOrderNo: lastOrderNo || undefined,
+            purchaseOrderNo: repOrderNo || undefined,
             cost: totalCost > 0 ? totalCost : undefined,
             paymentMethod: lastPaymentMethod,
-            payNo: lastPayNo,
+            payNo: units[0]?.payNo,
+            units: units.length ? [...units] : undefined,
           });
-          onProgress?.(order.orderId, "failed", failMsg, lastOrderNo || undefined, { purchased: successCount, total: totalQty });
+          onProgress?.(order.orderId, "failed", failMsg, repOrderNo || undefined, { purchased: successCount, total: totalQty });
           console.error(`[gmarket-purchase] 주문 실패: ${order.orderId}`, failMsg, err instanceof Error ? err.message : String(err));
         }
 

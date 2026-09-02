@@ -10,6 +10,7 @@ import type { Order, Product, CommissionRate } from "@/types/database";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { calcPlatformPrice, calcSettlementPrice, buildRateMap } from "@/lib/product-calculations";
 import { getSchemaByCode, DEFAULT_SCHEMA } from "@/lib/playauto-schema";
+import { formatPurchaseOrders, parsePurchaseOrders } from "@/lib/purchase-orders";
 import { formatKoreanDateTime, toKstDateKey } from "@/lib/date-utils";
 
 /** 발주서 양식 엑셀 생성 (현재 발주서 테이블과 동일한 양식) */
@@ -43,6 +44,8 @@ export async function generateOrderExcel(orders: Order[]): Promise<{ buffer: Arr
     배송상태: o.delivery_status,
     최저가링크: o.purchase_url,
     주문상세링크: o.purchase_detail_url,
+    // 수량 N개 자동구매의 주문 N건 전체 (참고용 — 가져오기에서는 읽지 않는다)
+    구매주문목록: formatPurchaseOrders(parsePurchaseOrders(o.purchase_orders)) || null,
   }));
 
   const ws = XLSX.utils.json_to_sheet(data);

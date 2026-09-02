@@ -10,6 +10,7 @@ import { collectAuctionTracking } from "@/lib/scrapers/auction";
 import { collectOhouseTracking } from "@/lib/scrapers/ohouse";
 import type { ScrapeResult } from "@/lib/scrapers/types";
 import { applyTrackingToOrders, saveTrackingLogs } from "@/lib/tracking/apply";
+import { allOrderNos, getPurchaseOrders } from "@/lib/purchase-orders";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = SupabaseClient<any, any, any>;
@@ -39,18 +40,29 @@ export interface CollectAllResult {
 export async function collectTrackingForUser(supabase: AnySupabase, userId: string, opts: { days?: number; signal?: AbortSignal; log?: (m: string) => void } = {}): Promise<CollectAllResult> {
   const log = opts.log ?? ((m: string) => console.log(`[collect-all] ${m}`));
   const since = new Date(Date.now() - (opts.days ?? 30) * 86400000).toISOString();
+  // 대표 주문번호가 있는 행을 모두 읽고, 구매 주문 목록 중 운송장이 없는 엔트리가 하나라도 있는 행만 대상으로 삼는다
+  // (수량 N개 자동구매는 주문 N건 — 대표 운송장이 있어도 나머지 주문의 운송장은 따로 수집)
   const { data: pendingRows, error } = await supabase
     .from("orders")
-    .select("id,purchase_source,purchase_id,purchase_order_no,tracking_no,delivery_status")
+    .select("id,purchase_source,purchase_id,purchase_order_no,purchase_detail_url,courier,tracking_no,delivery_status,quantity,purchased_at,purchase_orders")
     .eq("user_id", userId)
     .not("purchase_order_no", "is", null)
     .neq("purchase_order_no", "")
-    .or("tracking_no.is.null,tracking_no.eq.")
     .gte("order_date", since)
-    .limit(2000);
+    .limit(3000);
   if (error) throw new Error(`발주서 조회 실패: ${error.message}`);
-  type Row = { id: string; purchase_source: string | null; purchase_id: string | null; purchase_order_no: string; delivery_status: string };
-  const pending = ((pendingRows ?? []) as Row[]).filter((o) => !["취소완료", "발송불가", "반품완료", "교환완료"].includes(o.delivery_status));
+  type Row = {
+    id: string; purchase_source: string | null; purchase_id: string | null; purchase_order_no: string; purchase_detail_url: string | null;
+    courier: string | null; tracking_no: string | null; delivery_status: string; quantity: number; purchased_at: string | null; purchase_orders: unknown;
+  };
+  const pendingNos = new Map<string, string[]>(); // 행 id → 운송장 없는 주문번호들
+  const pending = ((pendingRows ?? []) as Row[]).filter((o) => {
+    if (["취소완료", "발송불가", "반품완료", "교환완료"].includes(o.delivery_status)) return false;
+    const nos = allOrderNos(getPurchaseOrders(o).filter((e) => !e.tracking_no?.trim()));
+    if (nos.length === 0) return false;
+    pendingNos.set(o.id, nos);
+    return true;
+  });
 
   const { data: creds } = await supabase.from("purchase_credentials").select("id,platform,login_id,login_pw_encrypted").eq("user_id", userId).in("platform", ["gmarket", "auction", "ohouse"]);
   const result: CollectAllResult = { pending: pending.length, unmatched: 0, groups: [], appliedOrderIds: [] };
@@ -63,7 +75,7 @@ export async function collectTrackingForUser(supabase: AnySupabase, userId: stri
     const targets = pending.filter((o) => o.purchase_source === name && normalizeLoginId(o.purchase_id) === loginId);
     if (targets.length === 0) continue;
     for (const t of targets) matched.add(t.id);
-    const orderNos = [...new Set(targets.map((t) => t.purchase_order_no))];
+    const orderNos = [...new Set(targets.flatMap((t) => pendingNos.get(t.id) ?? [t.purchase_order_no]))];
     const g: CollectGroupResult = { platform: cred.platform, loginId: cred.login_id, targets: orderNos.length, success: 0, failed: 0, notFound: 0, applied: 0 };
     result.groups.push(g);
     log(`${name} ${cred.login_id}: ${orderNos.length}건 수집 시작`);

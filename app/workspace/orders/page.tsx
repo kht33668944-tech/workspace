@@ -11,6 +11,7 @@ import { useOrders } from "@/hooks/use-orders";
 import { useAuth } from "@/context/AuthContext";
 import { exportOrdersToCSV } from "@/lib/excel-parser";
 import { generatePlayAutoTrackingExcel, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
+import { formatPurchaseOrders, parsePurchaseOrders } from "@/lib/purchase-orders";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { formatKoreanDateTime, getKoreanMonthKey } from "@/lib/date-utils";
 import { rememberWorkspaceHref, replaceUrlParams } from "@/lib/view-state";
@@ -141,6 +142,7 @@ function hasPurchaseEvidence(order: Order): boolean {
     order.purchased_at ||
     order.payment_method?.trim() ||
     order.purchase_log_order_nos?.length ||
+    parsePurchaseOrders(order.purchase_orders).length > 0 ||
     (order.cost ?? 0) > 0
   );
 }
@@ -1338,6 +1340,8 @@ function OrdersPageInner() {
       운송장: o.tracking_no,
       배송상태: o.delivery_status,
       최저가링크: o.purchase_url,
+      주문상세링크: o.purchase_detail_url,
+      구매주문목록: formatPurchaseOrders(parsePurchaseOrders(o.purchase_orders)) || null,
     }));
     const monthLabel = selectedMonth || "전체";
     await exportOrdersToCSV(exportData, `발주서_${monthLabel}.xlsx`);

@@ -193,6 +193,6 @@ export async function runClaimAction(input: ClaimActionInput): Promise<ClaimActi
   return out;
 }
 
-function appendMemo(memo: string | null, line: string) {
+export function appendMemo(memo: string | null, line: string) {
   return memo ? `${memo} / ${line}` : line;
 }

@@ -7,6 +7,7 @@ import { useToast } from "@/context/ToastContext";
 import { getKoreanDateKey, getKoreanMonthKey } from "@/lib/date-utils";
 import type { Order, OrderInsert, OrderUpdate } from "@/types/database";
 import { CLAIM_STATUSES } from "@/lib/constants";
+import { allOrderNos, getPurchaseOrders, parsePurchaseOrders } from "@/lib/purchase-orders";
 
 interface UseOrdersOptions {
   month?: string | null;
@@ -96,6 +97,7 @@ function hasPurchaseEvidence(order: Order): boolean {
     order.purchased_at ||
     hasText(order.payment_method) ||
     order.purchase_log_order_nos?.length ||
+    parsePurchaseOrders(order.purchase_orders).length > 0 ||
     (order.cost ?? 0) > 0
   );
 }
@@ -235,9 +237,12 @@ export function useOrders(options: UseOrdersOptions = {}) {
       const purchaseNos = purchaseNosByOrderId.get(order.id) ?? [];
       const expectedQty = Math.max(Number(order.quantity) || 1, 1);
       const hasSavedPurchaseNo = Boolean(order.purchase_order_no?.trim());
+      // 구매 주문 목록에 이미 들어 있는 번호는 정상 다건 구매 (수량 N개 = 주문 N건) — 목록 밖의 번호만 경고 대상
+      const known = new Set(allOrderNos(getPurchaseOrders(order)));
+      const unknownNos = purchaseNos.filter((no) => !known.has(no));
       const duplicateLevel: Order["purchase_duplicate_level"] = purchaseNos.length > expectedQty || (!hasSavedPurchaseNo && purchaseNos.length > 0)
         ? "danger"
-        : purchaseNos.length > 1
+        : unknownNos.length > 0 && purchaseNos.length > 1
           ? "warning"
           : null;
 
@@ -425,6 +430,15 @@ export function useOrders(options: UseOrdersOptions = {}) {
   const updateOrder = (id: string, updates: OrderUpdate, skipUndo = false): Promise<void> => {
     let autoStatusUpdates: OrderUpdate = { ...updates };
     const currentOrder = orders.find((o) => o.id === id);
+
+    // 표에서 대표 주문번호를 직접 고치면 구매 주문 목록의 첫 엔트리도 같이 맞춘다 (목록이 있을 때만)
+    if (currentOrder && typeof autoStatusUpdates.purchase_order_no === "string" && autoStatusUpdates.purchase_orders === undefined) {
+      const stored = parsePurchaseOrders(currentOrder.purchase_orders);
+      const rep = autoStatusUpdates.purchase_order_no.trim();
+      if (stored.length > 0 && rep && stored[0].order_no !== rep) {
+        autoStatusUpdates.purchase_orders = [{ ...stored[0], order_no: rep }, ...stored.slice(1)];
+      }
+    }
 
     // 취소완료는 '주문 종료'를 뜻하는 최종상태이므로 구매정보 유무와 무관하게 항상 허용한다.
     if (currentOrder && hasPurchaseEvidence(currentOrder) && autoStatusUpdates.delivery_status !== "취소완료") {
