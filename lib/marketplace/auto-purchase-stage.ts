@@ -160,6 +160,8 @@ export interface AutoPurchaseStageOpts {
   paymentPin: string | null;  // env GMARKET_PAYMENT_PIN
   dryRun: boolean;
   trigger: "scheduler" | "manual";
+  /** 주면 이 주문들만 대상 (선택 구매·테스트). 없으면 전체 구매대기 (크론) */
+  orderIds?: string[];
   log?: (msg: string) => void;
 }
 
@@ -175,13 +177,15 @@ export async function runAutoPurchaseStage(opts: AutoPurchaseStageOpts): Promise
   if (!gmarketAccount) { log("지마켓 기본 구매계정 미설정 — 스킵"); return result; }
 
   // 2. 대상 조회 (자동구매 모달의 purchasableOrders 필터와 동일)
-  const { data: orderRows, error: orderErr } = await opts.supabase
+  let orderQuery = opts.supabase
     .from("orders")
     .select("id, product_name, purchase_url, purchase_id, purchase_order_no, tracking_no, purchased_at, delivery_status, quantity, settlement, cost, memo, purchase_source, recipient_name, postal_code, address, address_detail, recipient_phone, delivery_memo")
     .eq("user_id", opts.userId)
     .eq("delivery_status", "구매대기")
     .not("purchase_url", "is", null)
     .neq("purchase_url", "");
+  if (opts.orderIds && opts.orderIds.length > 0) orderQuery = orderQuery.in("id", opts.orderIds);
+  const { data: orderRows, error: orderErr } = await orderQuery;
   if (orderErr) throw new Error(`구매대기 주문 조회 실패: ${orderErr.message}`);
 
   let candidates = ((orderRows ?? []) as OrderRow[]).filter(
@@ -219,16 +223,25 @@ export async function runAutoPurchaseStage(opts: AutoPurchaseStageOpts): Promise
   const runId = await startSyncRun(opts.supabase, { userId: opts.userId, platform: "gmarket", kind: "auto-purchase", trigger: opts.trigger, dryRun: opts.dryRun });
   try {
     // 4. 상품소싱 매칭 (상품명 정규화 — 수동 원가갱신과 동일 규칙)
-    const { data: productRows, error: productErr } = await opts.supabase
-      .from("products")
-      .select("id, product_name, purchase_url, lowest_price")
-      .eq("user_id", opts.userId)
-      .gt("purchase_url", "")
-      .neq("registration_status", "판매종료");
-    if (productErr) throw new Error(`상품소싱 조회 실패: ${productErr.message}`);
+    //    products 가 1000개를 넘을 수 있어 페이지네이션으로 전부 가져온다 (supabase 기본 1000 제한)
+    const productRows: ProductRow[] = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error: productErr } = await opts.supabase
+        .from("products")
+        .select("id, product_name, purchase_url, lowest_price")
+        .eq("user_id", opts.userId)
+        .gt("purchase_url", "")
+        .neq("registration_status", "판매종료")
+        .range(from, from + PAGE - 1);
+      if (productErr) throw new Error(`상품소싱 조회 실패: ${productErr.message}`);
+      if (!data || data.length === 0) break;
+      productRows.push(...(data as ProductRow[]));
+      if (data.length < PAGE) break;
+    }
 
     const productMap = new Map<string, ProductRow>();
-    for (const p of (productRows ?? []) as ProductRow[]) {
+    for (const p of productRows) {
       if (!p.product_name) continue;
       const key = normalizeNameForMatch(p.product_name);
       const prev = productMap.get(key);
@@ -273,11 +286,15 @@ export async function runAutoPurchaseStage(opts: AutoPurchaseStageOpts): Promise
           continue;
         }
         const nextCost = priceResult.price * qty;
-        if (!opts.dryRun && order.cost !== nextCost) {
-          const patch: Record<string, unknown> = { cost: nextCost };
+        if (!opts.dryRun) {
+          // 원가가 이전과 같아도 구매처(purchase_source)는 세팅해야 한다 (수동 원가갱신과 동일)
+          const patch: Record<string, unknown> = {};
+          if (order.cost !== nextCost) patch.cost = nextCost;
           if (!order.purchase_source?.trim() && settlement - nextCost > 0) patch.purchase_source = "지마켓";
-          const { error } = await opts.supabase.from("orders").update(patch).eq("id", order.id).eq("user_id", opts.userId);
-          if (error) { result.errors.push(`원가 반영 실패(${order.id}): ${error.message}`); continue; }
+          if (Object.keys(patch).length > 0) {
+            const { error } = await opts.supabase.from("orders").update(patch).eq("id", order.id).eq("user_id", opts.userId);
+            if (error) { result.errors.push(`원가/구매처 반영 실패(${order.id}): ${error.message}`); continue; }
+          }
         }
         if (settlement <= 0) { result.skipped.noSettlement++; continue; }
         if (nextCost > settlement) { result.skipped.deficit++; continue; }

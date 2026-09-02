@@ -58,6 +58,13 @@ function isBotChallengeError(error: unknown): boolean {
   return isBotChallengeText(raw);
 }
 
+// 결제창(스마일페이 iframe)이 안 떠서 실패한 경우 — 결제 시작 전이라 재시도 안전.
+// 키패드 입력 중 실패는 결제 진행 중일 수 있어 재시도 대상에서 제외한다.
+function isRetryablePaymentFrameError(error: unknown): boolean {
+  const raw = error instanceof Error ? error.message : String(error);
+  return /스마일페이 결제 프레임을 찾을 수 없/.test(raw);
+}
+
 function isChallengeFrame(frame: Frame): boolean {
   return /captcha|challenge|turnstile|cloudflare|cf-chl/i.test(`${frame.name()} ${frame.url()}`);
 }
@@ -94,6 +101,10 @@ export async function purchaseGmarket(
     // 2. 각 주문건 순차 처리 (수량 > 1이면 1개씩 여러 번 구매)
     let activePage = page;
     const botRetryQueue: PurchaseOrderInfo[] = [];
+    // 주문별 재시도 횟수 — 봇 최대 2회, 결제 프레임 실패 최대 1회 (다른 주문 처리 후 마지막 라운드에서 재시도)
+    const retryCounts = new Map<string, { bot: number; frame: number }>();
+    const MAX_BOT_RETRY = 2;
+    const MAX_FRAME_RETRY = 1;
 
     const markUnprocessedAsCancelled = () => {
       console.log("[gmarket-purchase] 사용자 중단 요청 → 남은 주문 건너뜀");
@@ -222,12 +233,19 @@ export async function purchaseGmarket(
           ? ` (${successCount}/${totalQty}개 구매 후 실패${lastOrderNo ? `, 구매된 주문번호: ${lastOrderNo}` : ""})`
           : "";
         const failMsg = `${reason}${partialInfo}`;
-        const canRetryAtEnd = !isBotRetry && successCount === 0 && !lastOrderNo && isBotChallengeError(err);
+        // 이 주문에서 아무것도 안 샀을 때만 재시도 (부분 구매 건은 중복 위험이라 재시도 안 함)
+        const canRetry = successCount === 0 && !lastOrderNo;
+        const counts = retryCounts.get(order.orderId) ?? { bot: 0, frame: 0 };
+        const willRetryBot = canRetry && isBotChallengeError(err) && counts.bot < MAX_BOT_RETRY;
+        const willRetryFrame = canRetry && isRetryablePaymentFrameError(err) && counts.frame < MAX_FRAME_RETRY;
 
-        if (canRetryAtEnd) {
+        if (willRetryBot || willRetryFrame) {
+          if (willRetryBot) counts.bot++; else counts.frame++;
+          retryCounts.set(order.orderId, counts);
           botRetryQueue.push(order);
-          onProgress?.(order.orderId, "processing", "봇 확인 화면 감지 → 다른 주문 처리 후 마지막에 다시 시도합니다.");
-          console.warn(`[gmarket-purchase] 봇 확인 감지, 마지막 재시도 대기: ${order.orderId}`);
+          const kind = willRetryBot ? `봇 확인(${counts.bot}/${MAX_BOT_RETRY})` : `결제창 미표시(${counts.frame}/${MAX_FRAME_RETRY})`;
+          onProgress?.(order.orderId, "processing", `${kind} → 다른 주문 처리 후 다시 시도합니다.`);
+          console.warn(`[gmarket-purchase] ${kind} 재시도 대기: ${order.orderId}`);
         } else {
           result.failed.push({
             orderId: order.orderId,
@@ -260,8 +278,9 @@ export async function purchaseGmarket(
       if (!keepGoing) break;
     }
 
-    if (!abortSignal?.aborted && botRetryQueue.length > 0) {
-      console.log(`[gmarket-purchase] 봇 확인 주문 ${botRetryQueue.length}건 마지막 재시도 대기`);
+    // 재시도 큐를 라운드 단위로 비운다 — 재시도 중 또 봇/결제창 실패면 counts 한도까지 다음 라운드에 재큐잉
+    while (!abortSignal?.aborted && botRetryQueue.length > 0) {
+      console.log(`[gmarket-purchase] 재시도 대기 주문 ${botRetryQueue.length}건`);
       await sleep(BOT_CHALLENGE_RETRY_DELAY_MS);
 
       const retryOrders = botRetryQueue.splice(0);
