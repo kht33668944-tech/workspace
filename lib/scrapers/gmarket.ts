@@ -13,7 +13,9 @@ const TIMEOUT_API = 30000;
 const TIMEOUT_TRACKING = 10000;
 // 배송수집 대상은 최근 주문이라 앞쪽 페이지에 있음. 못 찾은 주문 탐색 상한(1페이지=5건).
 // 찾는 주문을 다 찾으면 그 전에 멈추므로, 이 값은 "미발견 주문을 몇 페이지까지 뒤질지"만 결정.
-const MAX_PAGES = 20;
+// 구매량이 하루 30~50결제면 20페이지(100결제)는 이틀치가 안 돼, 발송이 하루 이상 늦은
+// 주문이 운송장 등록 시점에 범위 밖으로 밀려 영영 미발견됐다(2026-09-03 실제 사례) → 60으로 상향.
+const MAX_PAGES = 60;
 
 type StealthContext = Awaited<ReturnType<typeof createStealthContext>>;
 
@@ -138,6 +140,12 @@ export async function collectGmarketTracking(
 
     if (firstData.data?.payBundleList?.length) {
       allBundles.push(...firstData.data.payBundleList);
+      // 첫 페이지 발견분도 조기 종료 카운트에 포함 (누락 시 대상을 다 찾고도 상한까지 헛스캔)
+      for (const bundle of firstData.data.payBundleList) {
+        for (const order of bundle.orderList) {
+          if (targetSet.has(String(order.orderNo))) found.add(String(order.orderNo));
+        }
+      }
 
       const totalCount = firstData.data.totalCount;
       const pageSize = firstData.data.pageSize || 5;

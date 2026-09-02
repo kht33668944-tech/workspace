@@ -58,7 +58,8 @@ export async function collectTrackingForUser(supabase: AnySupabase, userId: stri
   const pendingNos = new Map<string, string[]>(); // 행 id → 운송장 없는 주문번호들
   const pending = ((pendingRows ?? []) as Row[]).filter((o) => {
     if (["취소완료", "발송불가", "반품완료", "교환완료"].includes(o.delivery_status)) return false;
-    const nos = allOrderNos(getPurchaseOrders(o).filter((e) => !e.tracking_no?.trim()));
+    // "직접결제" 같은 비숫자 값은 마켓 주문번호가 아니라 영원히 미발견 → 스크래퍼가 매회 탐색 상한까지 헛스캔하게 만든다
+    const nos = allOrderNos(getPurchaseOrders(o).filter((e) => !e.tracking_no?.trim())).filter((no) => /^\d+$/.test(no.trim()));
     if (nos.length === 0) return false;
     pendingNos.set(o.id, nos);
     return true;
