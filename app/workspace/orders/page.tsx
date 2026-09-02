@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { usePreventBrowserSave } from "@/hooks/use-prevent-browser-save";
-import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban, Send, Globe } from "lucide-react";
+import { FileSpreadsheet, Trash2, Download, Calendar, Truck, ChevronDown, ShoppingCart, History, Zap, MessageSquare, RefreshCw, Ban, Send, Globe, RotateCcw } from "lucide-react";
 import PurchaseLogTab from "@/components/workspace/orders/purchase-log-tab";
 import TrackingLogTab from "@/components/workspace/orders/tracking-log-tab";
 import InquiryTab from "@/components/workspace/orders/inquiry-tab";
@@ -33,6 +33,7 @@ const BulkSmsModal = dynamic(() => import("@/components/workspace/orders/bulk-sm
 const MarketplaceCancelModal = dynamic(() => import("@/components/workspace/orders/marketplace-cancel-modal"), { ssr: false });
 const OrderSyncModal = dynamic(() => import("@/components/workspace/orders/order-sync-modal"), { ssr: false });
 const MarketplaceShipModal = dynamic(() => import("@/components/workspace/orders/marketplace-ship-modal"), { ssr: false });
+const GmarketReturnModal = dynamic(() => import("@/components/workspace/automation/gmarket-return-modal"), { ssr: false });
 import { useToast } from "@/context/ToastContext";
 import { useAutoPurchaseController, useTrackingCollectController } from "@/context/modal-controllers";
 import { PLATFORM_LABELS } from "@/types/database";
@@ -282,6 +283,7 @@ function OrdersPageInner() {
   const trackingCollect = useTrackingCollectController();
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showAutoMenu, setShowAutoMenu] = useState(false);
+  const [returnModalIds, setReturnModalIds] = useState<string[] | null>(null); // 지마켓 반품 모달 (선택 주문 id들)
   const [showApiMenu, setShowApiMenu] = useState(false);
   const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
   const [refreshingCosts, setRefreshingCosts] = useState(false);
@@ -531,6 +533,11 @@ function OrdersPageInner() {
     const selectedOrders = await getLatestSelectedOrders();
     trackingCollect.open({ orders: selectedOrders, courierCodeMap });
   }, [courierCodeMap, getLatestSelectedOrders, trackingCollect]);
+
+  const handleOpenGmarketReturn = useCallback(() => {
+    setShowAutoMenu(false);
+    setReturnModalIds(Array.from(selectedIds));
+  }, [selectedIds]);
   const pushCostRefreshLog = useCallback((message: string) => {
     setCostRefreshLog((prev) => [...prev.slice(-80), message]);
   }, []);
@@ -1628,6 +1635,14 @@ function OrdersPageInner() {
                   원가 갱신{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
                 </button>
                 <button
+                  onClick={handleOpenGmarketReturn}
+                  disabled={selectedIds.size === 0}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <RotateCcw className="w-4 h-4 text-amber-400" />
+                  반품 자동화{selectedIds.size > 0 ? ` (${selectedIds.size}건)` : ""}
+                </button>
+                <button
                   onClick={() => { setShowAutoMenu(false); setShowBulkSms(true); }}
                   disabled={selectedIds.size === 0}
                   className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -1795,6 +1810,14 @@ function OrdersPageInner() {
         <BulkSmsModal
           orders={orders.filter((o) => selectedIds.has(o.id))}
           onClose={() => setShowBulkSms(false)}
+        />
+      )}
+      {returnModalIds !== null && (
+        <GmarketReturnModal
+          open
+          orderIds={returnModalIds}
+          onClose={() => setReturnModalIds(null)}
+          onRefetch={refetch}
         />
       )}
       {costRefreshResultOpen && costRefreshResults.length > 0 && (
