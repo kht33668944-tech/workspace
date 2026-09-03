@@ -38,7 +38,7 @@ function summarize(run: MarketplaceSyncRun): Array<[string, string | number]> {
     out.push(["운송장 수집", `미수집 ${Number(d.pending ?? run.remote_count ?? 0)} → 반영 ${Number(d.applied ?? run.confirmed ?? 0)}건`]);
     if (Number(d.unmatched ?? 0)) out.push(["계정 미매칭", `${Number(d.unmatched)}건`]);
   } else if (kind === "esm-export") {
-    out.push(["ESM 엑셀", Number(d.count ?? 0) > 0 ? `${Number(d.count)}건 저장` : "새 건 없음"]);
+    out.push(["ESM 발송처리 엑셀", Number(d.count ?? 0) > 0 ? `${Number(d.count)}건 저장` : "새 건 없음"]);
     if (typeof d.file === "string" && d.file) out.push(["파일", d.file]);
   } else if (kind === "settlement") {
     out.push(["정산", `매칭 ${Number(d.matched ?? 0)} · 반영 ${run.confirmed ?? 0} · 미매칭 ${Number(d.unmatched ?? 0)}`]);

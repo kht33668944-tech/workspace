@@ -59,7 +59,7 @@ npm run coupang:cancel / esm:cancel / ss:cancel  # 취소 자동화 (드라이�
 - 방향 규칙: 마켓→발주서는 클레임·배송 상태만, 발주서→마켓은 발주확인·취소승인·판매자취소·송장만
 
 ### 자동화 크론 (Windows 작업 스케줄러 — 로컬 전용, Railway 미사용)
-- 4종: `OnliveOrderSync`(매시 :00, `scripts/marketplace-order-sync.mts` — 주문·문의·정산 1회/일·21시 하루요약·헬스체크), `OnliveTrackingShip`(3시간, 02:30 앵커, `scripts/tracking-and-ship.mts` — 운송장 수집→송장 전송→ESM 엑셀), `OnliveAutoPrice`(4시간, 00:15 앵커, `scripts/auto-price-refresh.mjs` — 최저가 수집→가격 적용→마켓 반영+검산), `OnliveNightlyAudit`(매일 23:00, `scripts/nightly-audit.mts` — 12개 항목 총점검+장부 디스코드 보고, 웹훅 `DISCORD_WEBHOOK_AUDIT`)
+- 4종: `OnliveOrderSync`(매시 :00, `scripts/marketplace-order-sync.mts` — 주문·문의·정산 1회/일·21시 하루요약·헬스체크), `OnliveTrackingShip`(3시간, 02:30 앵커, `scripts/tracking-and-ship.mts` — 운송장 수집→송장 전송→ESM 발송처리 엑셀), `OnliveAutoPrice`(4시간, 00:15 앵커, `scripts/auto-price-refresh.mjs` — 최저가 수집→가격 적용→마켓 반영+검산), `OnliveNightlyAudit`(매일 23:00, `scripts/nightly-audit.mts` — 12개 항목 총점검+장부 디스코드 보고, 웹훅 `DISCORD_WEBHOOK_AUDIT`)
 - 등록/해제: `scripts/register-*-task.ps1` (`-Remove`). **시작 앵커는 `lib/automation-schedule.ts`와 일치가 계약** — 자동화 페이지 타임라인·헬스체크가 이 앵커를 가정하므로 임의 변경 금지
 - 주문수집과 운송장 작업은 `logs/.marketplace.lock`으로 동시 실행 방지(쿠팡 API 초당 한도 합산). 스크립트 전용 env `SYNC_USER_ID`
 - 디스코드 알림: `lib/discord-notifier.ts` — 채널별 웹훅 `DISCORD_WEBHOOK_ORDERS/TRACKING/PURCHASE/PRICE/AI/INQUIRY` (없으면 `DISCORD_WEBHOOK_URL`로 통합)

@@ -96,7 +96,7 @@ export async function fetchShipReadyOrders(supabase: AnySupabase, userId: string
   const ready: ShipCandidate[] = [];
   const skipped: ShipSkipped[] = [];
   for (const o of (data ?? []) as ShipCandidate[]) {
-    if (!o.marketplace_product_order_no) { skipped.push({ order: o, reason: "마켓 상품주문번호 없음 (플레이오토 수집 주문 — 플토로 송장 전송)" }); continue; }
+    if (!o.marketplace_product_order_no) { skipped.push({ order: o, reason: "마켓 상품주문번호 없음 (엑셀 유입 주문 — 지마켓·옥션은 ESM 발송처리 엑셀로)" }); continue; }
     if (CLAIM_STATUSES.has(o.delivery_status)) { skipped.push({ order: o, reason: `${o.delivery_status} 상태 — 취소요청은 '거절(발송)' 버튼으로 처리` }); continue; }
     if (!getMarketplaceCourierCode(o.courier, platform)) { skipped.push({ order: o, reason: `택배사 코드 없음: ${o.courier ?? "(택배사 미입력)"}` }); continue; }
     if (platform === "coupang" && !parseCoupangKey(o)) { skipped.push({ order: o, reason: "쿠팡 주문 식별자 형식 오류" }); continue; }

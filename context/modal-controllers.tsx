@@ -16,10 +16,9 @@ const autoPurchase = createModalController<AutoPurchaseInput>("AutoPurchase");
 export const AutoPurchaseProvider = autoPurchase.Provider;
 export const useAutoPurchaseController = autoPurchase.useController;
 
-// 운송장 수집: 전체 주문 + 택배사 코드 맵 스냅샷
+// 운송장 수집: 전체 주문 스냅샷
 export interface TrackingCollectInput {
   orders: Order[];
-  courierCodeMap: Record<string, number>;
 }
 const trackingCollect = createModalController<TrackingCollectInput>("TrackingCollect");
 export const TrackingCollectProvider = trackingCollect.Provider;

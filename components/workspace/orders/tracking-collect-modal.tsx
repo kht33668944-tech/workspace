@@ -7,7 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import type { Order, PurchaseCredential } from "@/types/database";
 import { PLATFORM_LABELS } from "@/types/database";
 import type { ScrapeResult, TrackingInfo } from "@/lib/scrapers/types";
-import { generateOrderExcel, generatePlayAutoTrackingExcel, arrayBufferToBase64, downloadExcel } from "@/lib/excel-export";
+import { generateOrderExcel, generateEsmSendExcelDirect, arrayBufferToBase64, downloadExcel } from "@/lib/excel-export";
 import { allOrderNos, getPurchaseOrders } from "@/lib/purchase-orders";
 import { buildTrackingNotification, groupScrapeResultsByOrder, shipPlatformLabel, type TrackingShipItem } from "@/lib/tracking-notification";
 
@@ -27,7 +27,6 @@ function pendingOrderNos(o: Order): string[] {
 
 interface TrackingCollectModalProps {
   orders: Order[];
-  courierCodeMap?: Record<string, number>;
   onClose: () => void;
   onApply: (updates: { purchase_order_no: string; courier: string; tracking_no: string }[]) => Promise<void>;
   /** 최소화(작업 유지) — 백그라운드 호스트에서 주입 */
@@ -49,7 +48,7 @@ const PLATFORM_NAME_MAP: Record<string, Platform> = {
 
 const normalizeLoginId = (value: string | null | undefined) => value?.trim().toLowerCase() ?? "";
 
-export default function TrackingCollectModal({ orders, courierCodeMap = {}, onClose, onApply, onMinimize, onProgress }: TrackingCollectModalProps) {
+export default function TrackingCollectModal({ orders, onClose, onApply, onMinimize, onProgress }: TrackingCollectModalProps) {
   const { session } = useAuth();
   const [step, setStep] = useState<Step>("config");
   const [credentials, setCredentials] = useState<PurchaseCredential[]>([]);
@@ -68,7 +67,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
   const [results, setResults] = useState<ScrapeResult[]>([]);
   const [error, setError] = useState("");
   const [applying, setApplying] = useState(false);
-  const [exporting, setExporting] = useState<string | null>(null); // "order" | "playauto" | null
+  const [exporting, setExporting] = useState<string | null>(null); // "order" | "esm" | null
 
   // 중단 기능
   const [isStopping, setIsStopping] = useState(false);
@@ -398,15 +397,38 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
   }, [mergedResult, orders]);
 
   // 엑셀 내보내기 + 보관함 자동 저장 (단일 양식)
-  const handleExport = async (type: "order" | "playauto") => {
+  const handleExport = async (type: "order" | "esm") => {
     if (collectedOrders.length === 0) return;
     setExporting(type);
 
     try {
-      const { buffer, filename } = type === "order"
-        ? await generateOrderExcel(collectedOrders)
-        : await generatePlayAutoTrackingExcel(collectedOrders, courierCodeMap);
+      if (type === "esm") {
+        const { buffer, filename, count } = await generateEsmSendExcelDirect(collectedOrders);
+        if (!buffer || count === 0) {
+          console.warn("[tracking-collect] ESM 발송처리 대상 없음");
+          return;
+        }
+        downloadExcel(buffer, filename);
+        if (session?.access_token) {
+          const base64 = arrayBufferToBase64(buffer);
+          await fetch("/api/archives", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              file_name: filename,
+              file_type: "esm_tracking",
+              file_data: base64,
+              order_count: count,
+            }),
+          });
+        }
+        return;
+      }
 
+      const { buffer, filename } = await generateOrderExcel(collectedOrders);
       downloadExcel(buffer, filename);
 
       if (session?.access_token) {
@@ -419,7 +441,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
           },
           body: JSON.stringify({
             file_name: filename,
-            file_type: type === "order" ? "order_export" : "playauto_tracking",
+            file_type: "order_export",
             file_data: base64,
             order_count: collectedOrders.length,
           }),
@@ -444,15 +466,19 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
       // 두 번째 파일이 간헐적으로 "문제가 발생했습니다"로 실패할 수 있어 순차 처리한다.
       await new Promise((resolve) => window.setTimeout(resolve, 800));
 
-      // 2) 플레이오토 운송장 양식
-      const playAutoResult = await generatePlayAutoTrackingExcel(targetOrders, courierCodeMap);
-      downloadExcel(playAutoResult.buffer, playAutoResult.filename);
+      // 2) ESM 발송처리 4열 양식 (대상 없으면 다운로드·보관 없이 건너뜀)
+      const esmResult = await generateEsmSendExcelDirect(targetOrders);
+      if (esmResult.buffer && esmResult.count > 0) {
+        downloadExcel(esmResult.buffer, esmResult.filename);
+      }
 
       // 보관함 저장
       if (session?.access_token) {
         const saves = [
-          { ...orderResult, file_type: "order_export" as const },
-          { ...playAutoResult, file_type: "playauto_tracking" as const },
+          { ...orderResult, file_type: "order_export" as const, order_count: targetOrders.length },
+          ...(esmResult.buffer && esmResult.count > 0
+            ? [{ buffer: esmResult.buffer, filename: esmResult.filename, file_type: "esm_tracking" as const, order_count: esmResult.count }]
+            : []),
         ];
         for (const s of saves) {
           const base64 = arrayBufferToBase64(s.buffer);
@@ -466,7 +492,7 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
               file_name: s.filename,
               file_type: s.file_type,
               file_data: base64,
-              order_count: targetOrders.length,
+              order_count: s.order_count,
             }),
           });
         }
@@ -833,12 +859,12 @@ export default function TrackingCollectModal({ orders, courierCodeMap = {}, onCl
                         {exporting === "order" ? "저장 중..." : "발주서 양식"}
                       </button>
                       <button
-                        onClick={() => handleExport("playauto")}
+                        onClick={() => handleExport("esm")}
                         disabled={exporting !== null}
                         className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-purple-500/10 border border-purple-500/20 rounded-lg text-xs text-purple-400 hover:bg-purple-500/20 disabled:opacity-50 transition-colors"
                       >
                         <FileSpreadsheet className="w-3.5 h-3.5" />
-                        {exporting === "playauto" ? "저장 중..." : "플레이오토 운송장"}
+                        {exporting === "esm" ? "저장 중..." : "ESM 발송처리"}
                       </button>
                     </div>
                     <p className="text-xs text-[var(--text-disabled)] mt-1.5">다운로드와 동시에 보관함에 자동 저장됩니다</p>

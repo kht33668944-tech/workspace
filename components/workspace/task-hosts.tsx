@@ -42,7 +42,6 @@ export function TrackingCollectHost() {
     <div className={c.visible ? "" : "hidden"}>
       <TrackingCollectModal
         orders={c.input.orders}
-        courierCodeMap={c.input.courierCodeMap}
         onClose={c.close}
         onMinimize={c.minimize}
         onProgress={c.setProgress}

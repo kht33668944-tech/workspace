@@ -7,7 +7,6 @@ async function loadXLSX() {
   await _xlsxPromise;
 }
 import type { Order, Product, CommissionRate } from "@/types/database";
-import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { calcPlatformPrice, calcSettlementPrice, buildRateMap } from "@/lib/product-calculations";
 import { getSchemaByCode, DEFAULT_SCHEMA } from "@/lib/playauto-schema";
 import { formatPurchaseOrders, parsePurchaseOrders } from "@/lib/purchase-orders";
@@ -53,41 +52,6 @@ export async function generateOrderExcel(orders: Order[]): Promise<{ buffer: Arr
   XLSX.utils.book_append_sheet(wb, ws, "배송조회수집");
   const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
   const filename = `배송조회수집_${today}.xlsx`;
-
-  return { buffer, filename };
-}
-
-/**
- * 플레이오토 대량 운송장 전송 양식 엑셀 생성
- * 양식: 묶음번호 | 택배사(코드숫자) | 운송장번호
- * @param courierCodeMap 택배사명 → 코드 매핑 (사용자 설정 or 기본값)
- */
-export async function generatePlayAutoTrackingExcel(
-  orders: Order[],
-  courierCodeMap: Record<string, number> = {}
-): Promise<{ buffer: ArrayBuffer; filename: string }> {
-  await loadXLSX();
-  const today = toKstDateKey();
-
-  // 운송장이 있는 주문만 필터링
-  const trackingOrders = orders.filter((o) => o.tracking_no && o.tracking_no.trim() !== "");
-
-  // courierCodeMap → DEFAULT_COURIER_CODES 순으로 조회하여 반드시 코드 숫자로 변환
-  const data = trackingOrders.map((o) => {
-    const courierName = o.courier || "";
-    const code = courierCodeMap[courierName] ?? DEFAULT_COURIER_CODES[courierName] ?? courierName;
-    return {
-      묶음번호: o.bundle_no || "",
-      택배사: code,
-      운송장번호: o.tracking_no || "",
-    };
-  });
-
-  const ws = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "운송장전송");
-  const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-  const filename = `플레이오토_운송장_${today}.xlsx`;
 
   return { buffer, filename };
 }
@@ -160,6 +124,9 @@ export async function generateCoupangWingTrackingExcel(orders: Order[]): Promise
 /** DB 표준 택배사명 → ESM PLUS 표기 (발송관리 엑셀이 실제로 쓰는 이름 기준, 그 외는 그대로 통과) */
 const ESM_COURIER_MAP: Record<string, string> = {
   "CJ대한통운": "CJ택배",
+  "합동택배": "기타택배",
+  "천일택배": "기타택배",
+  "SLX": "기타택배",
 };
 
 // ESM PLUS 판매 계정 아이디 (지마켓·옥션 공용) — 계정 변경 시 여기만 수정
@@ -178,7 +145,7 @@ export interface EsmSendExcelResult {
  * ESM PLUS 대량 발송처리 엑셀 직접 생성 — 마켓 주문번호가 저장된 주문은 파일 없이 원클릭.
  * (발송관리 엑셀로 가져온 주문, 또는 파일 매칭으로 주문번호가 백필된 주문)
  */
-export async function generateEsmSendExcelDirect(orders: Order[]): Promise<{ buffer: ArrayBuffer | null; filename: string; count: number; needsFile: number }> {
+export async function generateEsmSendExcelDirect(orders: Order[]): Promise<{ buffer: ArrayBuffer | null; filename: string; count: number; needsFile: number; orderIds: string[] }> {
   await loadXLSX();
   const today = toKstDateKey();
   const filename = `ESM_발송처리_${today}.xlsx`;
@@ -191,7 +158,7 @@ export async function generateEsmSendExcelDirect(orders: Order[]): Promise<{ buf
   const direct = esmOrders.filter((o) => o.marketplace_order_no);
   const needsFile = esmOrders.length - direct.length; // 주문번호 없는 구(플레이오토) 주문 — 파일 매칭 필요
 
-  if (direct.length === 0) return { buffer: null, filename, count: 0, needsFile };
+  if (direct.length === 0) return { buffer: null, filename, count: 0, needsFile, orderIds: [] };
 
   const out: (string | number)[][] = [["계정", "주문번호", "택배사", "운송장번호"]];
   for (const o of direct) {
@@ -208,7 +175,8 @@ export async function generateEsmSendExcelDirect(orders: Order[]): Promise<{ buf
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "발송처리");
   const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-  return { buffer, filename, count: direct.length, needsFile };
+  const orderIds = direct.map((o) => o.id);
+  return { buffer, filename, count: direct.length, needsFile, orderIds };
 }
 
 /**

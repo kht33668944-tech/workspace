@@ -50,7 +50,7 @@ export const AUTOMATIONS: AutomationDef[] = [
     maxRuntimeMin: 20, toleranceMin: 10,
   },
   {
-    key: "tracking-ship", label: "운송장·송장", description: "구매처 운송장 수집 → 마켓 송장 전송 → ESM 엑셀 → 지마켓 반품추적",
+    key: "tracking-ship", label: "운송장·송장", description: "구매처 운송장 수집 → 마켓 송장 전송 → ESM 발송처리 엑셀 → 지마켓 반품추적",
     taskName: "OnliveTrackingShip", runVia: "schtasks",
     kinds: ["tracking-collect", "shipping", "esm-export", "return-track"], primaryKind: "tracking-collect",
     schedule: { type: "interval", anchorHour: 2, minute: 30, intervalHours: 3 },
