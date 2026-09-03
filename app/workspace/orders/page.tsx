@@ -10,9 +10,8 @@ import InquiryTab from "@/components/workspace/orders/inquiry-tab";
 import { useOrders } from "@/hooks/use-orders";
 import { useAuth } from "@/context/AuthContext";
 import { exportOrdersToCSV } from "@/lib/excel-parser";
-import { generatePlayAutoTrackingExcel, generateCoupangWingTrackingExcel, generateEsmSendExcel, generateEsmSendExcelDirect, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
+import { generateCoupangWingTrackingExcel, generateEsmSendExcel, generateEsmSendExcelDirect, downloadExcel } from "@/lib/excel-export";
 import { formatPurchaseOrders, parsePurchaseOrders } from "@/lib/purchase-orders";
-import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { formatKoreanDateTime, getKoreanMonthKey } from "@/lib/date-utils";
 import { rememberWorkspaceHref, replaceUrlParams } from "@/lib/view-state";
 import { supabase } from "@/lib/supabase";
@@ -287,7 +286,6 @@ function OrdersPageInner() {
   const [showAutoMenu, setShowAutoMenu] = useState(false);
   const [returnModalIds, setReturnModalIds] = useState<string[] | null>(null); // 지마켓 반품 모달 (선택 주문 id들)
   const [showApiMenu, setShowApiMenu] = useState(false);
-  const [courierCodeMap, setCourierCodeMap] = useState<Record<string, number>>(DEFAULT_COURIER_CODES);
   const [refreshingCosts, setRefreshingCosts] = useState(false);
   const [costRefreshLog, setCostRefreshLog] = useState<string[]>([]);
   const [costRefreshTotal, setCostRefreshTotal] = useState(0);
@@ -349,24 +347,6 @@ function OrdersPageInner() {
   }, [selectedMonth]);
 
   const monthOptions = useMemo(() => generateMonthOptions(), []);
-
-  // 택배사 코드 로드
-  useEffect(() => {
-    if (!session?.access_token) return;
-    fetch("/api/courier-codes", {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    })
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => {
-        if (data && Array.isArray(data) && data.length > 0) {
-          // 기본값과 병합 (DB 커스텀 코드가 기본값을 덮어씀)
-          const map: Record<string, number> = { ...DEFAULT_COURIER_CODES };
-          for (const c of data) map[c.courier_name] = c.courier_code;
-          setCourierCodeMap(map);
-        }
-      })
-      .catch(() => {});
-  }, [session?.access_token]);
 
   // 드롭다운 메뉴 외부 클릭 닫기
   useEffect(() => {
@@ -533,8 +513,8 @@ function OrdersPageInner() {
   const handleOpenTrackingCollect = useCallback(async () => {
     setShowAutoMenu(false);
     const selectedOrders = await getLatestSelectedOrders();
-    trackingCollect.open({ orders: selectedOrders, courierCodeMap });
-  }, [courierCodeMap, getLatestSelectedOrders, trackingCollect]);
+    trackingCollect.open({ orders: selectedOrders });
+  }, [getLatestSelectedOrders, trackingCollect]);
 
   const handleOpenGmarketReturn = useCallback(() => {
     setShowAutoMenu(false);
@@ -1348,30 +1328,6 @@ function OrdersPageInner() {
     setShowExportMenu(false);
   };
 
-  const handleExportPlayAuto = async () => {
-    const { buffer, filename } = await generatePlayAutoTrackingExcel(exportTargetOrders, courierCodeMap);
-    downloadExcel(buffer, filename);
-    setShowExportMenu(false);
-
-    // 보관함에 자동 저장
-    if (session?.access_token) {
-      const base64 = arrayBufferToBase64(buffer);
-      fetch("/api/archives", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          file_name: filename,
-          file_type: "playauto_tracking",
-          file_data: base64,
-          order_count: exportTargetOrders.filter((o) => o.tracking_no).length,
-        }),
-      }).catch(() => {});
-    }
-  };
-
   // 쿠팡 윙 대량배송(운송장 일괄등록) 수동 내보내기 — API 장애 시 윙에 직접 업로드
   const handleExportCoupangWing = async () => {
     const { buffer, filename, count, skippedNoBundle } = await generateCoupangWingTrackingExcel(exportTargetOrders);
@@ -1734,13 +1690,6 @@ function OrdersPageInner() {
                 >
                   <FileSpreadsheet className="w-4 h-4 text-blue-400" />
                   발주서 양식
-                </button>
-                <button
-                  onClick={handleExportPlayAuto}
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                >
-                  <Truck className="w-4 h-4 text-purple-400" />
-                  플레이오토 운송장
                 </button>
                 <div className="my-1 border-t border-[var(--border)]" />
                 <div className="px-4 py-1 text-[11px] text-[var(--text-muted)]">수동 내보내기 (마켓 업로드용)</div>

@@ -7,7 +7,6 @@ async function loadXLSX() {
   await _xlsxPromise;
 }
 import type { Order, Product, CommissionRate } from "@/types/database";
-import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { calcPlatformPrice, calcSettlementPrice, buildRateMap } from "@/lib/product-calculations";
 import { getSchemaByCode, DEFAULT_SCHEMA } from "@/lib/playauto-schema";
 import { formatPurchaseOrders, parsePurchaseOrders } from "@/lib/purchase-orders";
@@ -53,41 +52,6 @@ export async function generateOrderExcel(orders: Order[]): Promise<{ buffer: Arr
   XLSX.utils.book_append_sheet(wb, ws, "배송조회수집");
   const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
   const filename = `배송조회수집_${today}.xlsx`;
-
-  return { buffer, filename };
-}
-
-/**
- * 플레이오토 대량 운송장 전송 양식 엑셀 생성
- * 양식: 묶음번호 | 택배사(코드숫자) | 운송장번호
- * @param courierCodeMap 택배사명 → 코드 매핑 (사용자 설정 or 기본값)
- */
-export async function generatePlayAutoTrackingExcel(
-  orders: Order[],
-  courierCodeMap: Record<string, number> = {}
-): Promise<{ buffer: ArrayBuffer; filename: string }> {
-  await loadXLSX();
-  const today = toKstDateKey();
-
-  // 운송장이 있는 주문만 필터링
-  const trackingOrders = orders.filter((o) => o.tracking_no && o.tracking_no.trim() !== "");
-
-  // courierCodeMap → DEFAULT_COURIER_CODES 순으로 조회하여 반드시 코드 숫자로 변환
-  const data = trackingOrders.map((o) => {
-    const courierName = o.courier || "";
-    const code = courierCodeMap[courierName] ?? DEFAULT_COURIER_CODES[courierName] ?? courierName;
-    return {
-      묶음번호: o.bundle_no || "",
-      택배사: code,
-      운송장번호: o.tracking_no || "",
-    };
-  });
-
-  const ws = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "운송장전송");
-  const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-  const filename = `플레이오토_운송장_${today}.xlsx`;
 
   return { buffer, filename };
 }
@@ -160,6 +124,9 @@ export async function generateCoupangWingTrackingExcel(orders: Order[]): Promise
 /** DB 표준 택배사명 → ESM PLUS 표기 (발송관리 엑셀이 실제로 쓰는 이름 기준, 그 외는 그대로 통과) */
 const ESM_COURIER_MAP: Record<string, string> = {
   "CJ대한통운": "CJ택배",
+  "합동택배": "기타택배",
+  "천일택배": "기타택배",
+  "SLX": "기타택배",
 };
 
 // ESM PLUS 판매 계정 아이디 (지마켓·옥션 공용) — 계정 변경 시 여기만 수정

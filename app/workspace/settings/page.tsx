@@ -1,7 +1,6 @@
 "use client";
 
 import CredentialManager from "@/components/workspace/settings/credential-manager";
-import CourierCodeManager from "@/components/workspace/settings/courier-code-manager";
 import GeminiUsageDashboard from "@/components/workspace/settings/gemini-usage-dashboard";
 import MarketplaceApiManager from "@/components/workspace/settings/marketplace-api-manager";
 import MarketplaceApiLogs from "@/components/workspace/settings/marketplace-api-logs";
@@ -20,7 +19,6 @@ export default function SettingsPage() {
       <MarketplaceApiManager />
       <MarketplaceApiLogs />
       <CredentialManager />
-      <CourierCodeManager />
       <GeminiUsageDashboard />
     </div>
   );
