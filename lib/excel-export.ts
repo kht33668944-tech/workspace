@@ -116,7 +116,9 @@ export async function generateCoupangWingTrackingExcel(orders: Order[]): Promise
   const today = toKstDateKey();
 
   const targets = orders.filter((o) =>
-    (o.marketplace ?? "").includes("쿠팡") && o.tracking_no && o.tracking_no.trim() !== ""
+    (o.marketplace ?? "").includes("쿠팡") && o.tracking_no && o.tracking_no.trim() !== "" &&
+    !o.shipped_to_marketplace_at && // 이미 마켓에 송장 전송된 건 제외 (재업로드 오류 방지)
+    !/반품|취소|교환/.test(o.delivery_status ?? "")
   );
   // 윙 업로드에는 묶음배송번호·주문번호·옵션ID(vendorItemId)가 필수 —
   // 옵션ID는 마켓 상품주문번호("묶음배송번호-옵션ID")의 뒷부분에서 추출한다
@@ -183,7 +185,8 @@ export async function generateEsmSendExcelDirect(orders: Order[]): Promise<{ buf
 
   const esmOrders = orders.filter((o) => {
     const mp = o.marketplace ?? "";
-    return (mp.includes("지마켓") || mp.includes("옥션")) && o.tracking_no && o.tracking_no.trim() !== "";
+    return (mp.includes("지마켓") || mp.includes("옥션")) && o.tracking_no && o.tracking_no.trim() !== "" &&
+      !/반품|취소|교환/.test(o.delivery_status ?? "");
   });
   const direct = esmOrders.filter((o) => o.marketplace_order_no);
   const needsFile = esmOrders.length - direct.length; // 주문번호 없는 구(플레이오토) 주문 — 파일 매칭 필요
