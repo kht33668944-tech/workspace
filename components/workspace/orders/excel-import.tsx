@@ -370,7 +370,7 @@ export default function ExcelImport({ onImport, onClose, checkDuplicates }: Exce
               >
                 <Upload className="w-10 h-10 text-[var(--text-muted)] mb-3" />
                 <p className="text-[var(--text-tertiary)] text-sm">엑셀 파일을 드래그하거나 클릭해서 선택</p>
-                <p className="text-[var(--text-muted)] text-xs mt-1">플레이오토 양식 · 기존 발주서 양식 자동 인식 (.xlsx, .xls, .csv)</p>
+                <p className="text-[var(--text-muted)] text-xs mt-1">플레이오토 · 기존 발주서 · 쿠팡 윙 배송관리(DeliveryList) 양식 자동 인식 (.xlsx, .xls, .csv)</p>
               </div>
               <input
                 ref={fileRef}

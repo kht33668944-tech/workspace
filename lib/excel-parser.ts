@@ -297,9 +297,79 @@ function detectLegacyFormat(headerMap: Record<string, string>): boolean {
   return matchCount >= 3;
 }
 
+// 쿠팡 윙 배송관리 엑셀(DeliveryList) 감지 — 마켓 API 장애 시 수동 발주서 업로드용
+function isCoupangWingSheet(headers: string[]): boolean {
+  const normalized = new Set(headers.map(normalizeHeader));
+  return normalized.has("묶음배송번호") && normalized.has("옵션ID") && normalized.has("등록상품명");
+}
+
+// 쿠팡 윙 DeliveryList 전용 명시 매핑.
+// 일반 별칭 매핑에 맡기면 "주문번호"가 소싱 구매번호(purchase_order_no)로,
+// "옵션판매가(판매단가)"가 매출로 잘못 매핑되므로 컬럼을 못박는다. (키는 normalizeHeader 적용 형태)
+const COUPANG_WING_MAP: Record<string, string> = {
+  "묶음배송번호": "bundle_no",
+  "주문번호": "marketplace_order_no",
+  "주문일": "order_date",
+  "등록상품명": "product_name",
+  "구매수(수량)": "quantity",
+  "결제액": "revenue",
+  "구매자": "marketplace_orderer_name",
+  "구매자전화번호": "orderer_phone",
+  "수취인이름": "recipient_name",
+  "수취인전화번호": "recipient_phone",
+  "우편번호": "postal_code",
+  "수취인주소": "address",
+  "배송메세지": "delivery_memo",
+  "택배사": "courier",
+  "운송장번호": "tracking_no",
+};
+
+function parseCoupangWingOrders(headers: string[], rows: RawRow[]): { orders: OrderInsert[]; headerMap: Record<string, string> } {
+  const headerMap: Record<string, string> = {};
+  for (const h of headers) {
+    const eng = COUPANG_WING_MAP[normalizeHeader(h)];
+    if (eng) headerMap[h] = eng;
+  }
+  const findHeader = (name: string) => headers.find((h) => normalizeHeader(h) === name);
+  const bundleHeader = findHeader("묶음배송번호");
+  const optionHeader = findHeader("옵션ID");
+  const shipByHeader = findHeader("주문시출고예정일");
+  const rate = SETTLEMENT_RATES.find(([key]) => key === "쿠팡")?.[1] ?? 0;
+
+  const orders = rows
+    .filter((row) => bundleHeader && String(row[bundleHeader] ?? "").trim())
+    .map((row) => {
+      const order = mapRowToOrder(row, headerMap);
+      order.marketplace = "쿠팡";
+      // API 수집(order-sync)과 같은 키(shipmentBoxId-vendorItemId = 묶음배송번호-옵션ID)
+      // → 재업로드·API 복구 후 재수집 시 중복으로 걸러진다
+      const bundleNo = String(row[bundleHeader!] ?? "").trim();
+      const optionId = optionHeader ? String(row[optionHeader] ?? "").trim() : "";
+      if (bundleNo && optionId) order.marketplace_product_order_no = `${bundleNo}-${optionId}`;
+      if (shipByHeader) {
+        const shipBy = String(row[shipByHeader] ?? "").trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(shipBy)) order.ship_by_date = shipBy.slice(0, 10);
+      }
+      if (order.revenue && rate) order.settlement = Math.round(order.revenue * rate);
+      if (order.tracking_no) {
+        order.delivery_status = "배송준비"; // 이미 발송된 행
+      } else {
+        order.courier = null; // 운송장 없이 택배사만 미리 찍힌 값은 무시 (실발송 택배사는 수집 시 채움)
+      }
+      return order;
+    })
+    .filter((o) => (o.revenue ?? 0) > 0);
+
+  return { orders, headerMap };
+}
+
 // 시트 하나를 파싱하여 주문 목록 반환 (내부 공용)
 function parseSheetToOrders(sheet: WorkSheet): { orders: OrderInsert[]; headers: string[]; headerMap: Record<string, string> } {
   const { headers, rows } = parseSheet(sheet);
+  if (isCoupangWingSheet(headers)) {
+    const wing = parseCoupangWingOrders(headers, rows);
+    return { orders: wing.orders, headers, headerMap: wing.headerMap };
+  }
   const parsedHeaderMap = buildHeaderMap(headers);
   const headerMap = normalizeSmartstoreHeaderMap(headers, rows, parsedHeaderMap);
   const bundleKey = headers.find((h) => headerMap[h] === "bundle_no");
@@ -351,6 +421,12 @@ function normalizeSmartstoreHeaderMap(headers: string[], rows: RawRow[], headerM
     next[plainOrderNoHeader] = "marketplace_order_no";
   }
   return next;
+}
+
+// 서버측 스크립트용: File API 없이 워크북 시트를 직접 파싱 (양식 자동 인식은 동일)
+export async function parseSheetOrdersFromWorksheet(sheet: WorkSheet): Promise<OrderInsert[]> {
+  await loadXLSX();
+  return parseSheetToOrders(sheet).orders;
 }
 
 export async function parseExcelFile(file: File, sheetIndex = 0): Promise<ParsedExcelResult> {
