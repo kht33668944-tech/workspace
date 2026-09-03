@@ -118,8 +118,10 @@ export async function generateCoupangWingTrackingExcel(orders: Order[]): Promise
   const targets = orders.filter((o) =>
     (o.marketplace ?? "").includes("쿠팡") && o.tracking_no && o.tracking_no.trim() !== ""
   );
-  // 윙 업로드에는 묶음배송번호·주문번호가 필수 — 마켓 번호가 없는 수기 행은 제외
-  const usable = targets.filter((o) => o.bundle_no && o.marketplace_order_no);
+  // 윙 업로드에는 묶음배송번호·주문번호·옵션ID(vendorItemId)가 필수 —
+  // 옵션ID는 마켓 상품주문번호("묶음배송번호-옵션ID")의 뒷부분에서 추출한다
+  const optionIdOf = (o: Order) => o.marketplace_product_order_no?.split("-")[1] ?? "";
+  const usable = targets.filter((o) => o.bundle_no && o.marketplace_order_no && optionIdOf(o));
   const skippedNoBundle = targets.length - usable.length;
 
   // 같은 묶음(bundle)에 운송장이 2개 이상이면 분리배송
@@ -140,6 +142,7 @@ export async function generateCoupangWingTrackingExcel(orders: Order[]): Promise
     row[3] = COUPANG_WING_COURIER_MAP[courierName] ?? courierName;
     row[4] = o.tracking_no!.replace(/[^\d]/g, ""); // 운송장은 숫자만 허용
     row[5] = (trackingsByBundle.get(String(o.bundle_no))?.size ?? 1) > 1 ? "Y" : "N";
+    row[14] = optionIdOf(o); // 옵션ID(vendorItemId) — 누락 시 vendorItemId.required 오류
     return row;
   });
 
