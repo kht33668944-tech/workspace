@@ -8,8 +8,8 @@ import { readJsonStorage, readUrlParam, rememberWorkspaceHref, replaceUrlParams,
 import type { ExcelArchive } from "@/types/database";
 
 type ArchiveMeta = Omit<ExcelArchive, "file_data">;
-type TabType = "playauto_tracking" | "order_export" | "playauto_product" | "price_update";
-const ARCHIVE_TABS: TabType[] = ["playauto_tracking", "order_export", "playauto_product", "price_update"];
+type TabType = "esm_tracking" | "order_export" | "playauto_product" | "price_update";
+const ARCHIVE_TABS: TabType[] = ["esm_tracking", "order_export", "playauto_product", "price_update"];
 const ARCHIVE_VIEW_STORAGE_KEY = "workspace:archive:view";
 
 function isArchiveTab(value: string | null): value is TabType {
@@ -24,7 +24,8 @@ export default function ArchivePage() {
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const urlTab = readUrlParam("tab");
     const saved = readJsonStorage<{ tab?: TabType }>(ARCHIVE_VIEW_STORAGE_KEY);
-    return isArchiveTab(urlTab) ? urlTab : saved?.tab ?? "playauto_tracking";
+    if (isArchiveTab(urlTab)) return urlTab;
+    return isArchiveTab(saved?.tab ?? null) ? (saved!.tab as TabType) : "esm_tracking";
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -143,7 +144,7 @@ export default function ArchivePage() {
   const { trackingCount, orderCount, productCount, priceUpdateCount } = useMemo(() => {
     let t = 0, o = 0, p = 0, u = 0;
     for (const a of archives) {
-      if (a.file_type === "playauto_tracking") t++;
+      if (a.file_type === "esm_tracking") t++;
       else if (a.file_type === "order_export") o++;
       else if (a.file_type === "playauto_product") p++;
       else if (a.file_type === "price_update") u++;
@@ -190,17 +191,17 @@ export default function ArchivePage() {
       <div className="overflow-x-auto scrollbar-hide border-b border-[var(--border-subtle)]">
       <div className="flex gap-1 min-w-max">
         <button
-          onClick={() => handleTabChange("playauto_tracking")}
+          onClick={() => handleTabChange("esm_tracking")}
           className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px min-h-[44px] ${
-            activeTab === "playauto_tracking"
+            activeTab === "esm_tracking"
               ? "border-purple-400 text-purple-400"
               : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
           }`}
         >
           <Truck className="w-4 h-4" />
-          플레이오토 운송장
+          ESM 발송처리
           {trackingCount > 0 && (
-            <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === "playauto_tracking" ? "bg-purple-500/20 text-purple-400" : "bg-[var(--bg-hover)] text-[var(--text-muted)]"}`}>
+            <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === "esm_tracking" ? "bg-purple-500/20 text-purple-400" : "bg-[var(--bg-hover)] text-[var(--text-muted)]"}`}>
               {trackingCount}
             </span>
           )}
@@ -266,7 +267,7 @@ export default function ArchivePage() {
           <Archive className="w-12 h-12 mb-3 opacity-30" />
           <p className="text-sm">보관된 파일이 없습니다</p>
           <p className="text-xs mt-1">
-            {activeTab === "playauto_tracking"
+            {activeTab === "esm_tracking"
               ? "운송장 수집 후 자동으로 저장됩니다"
               : activeTab === "playauto_product"
               ? "플레이오토 내보내기 시 자동으로 저장됩니다"
