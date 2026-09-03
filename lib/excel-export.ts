@@ -92,6 +92,66 @@ export async function generatePlayAutoTrackingExcel(
   return { buffer, filename };
 }
 
+/** 쿠팡 윙 "엑셀 대량배송" 업로드 양식 (formV4) — 필드명이 정확히 일치해야 업로드된다 */
+const COUPANG_WING_TRACKING_HEADERS = [
+  "번호", "묶음배송번호", "주문번호", "택배사", "운송장번호", "분리배송 Y/N", "분리배송 출고예정일",
+  "주문시 출고예정일", "출고일(발송일)", "주문일", "등록상품명", "등록옵션명", "노출상품명(옵션명)",
+  "노출상품ID", "옵션ID", "최초등록옵션명", "업체상품코드", "바코드", "결제액", "배송비구분", "배송비",
+  "도서산간 추가배송비", "구매수(수량)", "옵션판매가(판매단가)", "구매자", "구매자전화번호", "수취인이름",
+  "수취인전화번호", "우편번호", "수취인 주소", "배송메세지", "상품별 추가메시지", "주문자 추가메시지",
+  "배송완료일", "구매확정일자", "개인통관번호(PCCC)", "통관용구매자전화번호", "기타", "결제위치",
+];
+
+/** DB 표준 택배사명 → 쿠팡 윙 표기 (그 외는 그대로 통과) */
+const COUPANG_WING_COURIER_MAP: Record<string, string> = {
+  "CJ대한통운": "CJ 대한통운",
+};
+
+/**
+ * 쿠팡 윙 대량배송(운송장 일괄등록) 엑셀 생성 — API 장애 시 수동 송장 전송용.
+ * 대상: 쿠팡 주문 중 운송장이 있는 건. 같은 묶음배송번호에 서로 다른 운송장이면 분리배송 Y로 표기.
+ */
+export async function generateCoupangWingTrackingExcel(orders: Order[]): Promise<{ buffer: ArrayBuffer; filename: string; count: number; skippedNoBundle: number }> {
+  await loadXLSX();
+  const today = toKstDateKey();
+
+  const targets = orders.filter((o) =>
+    (o.marketplace ?? "").includes("쿠팡") && o.tracking_no && o.tracking_no.trim() !== ""
+  );
+  // 윙 업로드에는 묶음배송번호·주문번호가 필수 — 마켓 번호가 없는 수기 행은 제외
+  const usable = targets.filter((o) => o.bundle_no && o.marketplace_order_no);
+  const skippedNoBundle = targets.length - usable.length;
+
+  // 같은 묶음(bundle)에 운송장이 2개 이상이면 분리배송
+  const trackingsByBundle = new Map<string, Set<string>>();
+  for (const o of usable) {
+    const key = String(o.bundle_no);
+    const set = trackingsByBundle.get(key) ?? new Set<string>();
+    set.add(o.tracking_no!.trim());
+    trackingsByBundle.set(key, set);
+  }
+
+  const rows = usable.map((o, i) => {
+    const row: (string | number)[] = new Array(COUPANG_WING_TRACKING_HEADERS.length).fill("");
+    const courierName = o.courier || "";
+    row[0] = i + 1;
+    row[1] = String(o.bundle_no);
+    row[2] = String(o.marketplace_order_no);
+    row[3] = COUPANG_WING_COURIER_MAP[courierName] ?? courierName;
+    row[4] = o.tracking_no!.replace(/[^\d]/g, ""); // 운송장은 숫자만 허용
+    row[5] = (trackingsByBundle.get(String(o.bundle_no))?.size ?? 1) > 1 ? "Y" : "N";
+    return row;
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet([COUPANG_WING_TRACKING_HEADERS, ...rows]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "form");
+  const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  const filename = `쿠팡윙_운송장_${today}.xlsx`;
+
+  return { buffer, filename, count: rows.length, skippedNoBundle };
+}
+
 /** 플레이오토 내보내기 지원 플랫폼 */
 export type PlayAutoExportPlatform = "smartstore" | "gmarket_auction" | "coupang" | "auction" | "gmarket" | "11st";
 

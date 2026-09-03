@@ -10,7 +10,7 @@ import InquiryTab from "@/components/workspace/orders/inquiry-tab";
 import { useOrders } from "@/hooks/use-orders";
 import { useAuth } from "@/context/AuthContext";
 import { exportOrdersToCSV } from "@/lib/excel-parser";
-import { generatePlayAutoTrackingExcel, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
+import { generatePlayAutoTrackingExcel, generateCoupangWingTrackingExcel, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
 import { formatPurchaseOrders, parsePurchaseOrders } from "@/lib/purchase-orders";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { formatKoreanDateTime, getKoreanMonthKey } from "@/lib/date-utils";
@@ -1372,6 +1372,22 @@ function OrdersPageInner() {
     }
   };
 
+  // 쿠팡 윙 대량배송(운송장 일괄등록) 수동 내보내기 — API 장애 시 윙에 직접 업로드
+  const handleExportCoupangWing = async () => {
+    const { buffer, filename, count, skippedNoBundle } = await generateCoupangWingTrackingExcel(exportTargetOrders);
+    setShowExportMenu(false);
+    if (count === 0) {
+      showToast("내보낼 쿠팡 운송장이 없습니다. (운송장이 입력된 쿠팡 주문만 대상)", "info");
+      return;
+    }
+    downloadExcel(buffer, filename);
+    if (skippedNoBundle > 0) {
+      showToast(`쿠팡 윙 운송장 ${count}건 내보냄 · 묶음배송번호 없는 ${skippedNoBundle}건 제외`, "info");
+    } else {
+      showToast(`쿠팡 윙 운송장 ${count}건 내보냈습니다. 윙 배송관리 → 엑셀 대량배송에 업로드하세요.`, "success");
+    }
+  };
+
   // 데이터가 있는 월 + 전체 12개월 병합
   const allMonths = useMemo(() => {
     const set = new Set([...monthOptions, ...months]);
@@ -1681,6 +1697,29 @@ function OrdersPageInner() {
                 >
                   <Truck className="w-4 h-4 text-purple-400" />
                   플레이오토 운송장
+                </button>
+                <div className="my-1 border-t border-[var(--border)]" />
+                <div className="px-4 py-1 text-[11px] text-[var(--text-muted)]">수동 내보내기 (마켓 업로드용)</div>
+                <button
+                  onClick={handleExportCoupangWing}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Truck className="w-4 h-4 text-orange-400" />
+                  쿠팡 윙 운송장
+                </button>
+                <button
+                  disabled
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-disabled)] cursor-not-allowed"
+                >
+                  <Truck className="w-4 h-4 opacity-40" />
+                  옥션·지마켓 운송장 (준비중)
+                </button>
+                <button
+                  disabled
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-disabled)] cursor-not-allowed"
+                >
+                  <Truck className="w-4 h-4 opacity-40" />
+                  스마트스토어 운송장 (API 사용중)
                 </button>
               </div>
             )}
