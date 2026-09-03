@@ -10,7 +10,7 @@ import InquiryTab from "@/components/workspace/orders/inquiry-tab";
 import { useOrders } from "@/hooks/use-orders";
 import { useAuth } from "@/context/AuthContext";
 import { exportOrdersToCSV } from "@/lib/excel-parser";
-import { generatePlayAutoTrackingExcel, generateCoupangWingTrackingExcel, generateEsmSendExcel, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
+import { generatePlayAutoTrackingExcel, generateCoupangWingTrackingExcel, generateEsmSendExcel, generateEsmSendExcelDirect, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
 import { formatPurchaseOrders, parsePurchaseOrders } from "@/lib/purchase-orders";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { formatKoreanDateTime, getKoreanMonthKey } from "@/lib/date-utils";
@@ -1388,22 +1388,44 @@ function OrdersPageInner() {
     }
   };
 
-  // ESM PLUS 대량 발송처리 수동 내보내기 — 발송관리 엑셀을 받아 우리 운송장과 매칭
+  // ESM PLUS 대량 발송처리 수동 내보내기.
+  // 1순위: 마켓 주문번호가 저장된 주문은 파일 없이 바로 생성 (발송관리 엑셀로 가져온 주문)
+  // 2순위: 주문번호 없는 구(플레이오토) 주문은 발송관리 엑셀을 골라 매칭 + 주문번호 백필 → 다음부턴 원클릭
   const esmSendFileRef = useRef<HTMLInputElement>(null);
-  const handleEsmSendFile = async (file: File) => {
+  const handleExportEsmSend = async () => {
     setShowExportMenu(false);
+    const { buffer, filename, count, needsFile } = await generateEsmSendExcelDirect(exportTargetOrders);
+    if (buffer && count > 0) {
+      downloadExcel(buffer, filename);
+      const extra = needsFile > 0 ? ` · 주문번호 없는 ${needsFile}건은 발송관리 엑셀 선택으로 처리하세요` : "";
+      showToast(`ESM 발송처리 ${count}건 생성${extra} — 업로드 후 열을 A계정·B주문번호·C택배사·D운송장으로 지정하세요.`, "success");
+      return;
+    }
+    if (needsFile > 0) {
+      showToast(`주문번호가 없는 ${needsFile}건 — ESM PLUS 발송관리 엑셀을 선택하면 자동 매칭합니다.`, "info");
+      esmSendFileRef.current?.click();
+      return;
+    }
+    showToast("내보낼 옥션·지마켓 운송장이 없습니다. (운송장이 입력된 주문만 대상)", "info");
+  };
+
+  const handleEsmSendFile = async (file: File) => {
     try {
       const buf = await file.arrayBuffer();
-      const { buffer, filename, matched, unmatched, alreadyShipped } = await generateEsmSendExcel(buf, exportTargetOrders);
+      const { buffer, filename, matched, unmatched, alreadyShipped, matches } = await generateEsmSendExcel(buf, exportTargetOrders);
       if (!buffer || matched === 0) {
         showToast(`매칭된 운송장이 없습니다.${unmatched.length > 0 ? ` (미매칭 ${unmatched.length}건 — 운송장 수집 후 다시 시도)` : ""}`, "info");
         return;
       }
       downloadExcel(buffer, filename);
-      const parts = [`ESM 발송처리 ${matched}건 생성`];
+      // 매칭된 주문에 마켓 주문번호 저장 → 다음부터는 파일 없이 원클릭 생성
+      for (const m of matches) {
+        updateOrder(m.orderId, { marketplace_order_no: m.orderNo, marketplace_product_order_no: m.orderNo }, true);
+      }
+      const parts = [`ESM 발송처리 ${matched}건 생성 (주문번호 저장됨 — 다음부턴 파일 없이 바로 생성)`];
       if (unmatched.length > 0) parts.push(`운송장 없음 ${unmatched.length}건 제외`);
       if (alreadyShipped > 0) parts.push(`이미 발송 ${alreadyShipped}건 제외`);
-      showToast(`${parts.join(" · ")} — ESM PLUS 대량 발송처리에 업로드 후 열을 A계정·B주문번호·C택배사·D운송장으로 지정하세요.`, "success");
+      showToast(`${parts.join(" · ")} — 업로드 후 열을 A계정·B주문번호·C택배사·D운송장으로 지정하세요.`, "success");
       if (unmatched.length > 0) console.warn("[ESM 발송처리] 미매칭:", unmatched);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "발송관리 엑셀을 읽을 수 없습니다.", "error");
@@ -1730,11 +1752,11 @@ function OrdersPageInner() {
                   쿠팡 윙 운송장
                 </button>
                 <button
-                  onClick={() => esmSendFileRef.current?.click()}
+                  onClick={handleExportEsmSend}
                   className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                 >
                   <Truck className="w-4 h-4 text-green-400" />
-                  옥션·지마켓 운송장 (발송관리 엑셀 선택)
+                  옥션·지마켓 운송장
                 </button>
                 <input
                   ref={esmSendFileRef}

@@ -157,12 +157,52 @@ const ESM_COURIER_MAP: Record<string, string> = {
   "CJ대한통운": "CJ택배",
 };
 
+// ESM PLUS 판매 계정 아이디 (지마켓·옥션 공용) — 계정 변경 시 여기만 수정
+const ESM_ACCOUNT_ID = "redgoom00";
+
 export interface EsmSendExcelResult {
   buffer: ArrayBuffer | null;
   filename: string;
   matched: number;       // 운송장 채운 건수
   unmatched: string[];   // 발송 필요하지만 우리 운송장을 못 찾은 행 (수령인 | 상품명)
   alreadyShipped: number; // 파일에 이미 송장이 있던 행
+  matches: Array<{ orderId: string; orderNo: string }>; // 발주서에 마켓 주문번호 백필용
+}
+
+/**
+ * ESM PLUS 대량 발송처리 엑셀 직접 생성 — 마켓 주문번호가 저장된 주문은 파일 없이 원클릭.
+ * (발송관리 엑셀로 가져온 주문, 또는 파일 매칭으로 주문번호가 백필된 주문)
+ */
+export async function generateEsmSendExcelDirect(orders: Order[]): Promise<{ buffer: ArrayBuffer | null; filename: string; count: number; needsFile: number }> {
+  await loadXLSX();
+  const today = toKstDateKey();
+  const filename = `ESM_발송처리_${today}.xlsx`;
+
+  const esmOrders = orders.filter((o) => {
+    const mp = o.marketplace ?? "";
+    return (mp.includes("지마켓") || mp.includes("옥션")) && o.tracking_no && o.tracking_no.trim() !== "";
+  });
+  const direct = esmOrders.filter((o) => o.marketplace_order_no);
+  const needsFile = esmOrders.length - direct.length; // 주문번호 없는 구(플레이오토) 주문 — 파일 매칭 필요
+
+  if (direct.length === 0) return { buffer: null, filename, count: 0, needsFile };
+
+  const out: (string | number)[][] = [["계정", "주문번호", "택배사", "운송장번호"]];
+  for (const o of direct) {
+    const mp = (o.marketplace ?? "").includes("옥션") ? "옥션" : "지마켓";
+    const courierName = o.courier || "";
+    out.push([
+      `${mp}(${ESM_ACCOUNT_ID})`,
+      String(o.marketplace_order_no),
+      ESM_COURIER_MAP[courierName] ?? courierName,
+      o.tracking_no!.replace(/[^\d]/g, ""),
+    ]);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(out);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "발송처리");
+  const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  return { buffer, filename, count: direct.length, needsFile };
 }
 
 /**
@@ -178,7 +218,7 @@ export async function generateEsmSendExcel(esmFile: ArrayBuffer, orders: Order[]
   const wb = XLSX.read(new Uint8Array(esmFile), { type: "array" });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows: (string | number)[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-  if (rows.length < 2) return { buffer: null, filename, matched: 0, unmatched: [], alreadyShipped: 0 };
+  if (rows.length < 2) return { buffer: null, filename, matched: 0, unmatched: [], alreadyShipped: 0, matches: [] };
 
   const header = rows[0].map((c) => String(c).trim());
   const col = (name: string) => header.findIndex((h) => h.replace(/\s/g, "").includes(name));
@@ -210,6 +250,7 @@ export async function generateEsmSendExcel(esmFile: ArrayBuffer, orders: Order[]
 
   const out: (string | number)[][] = [["계정", "주문번호", "택배사", "운송장번호"]];
   const unmatched: string[] = [];
+  const matches: Array<{ orderId: string; orderNo: string }> = [];
   let alreadyShipped = 0;
 
   for (const row of rows.slice(1)) {
@@ -243,17 +284,18 @@ export async function generateEsmSendExcel(esmFile: ArrayBuffer, orders: Order[]
         ESM_COURIER_MAP[courierName] ?? courierName,
         order.tracking_no!.replace(/[^\d]/g, ""),
       ]);
+      matches.push({ orderId: order.id, orderNo });
     } else {
       unmatched.push(`${String(row[iRecipient] ?? "")} | ${String(row[iProduct] ?? "")}`);
     }
   }
 
-  if (out.length < 2) return { buffer: null, filename, matched: 0, unmatched, alreadyShipped };
+  if (out.length < 2) return { buffer: null, filename, matched: 0, unmatched, alreadyShipped, matches: [] };
   const outWs = XLSX.utils.aoa_to_sheet(out);
   const outWb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(outWb, outWs, "발송처리");
   const buffer = XLSX.write(outWb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-  return { buffer, filename, matched: out.length - 1, unmatched, alreadyShipped };
+  return { buffer, filename, matched: out.length - 1, unmatched, alreadyShipped, matches };
 }
 
 /** 플레이오토 내보내기 지원 플랫폼 */

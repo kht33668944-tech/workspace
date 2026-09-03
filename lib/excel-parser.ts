@@ -363,12 +363,82 @@ function parseCoupangWingOrders(headers: string[], rows: RawRow[]): { orders: Or
   return { orders, headerMap };
 }
 
+// ESM PLUS 발송관리 엑셀 감지 — 지마켓·옥션 주문 직접 가져오기용 (마켓 주문번호 확보)
+function isEsmSendSheet(headers: string[]): boolean {
+  const normalized = new Set(headers.map(normalizeHeader));
+  return normalized.has("판매아이디") && normalized.has("주문번호") && normalized.has("수령인명") && normalized.has("정산예정금액");
+}
+
+// ESM PLUS 발송관리 전용 명시 매핑 (키는 normalizeHeader 적용 형태).
+// 정산예정금액이 실제값으로 들어오므로 수수료 추정 대신 그대로 저장한다.
+const ESM_SEND_MAP: Record<string, string> = {
+  "주문번호": "marketplace_order_no",
+  "상품명": "product_name",
+  "수량": "quantity",
+  "판매금액": "revenue",
+  "정산예정금액": "settlement",
+  "수령인명": "recipient_name",
+  "수령인휴대폰": "recipient_phone",
+  "구매자명": "marketplace_orderer_name",
+  "구매자휴대폰": "orderer_phone",
+  "우편번호": "postal_code",
+  "주소": "address",
+  "배송시요구사항": "delivery_memo",
+  "결제일": "order_date", // "주문일" 컬럼은 전 행이 같은 배치 시각이라 결제일(실제 주문시각)을 쓴다
+  "송장번호": "tracking_no",
+  "장바구니번호(결제번호)": "bundle_no",
+};
+
+function parseEsmSendOrders(headers: string[], rows: RawRow[]): { orders: OrderInsert[]; headerMap: Record<string, string> } {
+  const headerMap: Record<string, string> = {};
+  for (const h of headers) {
+    const eng = ESM_SEND_MAP[normalizeHeader(h)];
+    if (eng) headerMap[h] = eng;
+  }
+  const findHeader = (name: string) => headers.find((h) => normalizeHeader(h) === name);
+  const accountHeader = findHeader("판매아이디");
+  const statusHeader = findHeader("주문상태");
+  const shipByHeader = findHeader("발송마감일");
+  const courierHeader = findHeader("택배사명(발송방법)");
+
+  const orders = rows
+    .filter((row) => String(row[findHeader("주문번호") ?? ""] ?? "").trim())
+    .filter((row) => !statusHeader || !String(row[statusHeader] ?? "").includes("취소"))
+    .map((row) => {
+      const order = mapRowToOrder(row, headerMap);
+      // 판매아이디("지마켓(redgoom00)") → 판매처
+      const account = accountHeader ? String(row[accountHeader] ?? "") : "";
+      order.marketplace = account.includes("옥션") ? "옥션" : account.includes("지마켓") ? "지마켓" : (account.split("(")[0].trim() || null);
+      // 주문번호는 상품 단위로 유일 → 중복 방지 키로도 사용 (재업로드 시 자동 차단)
+      if (order.marketplace_order_no) order.marketplace_product_order_no = String(order.marketplace_order_no);
+      if (shipByHeader) {
+        const shipBy = parseDate(row[shipByHeader]);
+        if (shipBy) order.ship_by_date = shipBy.slice(0, 10);
+      }
+      if (order.tracking_no) {
+        order.delivery_status = "배송준비"; // 이미 발송된 행
+        const courierRaw = courierHeader ? String(row[courierHeader] ?? "").trim() : "";
+        order.courier = courierRaw === "CJ택배" ? "CJ대한통운" : courierRaw || null;
+      } else {
+        order.courier = null; // 송장 없이 기본값으로 찍힌 택배사명은 무시
+      }
+      return order;
+    })
+    .filter((o) => (o.revenue ?? 0) > 0);
+
+  return { orders, headerMap };
+}
+
 // 시트 하나를 파싱하여 주문 목록 반환 (내부 공용)
 function parseSheetToOrders(sheet: WorkSheet): { orders: OrderInsert[]; headers: string[]; headerMap: Record<string, string> } {
   const { headers, rows } = parseSheet(sheet);
   if (isCoupangWingSheet(headers)) {
     const wing = parseCoupangWingOrders(headers, rows);
     return { orders: wing.orders, headers, headerMap: wing.headerMap };
+  }
+  if (isEsmSendSheet(headers)) {
+    const esm = parseEsmSendOrders(headers, rows);
+    return { orders: esm.orders, headers, headerMap: esm.headerMap };
   }
   const parsedHeaderMap = buildHeaderMap(headers);
   const headerMap = normalizeSmartstoreHeaderMap(headers, rows, parsedHeaderMap);

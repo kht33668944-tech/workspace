@@ -372,6 +372,9 @@ export function useOrders(options: UseOrdersOptions = {}) {
 
     // 기존 주문의 키 Set 생성
     const existingKeys = new Set<string>();
+    // 마켓 번호가 없는 기존 행(플레이오토 입력분)의 날짜+판매처+수취인+상품 키 —
+    // 마켓 엑셀(번호 있음)로 같은 주문을 다시 가져올 때 중복으로 잡기 위한 보조 키
+    const numberlessFuzzyKeys = new Set<string>();
     for (const o of existingOrders) {
       const key = makeDuplicateKey(
         o.bundle_no,
@@ -383,6 +386,10 @@ export function useOrders(options: UseOrdersOptions = {}) {
         o.marketplace_product_order_no,
       );
       if (key) existingKeys.add(key);
+      if (!o.marketplace_order_no && !o.marketplace_product_order_no) {
+        const fuzzy = makeDuplicateKey(null, o.recipient_name, o.product_name, o.order_date, o.marketplace);
+        if (fuzzy) numberlessFuzzyKeys.add(fuzzy);
+      }
     }
 
     // 엑셀 행별 중복 여부 판정
@@ -400,6 +407,12 @@ export function useOrders(options: UseOrdersOptions = {}) {
       );
       if (key && existingKeys.has(key)) {
         duplicateIndices.add(i);
+        continue;
+      }
+      // 번호 있는 행이 번호 없는 기존 행과 같은 주문인지 (수집 경로가 다른 경우)
+      if (r.marketplace_order_no || r.marketplace_product_order_no) {
+        const fuzzy = makeDuplicateKey(null, r.recipient_name ?? null, r.product_name ?? null, r.order_date ?? null, r.marketplace ?? null);
+        if (fuzzy && numberlessFuzzyKeys.has(fuzzy)) duplicateIndices.add(i);
       }
     }
     return duplicateIndices;
