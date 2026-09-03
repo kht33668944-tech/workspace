@@ -475,9 +475,9 @@ export default function TrackingCollectModal({ orders, onClose, onApply, onMinim
       // 보관함 저장
       if (session?.access_token) {
         const saves = [
-          { ...orderResult, file_type: "order_export" as const },
+          { ...orderResult, file_type: "order_export" as const, order_count: targetOrders.length },
           ...(esmResult.buffer && esmResult.count > 0
-            ? [{ buffer: esmResult.buffer, filename: esmResult.filename, file_type: "esm_tracking" as const }]
+            ? [{ buffer: esmResult.buffer, filename: esmResult.filename, file_type: "esm_tracking" as const, order_count: esmResult.count }]
             : []),
         ];
         for (const s of saves) {
@@ -492,7 +492,7 @@ export default function TrackingCollectModal({ orders, onClose, onApply, onMinim
               file_name: s.filename,
               file_type: s.file_type,
               file_data: base64,
-              order_count: targetOrders.length,
+              order_count: s.order_count,
             }),
           });
         }
