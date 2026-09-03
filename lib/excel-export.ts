@@ -178,7 +178,7 @@ export interface EsmSendExcelResult {
  * ESM PLUS 대량 발송처리 엑셀 직접 생성 — 마켓 주문번호가 저장된 주문은 파일 없이 원클릭.
  * (발송관리 엑셀로 가져온 주문, 또는 파일 매칭으로 주문번호가 백필된 주문)
  */
-export async function generateEsmSendExcelDirect(orders: Order[]): Promise<{ buffer: ArrayBuffer | null; filename: string; count: number; needsFile: number }> {
+export async function generateEsmSendExcelDirect(orders: Order[]): Promise<{ buffer: ArrayBuffer | null; filename: string; count: number; needsFile: number; orderIds: string[] }> {
   await loadXLSX();
   const today = toKstDateKey();
   const filename = `ESM_발송처리_${today}.xlsx`;
@@ -191,7 +191,7 @@ export async function generateEsmSendExcelDirect(orders: Order[]): Promise<{ buf
   const direct = esmOrders.filter((o) => o.marketplace_order_no);
   const needsFile = esmOrders.length - direct.length; // 주문번호 없는 구(플레이오토) 주문 — 파일 매칭 필요
 
-  if (direct.length === 0) return { buffer: null, filename, count: 0, needsFile };
+  if (direct.length === 0) return { buffer: null, filename, count: 0, needsFile, orderIds: [] };
 
   const out: (string | number)[][] = [["계정", "주문번호", "택배사", "운송장번호"]];
   for (const o of direct) {
@@ -208,7 +208,8 @@ export async function generateEsmSendExcelDirect(orders: Order[]): Promise<{ buf
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "발송처리");
   const buffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-  return { buffer, filename, count: direct.length, needsFile };
+  const orderIds = direct.map((o) => o.id);
+  return { buffer, filename, count: direct.length, needsFile, orderIds };
 }
 
 /**

@@ -4,7 +4,7 @@
 //
 // - 수집: purchase_credentials(지마켓/옥션/오늘의집)로 운송장 없는 주문을 스크래핑해 발주서에 반영 (브라우저 필요)
 // - 전송: 쿠팡·스마트스토어 판매분 중 미전송 운송장을 API 로 발송처리 (수동 입력분 포함)
-// - ESM : 지마켓·옥션·11번가 판매분 운송장을 플레이오토 양식 엑셀로 바탕화면\ESM운송장 에 저장
+// - ESM : 지마켓·옥션 판매분 운송장을 ESM Plus 발송처리 4열 엑셀로 바탕화면\ESM운송장 에 저장
 // - --dry / MARKETPLACE_API_DRY_RUN=true 면 마켓 쓰기 없이 대상만 확인 (수집·엑셀은 실행됨, 엑셀은 exported 표시 안 함)
 import fs from "fs";
 import path from "path";
@@ -114,7 +114,7 @@ try {
     const runId = await startRun("esm-export");
     try {
       esm = await exportEsmTrackingExcel(sb, userId, { days, markExported: !dry });
-      log(esm.count > 0 ? `ESM 운송장 ${esm.count}건 → ${esm.file}` : "ESM 운송장: 새 건 없음");
+      log(esm.count > 0 ? `ESM 발송처리 ${esm.count}건 → ${esm.file}` : "ESM 운송장: 새 건 없음");
       await finishRun(runId, { status: "success", remote_count: esm.count, detail: { count: esm.count, file: esm.file ?? null } });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

@@ -174,7 +174,7 @@ export function buildTrackingNotification(input: TrackingNotifyInput): TrackingN
   const blocks: string[][] = [[header]];
   // 할 일은 맨 위 — 제목만 보고 넘어가도 첫 줄에서 잡히게
   const todoLines: string[] = [];
-  if (esmCount > 0) todoLines.push(`👉 ESM 운송장 ${esmCount}건 엑셀 저장 → 플레이오토에 업로드`, `   ${input.esm?.file ?? ""}`);
+  if (esmCount > 0) todoLines.push(`👉 ESM 운송장 ${esmCount}건 엑셀 저장 → ESM Plus 발송관리 > 대량 발송처리에 업로드`, `   ${input.esm?.file ?? ""}`);
   if (shipFailed.length > 0) todoLines.push(`👉 송장 전송 실패 ${shipFailed.length}건 — 아래 사유 확인 후 '송장 전송 (API)' 재시도`);
   if (todoLines.length > 0) blocks.push(todoLines);
 
