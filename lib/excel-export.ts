@@ -152,6 +152,110 @@ export async function generateCoupangWingTrackingExcel(orders: Order[]): Promise
   return { buffer, filename, count: rows.length, skippedNoBundle };
 }
 
+/** DB 표준 택배사명 → ESM PLUS 표기 (발송관리 엑셀이 실제로 쓰는 이름 기준, 그 외는 그대로 통과) */
+const ESM_COURIER_MAP: Record<string, string> = {
+  "CJ대한통운": "CJ택배",
+};
+
+export interface EsmSendExcelResult {
+  buffer: ArrayBuffer | null;
+  filename: string;
+  matched: number;       // 운송장 채운 건수
+  unmatched: string[];   // 발송 필요하지만 우리 운송장을 못 찾은 행 (수령인 | 상품명)
+  alreadyShipped: number; // 파일에 이미 송장이 있던 행
+}
+
+/**
+ * ESM PLUS 대량 발송처리용 엑셀 생성 — 발송관리 엑셀을 읽어 우리 발주서 운송장과 매칭.
+ * ESM 주문번호는 발주서에 없으므로(플레이오토 묶음번호만 보유) 수령인+상품명(+수량)으로 매칭한다.
+ * 출력: [계정, 주문번호, 택배사, 운송장번호] 4열 — ESM PLUS 업로드 후 열 지정 A/B/C/D.
+ */
+export async function generateEsmSendExcel(esmFile: ArrayBuffer, orders: Order[]): Promise<EsmSendExcelResult> {
+  await loadXLSX();
+  const today = toKstDateKey();
+  const filename = `ESM_발송처리_${today}.xlsx`;
+
+  const wb = XLSX.read(new Uint8Array(esmFile), { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows: (string | number)[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  if (rows.length < 2) return { buffer: null, filename, matched: 0, unmatched: [], alreadyShipped: 0 };
+
+  const header = rows[0].map((c) => String(c).trim());
+  const col = (name: string) => header.findIndex((h) => h.replace(/\s/g, "").includes(name));
+  const iAccount = col("판매아이디");
+  const iOrderNo = col("주문번호");
+  const iTracking = col("송장번호");
+  const iRecipient = col("수령인명");
+  const iProduct = col("상품명");
+  const iQty = col("수량");
+  if (iAccount < 0 || iOrderNo < 0 || iRecipient < 0 || iProduct < 0) {
+    throw new Error("ESM PLUS 발송관리 엑셀이 아닙니다. (판매아이디·주문번호·수령인명·상품명 컬럼 필요)");
+  }
+
+  const normName = (s: string) => s.replace(/님$/, "").replace(/\s+/g, "").trim();
+  const normProduct = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+
+  // 우리 발주서에서 운송장 있는 지마켓·옥션 주문 풀 구성 (같은 키 여러 건이면 순서대로 소진)
+  const pool = new Map<string, Order[]>();
+  const loosePool = new Map<string, Order[]>();
+  for (const o of orders) {
+    const mp = o.marketplace ?? "";
+    if (!(mp.includes("지마켓") || mp.includes("옥션"))) continue;
+    if (!o.tracking_no || !o.tracking_no.trim() || !o.recipient_name || !o.product_name) continue;
+    const strict = `${normName(o.recipient_name)}|${normProduct(o.product_name)}|${o.quantity ?? 1}`;
+    const loose = `${normName(o.recipient_name)}|${normProduct(o.product_name)}`;
+    pool.set(strict, [...(pool.get(strict) ?? []), o]);
+    loosePool.set(loose, [...(loosePool.get(loose) ?? []), o]);
+  }
+
+  const out: (string | number)[][] = [["계정", "주문번호", "택배사", "운송장번호"]];
+  const unmatched: string[] = [];
+  let alreadyShipped = 0;
+
+  for (const row of rows.slice(1)) {
+    const orderNo = String(row[iOrderNo] ?? "").trim();
+    if (!orderNo) continue;
+    const existingTracking = iTracking >= 0 ? String(row[iTracking] ?? "").trim() : "";
+    if (existingTracking) { alreadyShipped++; continue; }
+
+    const recipient = normName(String(row[iRecipient] ?? ""));
+    const product = normProduct(String(row[iProduct] ?? ""));
+    const qty = iQty >= 0 ? Number(row[iQty]) || 1 : 1;
+
+    let order = pool.get(`${recipient}|${product}|${qty}`)?.shift();
+    if (!order) {
+      const looseList = (loosePool.get(`${recipient}|${product}`) ?? []).filter((o) => o.tracking_no);
+      if (looseList.length === 1) order = looseList.shift();
+    }
+    if (order) {
+      // 두 풀에서 모두 소진 처리
+      for (const m of [pool, loosePool]) {
+        for (const [k, list] of m) {
+          const idx = list.indexOf(order);
+          if (idx >= 0) list.splice(idx, 1);
+          if (list.length === 0) m.delete(k);
+        }
+      }
+      const courierName = order.courier || "";
+      out.push([
+        String(row[iAccount] ?? ""),
+        orderNo,
+        ESM_COURIER_MAP[courierName] ?? courierName,
+        order.tracking_no!.replace(/[^\d]/g, ""),
+      ]);
+    } else {
+      unmatched.push(`${String(row[iRecipient] ?? "")} | ${String(row[iProduct] ?? "")}`);
+    }
+  }
+
+  if (out.length < 2) return { buffer: null, filename, matched: 0, unmatched, alreadyShipped };
+  const outWs = XLSX.utils.aoa_to_sheet(out);
+  const outWb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(outWb, outWs, "발송처리");
+  const buffer = XLSX.write(outWb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  return { buffer, filename, matched: out.length - 1, unmatched, alreadyShipped };
+}
+
 /** 플레이오토 내보내기 지원 플랫폼 */
 export type PlayAutoExportPlatform = "smartstore" | "gmarket_auction" | "coupang" | "auction" | "gmarket" | "11st";
 

@@ -10,7 +10,7 @@ import InquiryTab from "@/components/workspace/orders/inquiry-tab";
 import { useOrders } from "@/hooks/use-orders";
 import { useAuth } from "@/context/AuthContext";
 import { exportOrdersToCSV } from "@/lib/excel-parser";
-import { generatePlayAutoTrackingExcel, generateCoupangWingTrackingExcel, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
+import { generatePlayAutoTrackingExcel, generateCoupangWingTrackingExcel, generateEsmSendExcel, downloadExcel, arrayBufferToBase64 } from "@/lib/excel-export";
 import { formatPurchaseOrders, parsePurchaseOrders } from "@/lib/purchase-orders";
 import { DEFAULT_COURIER_CODES } from "@/lib/courier-codes";
 import { formatKoreanDateTime, getKoreanMonthKey } from "@/lib/date-utils";
@@ -1388,6 +1388,28 @@ function OrdersPageInner() {
     }
   };
 
+  // ESM PLUS 대량 발송처리 수동 내보내기 — 발송관리 엑셀을 받아 우리 운송장과 매칭
+  const esmSendFileRef = useRef<HTMLInputElement>(null);
+  const handleEsmSendFile = async (file: File) => {
+    setShowExportMenu(false);
+    try {
+      const buf = await file.arrayBuffer();
+      const { buffer, filename, matched, unmatched, alreadyShipped } = await generateEsmSendExcel(buf, exportTargetOrders);
+      if (!buffer || matched === 0) {
+        showToast(`매칭된 운송장이 없습니다.${unmatched.length > 0 ? ` (미매칭 ${unmatched.length}건 — 운송장 수집 후 다시 시도)` : ""}`, "info");
+        return;
+      }
+      downloadExcel(buffer, filename);
+      const parts = [`ESM 발송처리 ${matched}건 생성`];
+      if (unmatched.length > 0) parts.push(`운송장 없음 ${unmatched.length}건 제외`);
+      if (alreadyShipped > 0) parts.push(`이미 발송 ${alreadyShipped}건 제외`);
+      showToast(`${parts.join(" · ")} — ESM PLUS 대량 발송처리에 업로드 후 열을 A계정·B주문번호·C택배사·D운송장으로 지정하세요.`, "success");
+      if (unmatched.length > 0) console.warn("[ESM 발송처리] 미매칭:", unmatched);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "발송관리 엑셀을 읽을 수 없습니다.", "error");
+    }
+  };
+
   // 데이터가 있는 월 + 전체 12개월 병합
   const allMonths = useMemo(() => {
     const set = new Set([...monthOptions, ...months]);
@@ -1708,12 +1730,23 @@ function OrdersPageInner() {
                   쿠팡 윙 운송장
                 </button>
                 <button
-                  disabled
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-disabled)] cursor-not-allowed"
+                  onClick={() => esmSendFileRef.current?.click()}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                 >
-                  <Truck className="w-4 h-4 opacity-40" />
-                  옥션·지마켓 운송장 (준비중)
+                  <Truck className="w-4 h-4 text-green-400" />
+                  옥션·지마켓 운송장 (발송관리 엑셀 선택)
                 </button>
+                <input
+                  ref={esmSendFileRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) handleEsmSendFile(file);
+                  }}
+                />
                 <button
                   disabled
                   className="w-full flex items-center gap-2 px-4 py-2 text-sm text-[var(--text-disabled)] cursor-not-allowed"
